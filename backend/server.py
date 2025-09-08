@@ -45,7 +45,7 @@ class RhymeSelection(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     school_id: str
     grade: str
-    position: str  # 'top' or 'bottom'
+    page_index: int  # Changed from position to page_index for carousel
     rhyme_code: str
     rhyme_name: str
     pages: float
@@ -54,7 +54,7 @@ class RhymeSelection(BaseModel):
 class RhymeSelectionCreate(BaseModel):
     school_id: str
     grade: str
-    position: str
+    page_index: int
     rhyme_code: str
 
 class GradeStatus(BaseModel):
@@ -100,15 +100,17 @@ async def get_all_rhymes():
     return rhymes_by_pages
 
 @api_router.get("/rhymes/available/{school_id}/{grade}")
-async def get_available_rhymes(school_id: str, grade: str):
-    """Get available rhymes for a specific grade, excluding already selected ones"""
-    # Get already selected rhymes for this school and grade
-    selected_rhymes = await db.rhyme_selections.find({
-        "school_id": school_id,
-        "grade": grade
-    }).to_list(None)
-    
-    selected_codes = {selection["rhyme_code"] for selection in selected_rhymes}
+async def get_available_rhymes(school_id: str, grade: str, include_selected: bool = False):
+    """Get available rhymes for a specific grade"""
+    if not include_selected:
+        # Get already selected rhymes for ALL grades in this school
+        selected_rhymes = await db.rhyme_selections.find({
+            "school_id": school_id
+        }).to_list(None)
+        
+        selected_codes = {selection["rhyme_code"] for selection in selected_rhymes}
+    else:
+        selected_codes = set()
     
     # Get available rhymes organized by pages
     rhymes_by_pages = {}
@@ -139,30 +141,66 @@ async def get_selected_rhymes(school_id: str):
     for selection in selections:
         grade = selection["grade"]
         if grade not in result:
-            result[grade] = {"top": None, "bottom": None}
+            result[grade] = []
         
-        result[grade][selection["position"]] = {
+        result[grade].append({
+            "page_index": selection["page_index"],
             "code": selection["rhyme_code"],
             "name": selection["rhyme_name"],
             "pages": selection["pages"]
-        }
+        })
+    
+    # Sort by page_index
+    for grade in result:
+        result[grade].sort(key=lambda x: x["page_index"])
     
     return result
 
+@api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
+async def get_selected_rhymes_other_grades(school_id: str, grade: str):
+    """Get rhymes selected in other grades that can be reused"""
+    selections = await db.rhyme_selections.find({
+        "school_id": school_id,
+        "grade": {"$ne": grade}  # Exclude current grade
+    }).to_list(None)
+    
+    # Get unique rhymes from other grades
+    selected_rhymes = {}
+    for selection in selections:
+        code = selection["rhyme_code"]
+        if code not in selected_rhymes:
+            selected_rhymes[code] = {
+                "code": code,
+                "name": selection["rhyme_name"],
+                "pages": selection["pages"],
+                "used_in_grades": []
+            }
+        selected_rhymes[code]["used_in_grades"].append(selection["grade"])
+    
+    # Organize by pages
+    rhymes_by_pages = {}
+    for rhyme in selected_rhymes.values():
+        page_key = str(rhyme["pages"])
+        if page_key not in rhymes_by_pages:
+            rhymes_by_pages[page_key] = []
+        rhymes_by_pages[page_key].append(rhyme)
+    
+    return rhymes_by_pages
+
 @api_router.post("/rhymes/select", response_model=RhymeSelection)
 async def select_rhyme(input: RhymeSelectionCreate):
-    """Select a rhyme for a specific grade and position"""
+    """Select a rhyme for a specific grade and page index"""
     # Check if rhyme exists
     if input.rhyme_code not in RHYMES_DATA:
         raise HTTPException(status_code=404, detail="Rhyme not found")
     
     rhyme_data = RHYMES_DATA[input.rhyme_code]
     
-    # Remove existing selection for this position if any
+    # Remove existing selection for this page index if any
     await db.rhyme_selections.delete_many({
         "school_id": input.school_id,
         "grade": input.grade,
-        "position": input.position
+        "page_index": input.page_index
     })
     
     # Create new selection
@@ -177,13 +215,13 @@ async def select_rhyme(input: RhymeSelectionCreate):
     
     return selection_obj
 
-@api_router.delete("/rhymes/remove/{school_id}/{grade}/{position}")
-async def remove_rhyme_selection(school_id: str, grade: str, position: str):
-    """Remove a rhyme selection for a specific position"""
+@api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}")
+async def remove_rhyme_selection(school_id: str, grade: str, page_index: int):
+    """Remove a rhyme selection for a specific page index"""
     result = await db.rhyme_selections.delete_many({
         "school_id": school_id,
         "grade": grade,
-        "position": position
+        "page_index": page_index
     })
     
     if result.deleted_count == 0:
@@ -208,7 +246,7 @@ async def get_grade_status(school_id: str):
         status.append({
             "grade": grade,
             "selected_count": selected_count,
-            "total_positions": 2  # top and bottom
+            "total_available": 25  # Maximum 25 rhymes can be selected
         })
     
     return status

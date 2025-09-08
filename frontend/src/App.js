@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
 
 // Icons
-import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -125,7 +125,7 @@ const GradeSelectionPage = ({ school, onGradeSelect }) => {
 
   const getGradeStatusInfo = (gradeId) => {
     const status = gradeStatus.find(s => s.grade === gradeId);
-    return status ? `${status.selected_count}/${status.total_positions}` : '0/2';
+    return status ? `${status.selected_count} of 25` : '0 of 25';
   };
 
   if (loading) {
@@ -177,7 +177,7 @@ const GradeSelectionPage = ({ school, onGradeSelect }) => {
 };
 
 // Tree Menu Component
-const TreeMenu = ({ rhymesData, onRhymeSelect, selectedRhymes, filterByPages }) => {
+const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onToggleReusable }) => {
   const [expandedGroups, setExpandedGroups] = useState({});
 
   const toggleGroup = (pageKey) => {
@@ -187,18 +187,13 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, selectedRhymes, filterByPages }) 
     }));
   };
 
-  const getFilteredRhymes = (pageKey, rhymes) => {
-    if (!filterByPages || filterByPages.includes(parseFloat(pageKey))) {
-      return rhymes;
-    }
-    return [];
-  };
+  const currentRhymes = showReusable ? reusableRhymes : rhymesData;
 
-  if (!rhymesData || Object.keys(rhymesData).length === 0) {
+  if (!currentRhymes || Object.keys(currentRhymes).length === 0) {
     return (
       <div className="p-4 text-center text-gray-500">
         <Music className="w-12 h-12 mx-auto mb-2 opacity-50" />
-        <p>No rhymes available</p>
+        <p>{showReusable ? 'No reusable rhymes available' : 'No rhymes available'}</p>
       </div>
     );
   }
@@ -206,16 +201,26 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, selectedRhymes, filterByPages }) 
   return (
     <div className="h-full overflow-y-auto bg-white/50 backdrop-blur-sm rounded-lg border border-gray-200">
       <div className="p-4 border-b bg-white/80">
-        <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-          <BookOpen className="w-5 h-5" />
-          Available Rhymes
-        </h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+            <BookOpen className="w-5 h-5" />
+            {showReusable ? 'Reusable Rhymes' : 'Available Rhymes'}
+          </h3>
+          <Button
+            onClick={onToggleReusable}
+            variant="outline"
+            size="sm"
+            className="text-xs"
+          >
+            <Eye className="w-3 h-3 mr-1" />
+            {showReusable ? 'Show Available' : 'Show Reusable'}
+          </Button>
+        </div>
       </div>
       
       <div className="p-2">
-        {Object.entries(rhymesData).map(([pageKey, rhymes]) => {
-          const filteredRhymes = getFilteredRhymes(pageKey, rhymes);
-          if (filteredRhymes.length === 0) return null;
+        {Object.entries(currentRhymes).map(([pageKey, rhymes]) => {
+          if (!rhymes || rhymes.length === 0) return null;
 
           return (
             <Collapsible key={pageKey} open={expandedGroups[pageKey]} onOpenChange={() => toggleGroup(pageKey)}>
@@ -224,7 +229,7 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, selectedRhymes, filterByPages }) 
                   <div className="w-6 h-6 bg-gradient-to-r from-orange-400 to-red-400 rounded-full flex items-center justify-center text-white text-xs font-bold">
                     {pageKey}
                   </div>
-                  {pageKey} Page{parseFloat(pageKey) !== 1 ? 's' : ''} ({filteredRhymes.length})
+                  {pageKey} Page{parseFloat(pageKey) !== 1 ? 's' : ''} ({rhymes.length})
                 </span>
                 {expandedGroups[pageKey] ? 
                   <ChevronDown className="w-4 h-4 text-gray-500" /> : 
@@ -233,7 +238,7 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, selectedRhymes, filterByPages }) 
               </CollapsibleTrigger>
               <CollapsibleContent className="pl-4">
                 <div className="space-y-1 mt-2">
-                  {filteredRhymes.map((rhyme) => (
+                  {rhymes.map((rhyme) => (
                     <button
                       key={rhyme.code}
                       onClick={() => onRhymeSelect(rhyme)}
@@ -246,6 +251,11 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, selectedRhymes, filterByPages }) 
                           </p>
                           <p className="text-xs text-gray-500 mt-1">
                             Code: {rhyme.code} • {rhyme.personalized === "Yes" ? "Personalized" : "Standard"}
+                            {rhyme.used_in_grades && (
+                              <span className="ml-2 text-blue-600">
+                                (Used in: {rhyme.used_in_grades.join(', ')})
+                              </span>
+                            )}
                           </p>
                         </div>
                         <div className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
@@ -264,17 +274,107 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, selectedRhymes, filterByPages }) 
   );
 };
 
+// Carousel Component
+const RhymeCarousel = ({ selectedRhymes, currentPageIndex, onPageChange, onRemovePage }) => {
+  const totalPages = Math.max(selectedRhymes.length, 1);
+  const currentRhyme = selectedRhymes[currentPageIndex];
+
+  return (
+    <div className="space-y-4">
+      {/* Navigation Controls */}
+      <div className="flex items-center justify-between">
+        <Button
+          onClick={() => onPageChange(Math.max(0, currentPageIndex - 1))}
+          disabled={currentPageIndex === 0}
+          variant="outline"
+          size="sm"
+        >
+          <ChevronLeft className="w-4 h-4 mr-1" />
+          Previous
+        </Button>
+        
+        <div className="text-sm text-gray-600">
+          Page {currentPageIndex + 1} of {totalPages}
+        </div>
+        
+        <Button
+          onClick={() => onPageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
+          disabled={currentPageIndex >= totalPages - 1}
+          variant="outline"
+          size="sm"
+        >
+          Next
+          <ChevronRight className="w-4 h-4 ml-1" />
+        </Button>
+      </div>
+
+      {/* SVG Display */}
+      <div className="bg-white/80 backdrop-blur-sm rounded-lg p-6 min-h-[400px] flex flex-col">
+        {currentRhyme ? (
+          <>
+            <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden mb-4">
+              <div 
+                dangerouslySetInnerHTML={{ __html: currentRhyme.svgContent || '' }}
+                className="w-full h-full flex items-center justify-center"
+              />
+            </div>
+            <div className="text-center">
+              <p className="font-semibold text-gray-800">{currentRhyme.name}</p>
+              <p className="text-sm text-gray-500">Code: {currentRhyme.code} • Pages: {currentRhyme.pages}</p>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <Button
+                onClick={() => onRemovePage(currentPageIndex)}
+                variant="outline"
+                className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
+              >
+                Remove
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-gray-500">
+            <div className="text-center">
+              <Music className="w-16 h-16 mx-auto mb-4 opacity-50" />
+              <p>No rhyme selected for this page</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Page Indicators */}
+      <div className="flex justify-center space-x-2">
+        {Array.from({ length: totalPages }, (_, index) => (
+          <button
+            key={index}
+            onClick={() => onPageChange(index)}
+            className={`w-3 h-3 rounded-full transition-colors duration-200 ${
+              index === currentPageIndex 
+                ? 'bg-orange-400' 
+                : selectedRhymes[index] 
+                  ? 'bg-gray-400' 
+                  : 'bg-gray-200'
+            }`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 // Main Rhyme Selection Interface
 const RhymeSelectionPage = ({ school, grade, onBack }) => {
   const [availableRhymes, setAvailableRhymes] = useState({});
-  const [selectedRhymes, setSelectedRhymes] = useState({ top: null, bottom: null });
+  const [reusableRhymes, setReusableRhymes] = useState({});
+  const [selectedRhymes, setSelectedRhymes] = useState([]);
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [showTreeMenu, setShowTreeMenu] = useState(false);
-  const [currentPosition, setCurrentPosition] = useState(null);
-  const [svgContent, setSvgContent] = useState({ top: null, bottom: null });
+  const [showReusable, setShowReusable] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchAvailableRhymes();
+    fetchReusableRhymes();
     fetchSelectedRhymes();
   }, []);
 
@@ -288,19 +388,34 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     }
   };
 
+  const fetchReusableRhymes = async () => {
+    try {
+      const response = await axios.get(`${API}/rhymes/selected/other-grades/${school.school_id}/${grade}`);
+      setReusableRhymes(response.data);
+    } catch (error) {
+      console.error('Error fetching reusable rhymes:', error);
+    }
+  };
+
   const fetchSelectedRhymes = async () => {
     try {
       const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
-      const gradeSelections = response.data[grade] || { top: null, bottom: null };
-      setSelectedRhymes(gradeSelections);
+      const gradeSelections = response.data[grade] || [];
       
-      // Load SVG content for selected rhymes
-      if (gradeSelections.top) {
-        loadSvgContent(gradeSelections.top.code, 'top');
-      }
-      if (gradeSelections.bottom) {
-        loadSvgContent(gradeSelections.bottom.code, 'bottom');
-      }
+      // Load SVG content for each selected rhyme
+      const rhymesWithSvg = await Promise.all(
+        gradeSelections.map(async (rhyme) => {
+          try {
+            const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
+            return { ...rhyme, svgContent: svgResponse.data };
+          } catch (error) {
+            console.error('Error loading SVG for', rhyme.code);
+            return { ...rhyme, svgContent: null };
+          }
+        })
+      );
+      
+      setSelectedRhymes(rhymesWithSvg);
     } catch (error) {
       console.error('Error fetching selected rhymes:', error);
     } finally {
@@ -308,20 +423,7 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     }
   };
 
-  const loadSvgContent = async (rhymeCode, position) => {
-    try {
-      const response = await axios.get(`${API}/rhymes/svg/${rhymeCode}`);
-      setSvgContent(prev => ({
-        ...prev,
-        [position]: response.data
-      }));
-    } catch (error) {
-      console.error('Error loading SVG:', error);
-    }
-  };
-
-  const handleAddRhyme = (position) => {
-    setCurrentPosition(position);
+  const handleAddRhyme = () => {
     setShowTreeMenu(true);
   };
 
@@ -330,28 +432,33 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       await axios.post(`${API}/rhymes/select`, {
         school_id: school.school_id,
         grade: grade,
-        position: currentPosition,
+        page_index: currentPageIndex,
         rhyme_code: rhyme.code
       });
 
-      // Update local state
-      setSelectedRhymes(prev => ({
-        ...prev,
-        [currentPosition]: {
-          code: rhyme.code,
-          name: rhyme.name,
-          pages: rhyme.pages
-        }
-      }));
-
       // Load SVG content
-      await loadSvgContent(rhyme.code, currentPosition);
+      const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
+      
+      // Update local state
+      const newRhyme = {
+        page_index: currentPageIndex,
+        code: rhyme.code,
+        name: rhyme.name,
+        pages: rhyme.pages,
+        svgContent: svgResponse.data
+      };
+
+      setSelectedRhymes(prev => {
+        const updated = [...prev];
+        updated[currentPageIndex] = newRhyme;
+        return updated;
+      });
 
       // Refresh available rhymes
       await fetchAvailableRhymes();
+      await fetchReusableRhymes();
 
       setShowTreeMenu(false);
-      setCurrentPosition(null);
       toast.success(`Rhyme "${rhyme.name}" selected successfully!`);
     } catch (error) {
       console.error('Error selecting rhyme:', error);
@@ -359,26 +466,18 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     }
   };
 
-  const handleReplaceRhyme = (position) => {
-    setCurrentPosition(position);
-    setShowTreeMenu(true);
-  };
-
-  const handleRemoveRhyme = async (position) => {
+  const handleRemovePage = async (pageIndex) => {
     try {
-      await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${position}`);
+      await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${pageIndex}`);
       
-      setSelectedRhymes(prev => ({
-        ...prev,
-        [position]: null
-      }));
-      
-      setSvgContent(prev => ({
-        ...prev,
-        [position]: null
-      }));
+      setSelectedRhymes(prev => {
+        const updated = [...prev];
+        updated[pageIndex] = null;
+        return updated;
+      });
 
       await fetchAvailableRhymes();
+      await fetchReusableRhymes();
       toast.success('Rhyme removed successfully!');
     } catch (error) {
       console.error('Error removing rhyme:', error);
@@ -386,8 +485,12 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     }
   };
 
-  const getFilterForPosition = (position) => {
-    return position === 'top' ? [1.0] : [0.5];
+  const handlePageChange = (newPageIndex) => {
+    setCurrentPageIndex(newPageIndex);
+  };
+
+  const handleToggleReusable = () => {
+    setShowReusable(!showReusable);
   };
 
   if (loading) {
@@ -425,147 +528,61 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
         <div className="max-w-7xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[calc(100vh-200px)]">
             
-            {/* Tree Menu - Left Side */}
-            <div className={`lg:col-span-1 transition-all duration-300 ${showTreeMenu ? 'block' : 'hidden lg:block'}`}>
-              {showTreeMenu && (
-                <div className="mb-4 lg:hidden">
-                  <Button 
-                    onClick={() => {setShowTreeMenu(false); setCurrentPosition(null);}}
-                    variant="outline"
-                    className="w-full"
-                  >
-                    Close Menu
-                  </Button>
-                </div>
-              )}
+            {/* Tree Menu - Left Side (only shown when showTreeMenu is true) */}
+            <div className={`lg:col-span-1 transition-all duration-300 ${showTreeMenu ? 'block' : 'hidden'}`}>
+              <div className="mb-4">
+                <Button 
+                  onClick={() => setShowTreeMenu(false)}
+                  variant="outline"
+                  className="w-full mb-2"
+                >
+                  <ChevronLeft className="w-4 h-4 mr-2" />
+                  Close Menu
+                </Button>
+              </div>
               <TreeMenu 
                 rhymesData={availableRhymes}
+                reusableRhymes={reusableRhymes}
+                showReusable={showReusable}
                 onRhymeSelect={handleRhymeSelect}
-                selectedRhymes={selectedRhymes}
-                filterByPages={currentPosition ? getFilterForPosition(currentPosition) : null}
+                onToggleReusable={handleToggleReusable}
               />
             </div>
 
-            {/* Right Side - Two Divisions */}
-            <div className={`lg:col-span-3 ${showTreeMenu ? 'hidden lg:block' : 'block'}`}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full">
-                
-                {/* Top Division (1.0 pages) */}
-                <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg text-center text-gray-700">
-                      Top Position (1.0 Page Rhymes)
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="h-[400px] flex flex-col">
-                    {selectedRhymes.top ? (
-                      <div className="flex-1 relative">
-                        <div className="h-full flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden">
-                          {svgContent.top ? (
-                            <div 
-                              dangerouslySetInnerHTML={{ __html: svgContent.top }}
-                              className="w-full h-full flex items-center justify-center"
-                            />
-                          ) : (
-                            <div className="text-center">
-                              <Music className="w-12 h-12 mx-auto mb-2 text-gray-400" />
-                              <p className="text-sm text-gray-500">Loading rhyme content...</p>
-                            </div>
-                          )}
-                        </div>
-                        <div className="mt-4 text-center">
-                          <p className="font-semibold text-gray-800">{selectedRhymes.top.name}</p>
-                          <p className="text-sm text-gray-500">Code: {selectedRhymes.top.code}</p>
-                        </div>
-                        <div className="flex gap-2 mt-4">
-                          <Button
-                            onClick={() => handleReplaceRhyme('top')}
-                            variant="outline"
-                            className="flex-1 bg-white/50 hover:bg-white"
-                          >
-                            <Replace className="w-4 h-4 mr-2" />
-                            Replace
-                          </Button>
-                          <Button
-                            onClick={() => handleRemoveRhyme('top')}
-                            variant="outline"
-                            className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex-1 flex items-center justify-center">
-                        <Button
-                          onClick={() => handleAddRhyme('top')}
-                          className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-                        >
-                          <Plus className="w-8 h-8" />
-                        </Button>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Bottom Division (0.5 pages) */}
-                <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg text-center text-gray-700">
-                      Bottom Position (0.5 Page Rhymes)
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="h-[400px] flex flex-col">
-                    {selectedRhymes.bottom ? (
-                      <div className="flex-1 relative">
-                        <div className="h-full flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden">
-                          {svgContent.bottom ? (
-                            <div 
-                              dangerouslySetInnerHTML={{ __html: svgContent.bottom }}
-                              className="w-full h-full flex items-center justify-center"
-                            />
-                          ) : (
-                            <div className="text-center">
-                              <Music className="w-12 h-12 mx-auto mb-2 text-gray-400" />
-                              <p className="text-sm text-gray-500">Loading rhyme content...</p>
-                            </div>
-                          )}
-                        </div>
-                        <div className="mt-4 text-center">
-                          <p className="font-semibold text-gray-800">{selectedRhymes.bottom.name}</p>
-                          <p className="text-sm text-gray-500">Code: {selectedRhymes.bottom.code}</p>
-                        </div>
-                        <div className="flex gap-2 mt-4">
-                          <Button
-                            onClick={() => handleReplaceRhyme('bottom')}
-                            variant="outline"
-                            className="flex-1 bg-white/50 hover:bg-white"
-                          >
-                            <Replace className="w-4 h-4 mr-2" />
-                            Replace
-                          </Button>
-                          <Button
-                            onClick={() => handleRemoveRhyme('bottom')}
-                            variant="outline"
-                            className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex-1 flex items-center justify-center">
-                        <Button
-                          onClick={() => handleAddRhyme('bottom')}
-                          className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-                        >
-                          <Plus className="w-8 h-8" />
-                        </Button>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
+            {/* Right Side - Carousel Interface */}
+            <div className={`${showTreeMenu ? 'lg:col-span-3' : 'lg:col-span-4'} flex flex-col items-center justify-center`}>
+              {selectedRhymes.length === 0 ? (
+                // Initial state - empty
+                <div className="text-center">
+                  <Button
+                    onClick={handleAddRhyme}
+                    className="w-32 h-32 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 mb-4"
+                  >
+                    <Plus className="w-12 h-12" />
+                  </Button>
+                  <p className="text-gray-600 text-lg">Click to add your first rhyme</p>
+                </div>
+              ) : (
+                // Carousel interface
+                <div className="w-full max-w-2xl">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-xl font-semibold text-gray-800">Selected Rhymes</h2>
+                    <Button
+                      onClick={handleAddRhyme}
+                      className="bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Rhyme
+                    </Button>
+                  </div>
+                  <RhymeCarousel
+                    selectedRhymes={selectedRhymes}
+                    currentPageIndex={currentPageIndex}
+                    onPageChange={handlePageChange}
+                    onRemovePage={handleRemovePage}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>
