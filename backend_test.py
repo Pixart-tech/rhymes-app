@@ -246,17 +246,26 @@ class RhymePickerAPITester:
         """Test SVG generation endpoint"""
         print("\n🎨 Testing SVG Generation...")
         
-        # Test with a known rhyme code
-        success, svg_content = self.run_test(
-            "Generate SVG for RE00001",
-            "GET",
-            "rhymes/svg/RE00001",
-            200
-        )
+        # Test with a known rhyme code (try RE00077 first, then fallback)
+        test_codes = ["RE00077", "RE00001"]
+        svg_tested = False
         
-        if success and isinstance(svg_content, str):
-            is_svg = svg_content.strip().startswith('<svg')
-            self.log_test("SVG Content Format", is_svg, "Valid SVG format" if is_svg else "Invalid SVG format")
+        for code in test_codes:
+            success, svg_content = self.run_test(
+                f"Generate SVG for {code}",
+                "GET",
+                f"rhymes/svg/{code}",
+                200
+            )
+            
+            if success and isinstance(svg_content, str):
+                is_svg = svg_content.strip().startswith('<svg')
+                self.log_test("SVG Content Format", is_svg, "Valid SVG format" if is_svg else "Invalid SVG format")
+                svg_tested = True
+                break
+        
+        if not svg_tested:
+            self.log_test("SVG Generation", False, "No valid rhyme codes found for testing")
         
         # Test with invalid rhyme code
         success, response = self.run_test(
