@@ -131,8 +131,8 @@ class RhymePickerAPITester:
         )
 
     def test_rhyme_selection_workflow(self):
-        """Test complete rhyme selection workflow"""
-        print("\n🎯 Testing Rhyme Selection Workflow...")
+        """Test complete rhyme selection workflow for dual-container system"""
+        print("\n🎯 Testing Dual-Container Rhyme Selection Workflow...")
         
         # First, get available rhymes to select from
         success, available_rhymes = self.run_test(
@@ -146,27 +146,34 @@ class RhymePickerAPITester:
             print("❌ Cannot proceed with selection tests - no available rhymes")
             return False
         
-        # Find a 0.5 page rhyme for bottom position
+        # Find a 0.5 page rhyme for testing
         half_page_rhyme = None
         if "0.5" in available_rhymes and available_rhymes["0.5"]:
             half_page_rhyme = available_rhymes["0.5"][0]
         
-        # Find a 1.0 page rhyme for top position
+        # Find a 1.0 page rhyme for testing (specifically RE00077 - Fruits salad if available)
         full_page_rhyme = None
         if "1.0" in available_rhymes and available_rhymes["1.0"]:
-            full_page_rhyme = available_rhymes["1.0"][0]
+            # Look for RE00077 specifically
+            for rhyme in available_rhymes["1.0"]:
+                if rhyme["code"] == "RE00077":
+                    full_page_rhyme = rhyme
+                    break
+            # If RE00077 not found, use first available 1.0 page rhyme
+            if not full_page_rhyme:
+                full_page_rhyme = available_rhymes["1.0"][0]
         
-        # Test selecting a 0.5 page rhyme for bottom position
+        # Test selecting a 0.5 page rhyme at page_index 0
         if half_page_rhyme:
             success, response = self.run_test(
-                "Select 0.5 Page Rhyme (Bottom)",
+                "Select 0.5 Page Rhyme (page_index 0)",
                 "POST",
                 "rhymes/select",
                 200,
                 data={
                     "school_id": self.test_school_id,
                     "grade": "nursery",
-                    "position": "bottom",
+                    "page_index": 0,
                     "rhyme_code": half_page_rhyme["code"]
                 }
             )
@@ -174,7 +181,7 @@ class RhymePickerAPITester:
             if success:
                 # Verify the selection was saved
                 success, selected = self.run_test(
-                    "Verify Bottom Selection Saved",
+                    "Verify 0.5 Page Selection Saved",
                     "GET",
                     f"rhymes/selected/{self.test_school_id}",
                     200
@@ -182,25 +189,34 @@ class RhymePickerAPITester:
                 
                 if success and isinstance(selected, dict):
                     has_nursery = "nursery" in selected
-                    has_bottom = has_nursery and selected["nursery"].get("bottom") is not None
-                    self.log_test("Bottom Position Selection Verified", has_bottom)
+                    has_selection = has_nursery and len(selected["nursery"]) > 0
+                    self.log_test("0.5 Page Selection Verified", has_selection)
         
-        # Test selecting a 1.0 page rhyme for top position
+        # Test selecting a 1.0 page rhyme at page_index 1
         if full_page_rhyme:
             success, response = self.run_test(
-                "Select 1.0 Page Rhyme (Top)",
+                "Select 1.0 Page Rhyme (page_index 1)",
                 "POST",
                 "rhymes/select",
                 200,
                 data={
                     "school_id": self.test_school_id,
                     "grade": "nursery",
-                    "position": "top",
+                    "page_index": 1,
                     "rhyme_code": full_page_rhyme["code"]
                 }
             )
+            
+            if success:
+                # Verify the selection was saved
+                success, selected = self.run_test(
+                    "Verify 1.0 Page Selection Saved",
+                    "GET",
+                    f"rhymes/selected/{self.test_school_id}",
+                    200
+                )
         
-        # Test replacing a selection
+        # Test replacing a selection (select different rhyme at same page_index)
         if half_page_rhyme and "0.5" in available_rhymes and len(available_rhymes["0.5"]) > 1:
             replacement_rhyme = available_rhymes["0.5"][1]
             success, response = self.run_test(
@@ -211,7 +227,7 @@ class RhymePickerAPITester:
                 data={
                     "school_id": self.test_school_id,
                     "grade": "nursery",
-                    "position": "bottom",
+                    "page_index": 0,
                     "rhyme_code": replacement_rhyme["code"]
                 }
             )
@@ -220,7 +236,7 @@ class RhymePickerAPITester:
         success, response = self.run_test(
             "Remove Rhyme Selection",
             "DELETE",
-            f"rhymes/remove/{self.test_school_id}/nursery/bottom",
+            f"rhymes/remove/{self.test_school_id}/nursery/0",
             200
         )
         
