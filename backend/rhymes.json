@@ -1,0 +1,832 @@
+{
+    "RE00001": [
+        "one, two, buckle my shoes",
+        0.5,
+        "Yes"
+    ],
+    "RE00002": [
+        "A Ram sam sam",
+        0.5,
+        "Yes"
+    ],
+    "RE00003": [
+        "Two little hands to clap",
+        0.5,
+        "Yes"
+    ],
+    "RE00004": [
+        "A little seed for me to grow",
+        0.5,
+        "Yes"
+    ],
+    "RE00005": [
+        "ABC Song",
+        0.5,
+        "Yes"
+    ],
+    "RE00006": [
+        "Aeroplane",
+        0.5,
+        "Yes"
+    ],
+    "RE00007": [
+        "All about me",
+        0.5,
+        "Yes"
+    ],
+    "RE00008": [
+        "Are you sleeping",
+        0.5,
+        "Yes"
+    ],
+    "RE00009": [
+        "Ba ba black sheep",
+        0.5,
+        "Yes"
+    ],
+    "RE00010": [
+        "Bits of paper",
+        0.5,
+        "Yes"
+    ],
+    "RE00011": [
+        "Ding dong bell",
+        0.5,
+        "Yes"
+    ],
+    "RE00012": [
+        "Garden",
+        0.5,
+        "Yes"
+    ],
+    "RE00013": [
+        "Good manners",
+        0.5,
+        "Yes"
+    ],
+    "RE00014": [
+        "Home from school",
+        0.5,
+        "Yes"
+    ],
+    "RE00015": [
+        "Hop a little ",
+        0.5,
+        "Yes"
+    ],
+    "RE00016": [
+        "I am special",
+        0.5,
+        "Yes"
+    ],
+    "RE00017": [
+        "I hear thunder",
+        0.5,
+        "Yes"
+    ],
+    "RE00018": [
+        "Kites kites flying high",
+        0.5,
+        "Yes"
+    ],
+    "RE00019": [
+        "Little fingers",
+        0.5,
+        "Yes"
+    ],
+    "RE00020": [
+        "Little me",
+        0.5,
+        "Yes"
+    ],
+    "RE00021": [
+        "Lollipop",
+        0.5,
+        "Yes"
+    ],
+    "RE00022": [
+        "Look, it's me!",
+        0.5,
+        "Yes"
+    ],
+    "RE00023": [
+        "Me an apple",
+        0.5,
+        "Yes"
+    ],
+    "RE00024": [
+        "Me",
+        0.5,
+        "Yes"
+    ],
+    "RE00025": [
+        "Mummy and daddy, I love you",
+        0.5,
+        "Yes"
+    ],
+    "RE00026": [
+        "My band",
+        0.5,
+        "Yes"
+    ],
+    "RE00027": [
+        "My family",
+        0.5,
+        "Yes"
+    ],
+    "RE00028": [
+        "My pets",
+        0.5,
+        "Yes"
+    ],
+    "RE00029": [
+        "My red balloon",
+        0.5,
+        "Yes"
+    ],
+    "RE00030": [
+        "My school",
+        0.5,
+        "Yes"
+    ],
+    "RE00031": [
+        "My sense organs",
+        0.5,
+        "Yes"
+    ],
+    "RE00032": [
+        "My teacher",
+        0.5,
+        "Yes"
+    ],
+    "RE00033": [
+        "Head, shoulder, knees and toes",
+        0.5,
+        "Yes"
+    ],
+    "RE00034": [
+        "Number rhyme",
+        0.5,
+        "Yes"
+    ],
+    "RE00035": [
+        "Out In The Garden",
+        0.5,
+        "Yes"
+    ],
+    "RE00036": [
+        "Prayer",
+        0.5,
+        "Yes"
+    ],
+    "RE00037": [
+        "Rain",
+        0.5,
+        "Yes"
+    ],
+    "RE00038": [
+        "Rain_1",
+        0.5,
+        "Yes"
+    ],
+    "RE00039": [
+        "Roly poly",
+        0.5,
+        "Yes"
+    ],
+    "RE00040": [
+        "Pat a cake",
+        0.5,
+        "Yes"
+    ],
+    "RE00041": [
+        "Roses are red",
+        0.5,
+        "Yes"
+    ],
+    "RE00042": [
+        "Row, row, row your boat",
+        0.5,
+        "Yes"
+    ],
+    "RE00043": [
+        "See-saw",
+        0.5,
+        "Yes"
+    ],
+    "RE00044": [
+        "Teddy Bear Teddy Bear",
+        0.5,
+        "Yes"
+    ],
+    "RE00045": [
+        "The cat in the cupboard",
+        0.5,
+        "Yes"
+    ],
+    "RE00046": [
+        "The chook, chook train",
+        0.5,
+        "Yes"
+    ],
+    "RE00047": [
+        "This little bird",
+        0.5,
+        "Yes"
+    ],
+    "RE00048": [
+        "To market, to market",
+        0.5,
+        "Yes"
+    ],
+    "RE00049": [
+        "Tomatoes are red",
+        0.5,
+        "Yes"
+    ],
+    "RE00050": [
+        "Toothbrush",
+        0.5,
+        "Yes"
+    ],
+    "RE00051": [
+        "Twinkle, twinkle",
+        0.5,
+        "Yes"
+    ],
+    "RE00052": [
+        "Two hands to work",
+        0.5,
+        "Yes"
+    ],
+    "RE00053": [
+        "two little hands to clap_1",
+        0.5,
+        "Yes"
+    ],
+    "RE00054": [
+        "Two little feet",
+        0.5,
+        "Yes"
+    ],
+    "RE00055": [
+        "When i come in",
+        0.5,
+        "Yes"
+    ],
+    "RE00056": [
+        "You shall have an apple",
+        0.5,
+        "Yes"
+    ],
+    "RE00057": [
+        "A little Seed ",
+        0.5,
+        "No"
+    ],
+    "RE00058": [
+        "A Small boat",
+        0.5,
+        "No"
+    ],
+    "RE00060": [
+        "Baby",
+        0.5,
+        "No"
+    ],
+    "RE00061": [
+        "Ants go marching",
+        0.5,
+        "No"
+    ],
+    "RE00062": [
+        "At the zoo",
+        0.5,
+        "No"
+    ],
+    "RE00063": [
+        "Bells",
+        0.5,
+        "No"
+    ],
+    "RE00064": [
+        "Bunny rabbit",
+        0.5,
+        "No"
+    ],
+    "RE00065": [
+        "Butterfly butterfly",
+        0.5,
+        "No"
+    ],
+    "RE00066": [
+        "Caterpillar",
+        0.5,
+        "No"
+    ],
+    "RE00067": [
+        "Chubby cheeks",
+        0.5,
+        "No"
+    ],
+    "RE00068": [
+        "Cobbler cobbler",
+        0.5,
+        "No"
+    ],
+    "RE00069": [
+        "Colourful rainbow",
+        0.5,
+        "No"
+    ],
+    "RE00070": [
+        "Dig spade dig",
+        0.5,
+        "No"
+    ],
+    "RE00071": [
+        "Doctor doctor",
+        0.5,
+        "No"
+    ],
+    "RE00072": [
+        "Early to bed",
+        0.5,
+        "No"
+    ],
+    "RE00073": [
+        "Elly the elephant",
+        0.5,
+        "No"
+    ],
+    "RE00074": [
+        "Fishy fish",
+        0.5,
+        "No"
+    ],
+    "RE00075": [
+        "Five little soldiers",
+        0.5,
+        "No"
+    ],
+    "RE00076": [
+        "Fruit Rhyme",
+        0.5,
+        "No"
+    ],
+    "RE00077": [
+        "Fruits salad",
+        1.0,
+        "No"
+    ],
+    "RE00078": [
+        "God's prayer",
+        0.5,
+        "No"
+    ],
+    "RE00079": [
+        "Goosey, goosey",
+        0.5,
+        "No"
+    ],
+    "RE00080": [
+        "Handy pandy",
+        0.5,
+        "No"
+    ],
+    "RE00081": [
+        "Happy little monkey",
+        0.5,
+        "No"
+    ],
+    "RE00082": [
+        "Hickory dickory dock",
+        0.5,
+        "No"
+    ],
+    "RE00083": [
+        "Hey diddle, diddle",
+        0.5,
+        "No"
+    ],
+    "RE00084": [
+        "I am a little tea pot",
+        0.5,
+        "No"
+    ],
+    "RE00085": [
+        "I can hop hop hop",
+        0.5,
+        "No"
+    ],
+    "RE00086": [
+        "I can see",
+        0.5,
+        "No"
+    ],
+    "RE00087": [
+        "I see the moon",
+        0.5,
+        "No"
+    ],
+    "RE00088": [
+        "Jack and jill",
+        0.5,
+        "No"
+    ],
+    "RE00089": [
+        "Jelly on the plate",
+        0.5,
+        "No"
+    ],
+    "RE00090": [
+        "Jumping hoping",
+        0.5,
+        "No"
+    ],
+    "RE00091": [
+        "Little ants",
+        0.5,
+        "No"
+    ],
+    "RE00092": [
+        "Little buds",
+        0.5,
+        "No"
+    ],
+    "RE00093": [
+        "Little bo-peep",
+        0.5,
+        "No"
+    ],
+    "RE00094": [
+        "Little miss muffet",
+        0.5,
+        "No"
+    ],
+    "RE00095": [
+        "Little jack",
+        0.5,
+        "No"
+    ],
+    "RE00096": [
+        "Little fish",
+        0.5,
+        "No"
+    ],
+    "RE00097": [
+        "London bridge is falling down",
+        0.5,
+        "No"
+    ],
+    "RE00098": [
+        "Look at me",
+        0.5,
+        "No"
+    ],
+    "RE00099": [
+        "Lucky locket",
+        0.5,
+        "No"
+    ],
+    "RE00100": [
+        "Mary had a little lamb",
+        0.5,
+        "No"
+    ],
+    "RE00101": [
+        "Micky mouse",
+        0.5,
+        "No"
+    ],
+    "RE00102": [
+        "Mummy's gone to london",
+        0.5,
+        "No"
+    ],
+    "RE00103": [
+        "My garden",
+        0.5,
+        "No"
+    ],
+    "RE00104": [
+        "My jack in the box",
+        0.5,
+        "No"
+    ],
+    "RE00105": [
+        "Number five",
+        0.5,
+        "No"
+    ],
+    "RE00106": [
+        "Oh! Look at the moon",
+        0.5,
+        "No"
+    ],
+    "RE00107": [
+        "One big aeroplane",
+        0.5,
+        "No"
+    ],
+    "RE00108": [
+        "One small fish",
+        0.5,
+        "No"
+    ],
+    "RE00109": [
+        "One, two",
+        0.5,
+        "No"
+    ],
+    "RE00110": [
+        "Oranges & Lemon",
+        0.5,
+        "No"
+    ],
+    "RE00111": [
+        "Oranges oranges",
+        0.5,
+        "No"
+    ],
+    "RE00112": [
+        "Pease-porridge hot",
+        0.5,
+        "No"
+    ],
+    "RE00113": [
+        "Peter, peter pumpkin eater",
+        0.5,
+        "No"
+    ],
+    "RE00114": [
+        "Polly, put the kettle on ",
+        0.5,
+        "No"
+    ],
+    "RE00115": [
+        "Pussy cat , pussy cat",
+        0.5,
+        "No"
+    ],
+    "RE00116": [
+        "Rabbit rabbit",
+        0.5,
+        "No"
+    ],
+    "RE00117": [
+        "There is a rainbow",
+        0.5,
+        "No"
+    ],
+    "RE00118": [
+        "Rain",
+        0.5,
+        "No"
+    ],
+    "RE00119": [
+        "Rain on the green grass",
+        0.5,
+        "No"
+    ],
+    "RE00120": [
+        "Rain, Rain, come soon",
+        0.5,
+        "No"
+    ],
+    "RE00121": [
+        "Rainbow song",
+        0.5,
+        "No"
+    ],
+    "RE00122": [
+        "Rat-tat-tat",
+        0.5,
+        "No"
+    ],
+    "RE00123": [
+        "Ring-a-ring-roses",
+        0.5,
+        "No"
+    ],
+    "RE00124": [
+        "Are you sleeping",
+        0.5,
+        "No"
+    ],
+    "RE00125": [
+        "Standing on the platform",
+        0.5,
+        "No"
+    ],
+    "RE00126": [
+        "Summer",
+        0.5,
+        "No"
+    ],
+    "RE00127": [
+        "Swimming",
+        0.5,
+        "No"
+    ],
+    "RE00128": [
+        "Tailor, tailor",
+        0.5,
+        "No"
+    ],
+    "RE00129": [
+        "Teddy bear, teddy bear",
+        0.5,
+        "No"
+    ],
+    "RE00130": [
+        "Ten little fingers",
+        0.5,
+        "No"
+    ],
+    "RE00131": [
+        "Ten little fireman",
+        0.5,
+        "No"
+    ],
+    "RE00132": [
+        "Thank you god!",
+        0.5,
+        "No"
+    ],
+    "RE00133": [
+        "The big yellow bus",
+        0.5,
+        "No"
+    ],
+    "RE00134": [
+        "The cat",
+        0.5,
+        "No"
+    ],
+    "RE00135": [
+        "The clock",
+        0.5,
+        "No"
+    ],
+    "RE00136": [
+        "The doctor",
+        0.5,
+        "No"
+    ],
+    "RE00137": [
+        "This little froggy",
+        0.5,
+        "No"
+    ],
+    "RE00138": [
+        "Two little dicky birds",
+        0.5,
+        "No"
+    ],
+    "RE00139": [
+        "Twinkle twinkle traffic light",
+        0.5,
+        "No"
+    ],
+    "RE00140": [
+        "Two twin aeroplanes",
+        0.5,
+        "No"
+    ],
+    "RE00141": [
+        "Winter",
+        0.5,
+        "No"
+    ],
+    "RE00142": [
+        "You are my sunshine",
+        0.5,
+        "No"
+    ],
+    "RE00143": [
+        "Yankee doodle",
+        0.5,
+        "No"
+    ],
+    "RE00144": [
+        "Whenever it is a rainy day",
+        0.5,
+        "No"
+    ],
+    "RE00145": [
+        "washong day",
+        0.5,
+        "No"
+    ],
+    "RE00146": [
+        "Vegetables song",
+        0.5,
+        "No"
+    ],
+    "RE00147": [
+        "Traffic policeman",
+        0.5,
+        "No"
+    ],
+    "RE00148": [
+        "Traffic lights",
+        0.5,
+        "No"
+    ],
+    "RE00149": [
+        "The says bow, bow",
+        0.5,
+        "No"
+    ],
+    "RE00150": [
+        "Twinkle, twinkle, traffic light",
+        0.5,
+        "No"
+    ],
+    "RE00151": [
+        "Rainbow song",
+        0.5,
+        "No"
+    ],
+    "RE00152": [
+        "The clock",
+        0.5,
+        "No"
+    ],
+    "RE00153": [
+        "The hen has a chicken",
+        0.5,
+        "No"
+    ],
+    "RE00154": [
+        "Hello! Mr bunny rabbit",
+        0.5,
+        "No"
+    ],
+    "RE00155": [
+        "At the zoo",
+        0.5,
+        "No"
+    ],
+    "RE00156": [
+        "One, two, zoo!",
+        0.5,
+        "No"
+    ],
+    "RE00157": [
+        "Alphabet have five vowels",
+        0.5,
+        "No"
+    ],
+    "RE00158": [
+        "Animals around us",
+        0.5,
+        "No"
+    ],
+    "RE00159": [
+        "Barber",
+        0.5,
+        "No"
+    ],
+    "RE00160": [
+        "The butterfly song",
+        0.5,
+        "No"
+    ],
+    "RE00161": [
+        "Chop, chop, choppity-chop",
+        0.5,
+        "No"
+    ],
+    "RE00162": [
+        "Cobbler, cobbler mend my shoe",
+        0.5,
+        "No"
+    ],
+    "RE00163": [
+        "Colours",
+        0.5,
+        "No"
+    ],
+    "RE00164": [
+        "Colours around me",
+        0.5,
+        "No"
+    ],
+    "RE00165": [
+        "Fish in the water",
+        0.5,
+        "No"
+    ],
+    "RE00166": [
+        "Fishy, fishy, in a brook",
+        0.5,
+        "No"
+    ],
+    "RE00167": [
+        "Five little sparrows",
+        0.5,
+        "No"
+    ]
+}
