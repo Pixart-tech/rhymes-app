@@ -315,7 +315,7 @@ class RhymePickerAPITester:
             data={
                 "school_id": self.test_school_id,
                 "grade": "nursery",
-                "position": "top",
+                "page_index": 0,
                 "rhyme_code": "NONEXISTENT"
             }
         )
@@ -324,7 +324,7 @@ class RhymePickerAPITester:
         success, response = self.run_test(
             "Remove Non-existent Selection",
             "DELETE",
-            f"rhymes/remove/{self.test_school_id}/nursery/nonexistent",
+            f"rhymes/remove/{self.test_school_id}/nursery/999",
             404
         )
 
