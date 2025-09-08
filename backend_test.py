@@ -297,7 +297,7 @@ class RhymePickerAPITester:
             # Check status structure
             if status:
                 sample_status = status[0]
-                required_fields = ["grade", "selected_count", "total_positions"]
+                required_fields = ["grade", "selected_count", "total_available"]
                 missing_fields = [field for field in required_fields if field not in sample_status]
                 self.log_test("Grade Status Structure", len(missing_fields) == 0,
                             f"Missing: {missing_fields}" if missing_fields else "All fields present")
