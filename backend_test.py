@@ -12,8 +12,8 @@ class RhymePickerAPITester:
         self.school_data = None
         self.tests_run = 0
         self.tests_passed = 0
-        self.test_school_id = "TEST001"
-        self.test_school_name = "Test Elementary"
+        self.test_school_id = "TEST_DUAL"
+        self.test_school_name = "Dual Container Test"
 
     def log_test(self, name, success, details=""):
         """Log test results"""
