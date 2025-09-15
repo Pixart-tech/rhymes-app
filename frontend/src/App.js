@@ -406,7 +406,7 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
         
         <Button
           onClick={() => onPageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
-          disabled={currentPageIndex >= totalPages - 1 && selectedRhymes.filter(r => r.page_index > currentPageIndex).length === 0}
+          disabled={currentPageIndex >= totalPages - 1}
           variant="outline"
           size="sm"
         >
