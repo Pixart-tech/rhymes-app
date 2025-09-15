@@ -590,26 +590,44 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
   const handleRhymeSelect = async (rhyme) => {
     try {
       let pageIndex;
+      let shouldCreateNewPage = false;
       
-      // Determine page index based on position and current page
+      // Determine page index and carousel logic
       if (currentPosition === 'top') {
-        // For top position, use current page index
-        pageIndex = currentPageIndex;
-      } else if (currentPosition === 'bottom') {
-        // For bottom position, check if current page already has a top rhyme
-        const currentPageRhymes = selectedRhymes.filter(r => r && r.page_index === currentPageIndex);
-        const hasTopRhyme = currentPageRhymes.some(r => r.pages === 0.5 || r.pages === 1.0);
-        
-        if (hasTopRhyme && currentPageRhymes.length === 1) {
-          // Current page has top rhyme, add to same page as bottom
-          pageIndex = currentPageIndex;
+        // TOP POSITION LOGIC
+        if (rhyme.pages === 1.0) {
+          // 1.0 page rhyme - create NEW page
+          pageIndex = getNextAvailablePageIndex();
+          shouldCreateNewPage = true;
         } else {
-          // No top rhyme or page full, use current page
+          // 0.5 page rhyme - use current page
           pageIndex = currentPageIndex;
         }
+      } else if (currentPosition === 'bottom') {
+        // BOTTOM POSITION LOGIC - always use current page for 0.5 page rhymes
+        pageIndex = currentPageIndex;
       } else {
-        // Fallback to next available
+        // Fallback
         pageIndex = getNextAvailablePageIndex();
+      }
+      
+      // Remove existing rhyme at same position if replacing
+      if (!shouldCreateNewPage && currentPosition) {
+        const currentPageRhymes = selectedRhymes.filter(r => r && r.page_index === pageIndex);
+        
+        if (currentPosition === 'top') {
+          // Remove existing top rhyme at this page
+          setSelectedRhymes(prev => 
+            prev.filter(r => !(r.page_index === pageIndex && 
+              (prev.filter(x => x.page_index === pageIndex).indexOf(r) === 0)))
+          );
+        } else if (currentPosition === 'bottom') {
+          // Remove existing bottom rhyme at this page
+          setSelectedRhymes(prev => 
+            prev.filter(r => !(r.page_index === pageIndex && 
+              (prev.filter(x => x.page_index === pageIndex).indexOf(r) === 1)))
+          );
+        }
       }
       
       await axios.post(`${API}/rhymes/select`, {
@@ -622,23 +640,23 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       // Load SVG content
       const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
       
-      // Update local state
+      // Create new rhyme object with position metadata
       const newRhyme = {
         page_index: pageIndex,
         code: rhyme.code,
         name: rhyme.name,
         pages: rhyme.pages,
-        svgContent: svgResponse.data
+        svgContent: svgResponse.data,
+        position: currentPosition // Track which position this was selected for
       };
 
-      // Remove any existing rhyme at the same page_index if replacing
-      setSelectedRhymes(prev => {
-        const filtered = prev.filter(r => r.page_index !== pageIndex || 
-          (currentPosition === 'bottom' && r.pages === 1.0) || 
-          (currentPosition === 'top' && r.pages === 0.5 && prev.filter(x => x.page_index === pageIndex).length < 2)
-        );
-        return [...filtered, newRhyme];
-      });
+      // Add new rhyme to state
+      setSelectedRhymes(prev => [...prev, newRhyme]);
+
+      // If we created a new page, navigate to it
+      if (shouldCreateNewPage) {
+        setCurrentPageIndex(pageIndex);
+      }
 
       // Refresh available rhymes
       await fetchAvailableRhymes();
@@ -646,7 +664,7 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
       setShowTreeMenu(false);
       setCurrentPosition(null);
-      toast.success(`Rhyme "${rhyme.name}" selected successfully!`);
+      toast.success(`Rhyme "${rhyme.name}" selected for ${currentPosition} position!`);
     } catch (error) {
       console.error('Error selecting rhyme:', error);
       toast.error('Failed to select rhyme');
