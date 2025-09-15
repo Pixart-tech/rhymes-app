@@ -650,18 +650,10 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
       setSelectedRhymes(prev => [...prev, newRhyme]);
 
-      // Check if page complete
+      // ALWAYS create next page after ANY selection (for 25 rhymes goal)
       setTimeout(() => {
-        const pageRhymes = [...selectedRhymes.filter(r => r.page_index !== pageIndex), newRhyme].filter(r => r.page_index === pageIndex);
-        
-        const hasFullPage = pageRhymes.some(r => r.pages === 1.0);
-        const hasTop = pageRhymes.some(r => r.position === 'top' && r.pages === 0.5);
-        const hasBottom = pageRhymes.some(r => r.position === 'bottom' && r.pages === 0.5);
-        
-        if (hasFullPage || (hasTop && hasBottom)) {
-          const nextPage = getNextAvailablePageIndex();
-          setCurrentPageIndex(nextPage);
-        }
+        const nextPage = getNextAvailablePageIndex();
+        setCurrentPageIndex(nextPage);
       }, 300);
 
       await fetchAvailableRhymes();
