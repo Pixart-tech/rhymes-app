@@ -313,23 +313,34 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
   const getCurrentPageRhymes = () => {
     let pageRhymes = { top: null, bottom: null };
     
-    // Simple approach: map rhymes by their page_index directly
-    selectedRhymes.forEach(rhyme => {
-      if (rhyme && rhyme.page_index === currentPageIndex) {
-        if (rhyme.pages === 1.0) {
-          // Full page rhyme takes entire page (top position, no bottom)
-          pageRhymes.top = rhyme;
-          pageRhymes.bottom = null;
-        } else if (rhyme.pages === 0.5) {
-          // Half page rhyme - assign to first available position
-          if (!pageRhymes.top) {
-            pageRhymes.top = rhyme;
-          } else if (!pageRhymes.bottom) {
-            pageRhymes.bottom = rhyme;
-          }
-        }
+    // Get all rhymes for the current page
+    const currentPageRhymes = selectedRhymes.filter(rhyme => 
+      rhyme && rhyme.page_index === currentPageIndex
+    );
+    
+    if (currentPageRhymes.length === 0) {
+      return pageRhymes;
+    }
+    
+    // Sort by selection order (you can modify this logic as needed)
+    currentPageRhymes.sort((a, b) => a.code.localeCompare(b.code));
+    
+    // Handle 1.0 page rhymes (takes full page)
+    const fullPageRhyme = currentPageRhymes.find(rhyme => rhyme.pages === 1.0);
+    if (fullPageRhyme) {
+      pageRhymes.top = fullPageRhyme;
+      pageRhymes.bottom = null; // Hide bottom when top is full page
+      return pageRhymes;
+    }
+    
+    // Handle 0.5 page rhymes (can have up to 2 per page)
+    const halfPageRhymes = currentPageRhymes.filter(rhyme => rhyme.pages === 0.5);
+    if (halfPageRhymes.length > 0) {
+      pageRhymes.top = halfPageRhymes[0];
+      if (halfPageRhymes.length > 1) {
+        pageRhymes.bottom = halfPageRhymes[1];
       }
-    });
+    }
     
     return pageRhymes;
   };
