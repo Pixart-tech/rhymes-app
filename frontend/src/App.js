@@ -744,12 +744,6 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     setShowReusable(!showReusable);
   };
 
-  const handleAddNewPage = () => {
-    const nextPageIndex = getNextAvailablePageIndex();
-    setCurrentPageIndex(nextPageIndex);
-    toast.success('New page created! You can add more rhymes.');
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
