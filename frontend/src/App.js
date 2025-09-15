@@ -565,7 +565,28 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
   const handleRhymeSelect = async (rhyme) => {
     try {
-      const pageIndex = getNextAvailablePageIndex();
+      let pageIndex;
+      
+      // Determine page index based on position and current page
+      if (currentPosition === 'top') {
+        // For top position, use current page index
+        pageIndex = currentPageIndex;
+      } else if (currentPosition === 'bottom') {
+        // For bottom position, check if current page already has a top rhyme
+        const currentPageRhymes = selectedRhymes.filter(r => r && r.page_index === currentPageIndex);
+        const hasTopRhyme = currentPageRhymes.some(r => r.pages === 0.5 || r.pages === 1.0);
+        
+        if (hasTopRhyme && currentPageRhymes.length === 1) {
+          // Current page has top rhyme, add to same page as bottom
+          pageIndex = currentPageIndex;
+        } else {
+          // No top rhyme or page full, use current page
+          pageIndex = currentPageIndex;
+        }
+      } else {
+        // Fallback to next available
+        pageIndex = getNextAvailablePageIndex();
+      }
       
       await axios.post(`${API}/rhymes/select`, {
         school_id: school.school_id,
@@ -586,7 +607,14 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
         svgContent: svgResponse.data
       };
 
-      setSelectedRhymes(prev => [...prev, newRhyme]);
+      // Remove any existing rhyme at the same page_index if replacing
+      setSelectedRhymes(prev => {
+        const filtered = prev.filter(r => r.page_index !== pageIndex || 
+          (currentPosition === 'bottom' && r.pages === 1.0) || 
+          (currentPosition === 'top' && r.pages === 0.5 && prev.filter(x => x.page_index === pageIndex).length < 2)
+        );
+        return [...filtered, newRhyme];
+      });
 
       // Refresh available rhymes
       await fetchAvailableRhymes();
