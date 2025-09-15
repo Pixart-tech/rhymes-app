@@ -626,10 +626,8 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       if (currentPosition) {
         setSelectedRhymes(prev => {
           return prev.filter(r => {
-            if (r.page_index === pageIndex && r.position === currentPosition) {
-              return false; // Remove rhyme with same position
-            }
-            return true;
+            // Only remove rhyme with same page_index AND same position
+            return !(r.page_index === pageIndex && r.position === currentPosition);
           });
         });
         
@@ -669,17 +667,34 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       // Add new rhyme to state
       setSelectedRhymes(prev => [...prev, newRhyme]);
 
-      // AUTOMATICALLY CREATE NEW PAGE AFTER SELECTION
+      // Check if page is COMPLETE and needs new page
       setTimeout(() => {
-        const nextPageIndex = getNextAvailablePageIndex();
-        setCurrentPageIndex(nextPageIndex);
+        const currentPageRhymes = [...selectedRhymes.filter(r => r.page_index !== pageIndex), newRhyme];
+        const pageRhymes = currentPageRhymes.filter(r => r.page_index === pageIndex);
         
-        if (rhyme.pages === 1.0) {
-          toast.success(`${rhyme.name} selected! New page created automatically.`);
-        } else {
-          toast.success(`${rhyme.name} selected! New page created for more rhymes.`);
+        let isPageComplete = false;
+        
+        // Page is complete if:
+        // 1. Has 1.0 page rhyme (takes full page)
+        // 2. Has both top (0.5) and bottom (0.5) rhymes
+        const hasFullPageRhyme = pageRhymes.some(r => r.pages === 1.0);
+        const hasTopHalf = pageRhymes.some(r => r.position === 'top' && r.pages === 0.5);
+        const hasBottomHalf = pageRhymes.some(r => r.position === 'bottom' && r.pages === 0.5);
+        
+        if (hasFullPageRhyme) {
+          isPageComplete = true;
+        } else if (hasTopHalf && hasBottomHalf) {
+          isPageComplete = true;
         }
-      }, 800);
+        
+        if (isPageComplete) {
+          const nextPageIndex = getNextAvailablePageIndex();
+          setCurrentPageIndex(nextPageIndex);
+          toast.success(`Page ${pageIndex + 1} completed! Moved to Page ${nextPageIndex + 1}.`);
+        } else {
+          toast.success(`${rhyme.name} added to ${currentPosition} position!`);
+        }
+      }, 500);
 
       // Refresh available rhymes
       await fetchAvailableRhymes();
