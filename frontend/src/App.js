@@ -710,16 +710,17 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
   const handleRemoveRhyme = async (rhyme, position) => {
     try {
+      // Remove from backend using position-specific endpoint
       await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${rhyme.page_index}/${position}`);
       
-      // Remove only the specific rhyme from state
+      // Remove ONLY the specific rhyme with matching page_index AND position from state
       setSelectedRhymes(prev => 
         prev.filter(r => !(r.page_index === rhyme.page_index && r.position === position))
       );
 
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
-      toast.success(`${rhyme.name} removed from ${position} position!`);
+      toast.success(`Rhyme removed from ${position} position only!`);
     } catch (error) {
       console.error('Error removing rhyme:', error);
       toast.error('Failed to remove rhyme');
