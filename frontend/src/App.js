@@ -176,7 +176,7 @@ const GradeSelectionPage = ({ school, onGradeSelect }) => {
   );
 };
 
-// Tree Menu Component  
+// Tree Menu Component
 const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onToggleReusable, hideFullPageRhymes }) => {
   const [expandedGroups, setExpandedGroups] = useState({});
 
@@ -265,9 +265,6 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
                             )}
                           </p>
                         </div>
-                        <div className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                          <div className="w-2 h-2 bg-orange-400 rounded-full"></div>
-                        </div>
                       </div>
                     </button>
                   ))}
@@ -281,264 +278,6 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
   );
 };
 
-// Dual Container Carousel Component
-const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange, onRemoveRhyme, onAddRhyme }) => {
-  // Calculate total pages based on selections
-  const calculateTotalPages = () => {
-    if (selectedRhymes.length === 0) return 1;
-    
-    // Get unique page indices and sort them
-    const uniquePages = [...new Set(selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined))];
-    uniquePages.sort((a, b) => a - b);
-    
-    // Always include current page index in the count
-    if (!uniquePages.includes(currentPageIndex)) {
-      uniquePages.push(currentPageIndex);
-    }
-    
-    // Return the number of pages (highest index + 1, minimum 1)
-    const maxPageIndex = Math.max(...uniquePages, currentPageIndex);
-    return maxPageIndex + 1;
-  };
-
-  const totalPages = calculateTotalPages();
-  
-  // Get rhymes for current page
-  const getCurrentPageRhymes = () => {
-    let pageRhymes = { top: null, bottom: null };
-    
-    // Get all rhymes for the current page
-    const currentPageRhymes = selectedRhymes.filter(rhyme => 
-      rhyme && rhyme.page_index === currentPageIndex
-    );
-    
-    if (currentPageRhymes.length === 0) {
-      return pageRhymes;
-    }
-    
-    // Handle 1.0 page rhymes (takes full page)
-    const fullPageRhyme = currentPageRhymes.find(rhyme => rhyme.pages === 1.0);
-    if (fullPageRhyme) {
-      pageRhymes.top = fullPageRhyme;
-      pageRhymes.bottom = null; // Hide bottom when top is full page
-      return pageRhymes;
-    }
-    
-    // Handle 0.5 page rhymes - assign based on position metadata or order
-    const halfPageRhymes = currentPageRhymes.filter(rhyme => rhyme.pages === 0.5);
-    if (halfPageRhymes.length > 0) {
-      // Sort by position preference if available, otherwise by selection order
-      halfPageRhymes.sort((a, b) => {
-        if (a.position === 'top' && b.position === 'bottom') return -1;
-        if (a.position === 'bottom' && b.position === 'top') return 1;
-        return a.code.localeCompare(b.code);
-      });
-      
-      pageRhymes.top = halfPageRhymes[0];
-      if (halfPageRhymes.length > 1) {
-        pageRhymes.bottom = halfPageRhymes[1];
-      }
-    }
-    
-    return pageRhymes;
-  };
-
-  const currentPageRhymes = getCurrentPageRhymes();
-  const hasTopRhyme = currentPageRhymes.top !== null;
-  const hasBottomRhyme = currentPageRhymes.bottom !== null;
-  const isTopFullPage = hasTopRhyme && currentPageRhymes.top.pages === 1.0;
-  
-  // Show bottom container UNLESS top has a 1.0 page rhyme
-  const showBottomContainer = !isTopFullPage;
-
-  // Handle completely empty state
-  if (selectedRhymes.length === 0 && currentPageIndex === 0) {
-    return (
-      <div className="space-y-6">
-        <h2 className="text-xl font-semibold text-gray-800 text-center">Select Rhymes for this Grade</h2>
-        
-        <div className="grid grid-cols-1 gap-6">
-          {/* Initial Top Container */}
-          <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
-            <CardContent className="p-6 min-h-[300px] flex flex-col items-center justify-center">
-              <Button
-                onClick={() => onAddRhyme('top')}
-                className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-              >
-                <Plus className="w-8 h-8" />
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Initial Bottom Container */}
-          <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
-            <CardContent className="p-6 min-h-[300px] flex flex-col items-center justify-center">
-              <Button
-                onClick={() => onAddRhyme('bottom')}
-                className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-              >
-                <Plus className="w-8 h-8" />
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Navigation Controls - Always show */}
-      <div className="flex items-center justify-between">
-        <Button
-          onClick={() => onPageChange(Math.max(0, currentPageIndex - 1))}
-          disabled={currentPageIndex === 0}
-          variant="outline"
-          size="sm"
-        >
-          <ChevronLeft className="w-4 h-4 mr-1" />
-          Previous
-        </Button>
-        
-        <div className="text-sm text-gray-600 font-medium">
-          Page {currentPageIndex + 1} of {totalPages}
-        </div>
-        
-        <Button
-          onClick={() => onPageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
-          disabled={currentPageIndex >= totalPages - 1}
-          variant="outline"
-          size="sm"
-        >
-          Next
-          <ChevronRight className="w-4 h-4 ml-1" />
-        </Button>
-      </div>
-
-      {/* Dual Container Layout */}
-      <div className="grid grid-cols-1 gap-6">
-        
-        {/* Top Container */}
-        <Card className={`relative bg-white/80 backdrop-blur-sm border-0 shadow-xl transition-all duration-300 ${
-          isTopFullPage ? 'min-h-[600px]' : 'min-h-[300px]'
-        }`}>
-          <CardContent className="p-6 min-h-[300px] flex flex-col">
-            {hasTopRhyme ? (
-              <>
-                <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden mb-4">
-                  <div 
-                    dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
-                    className="w-full h-full flex items-center justify-center"
-                  />
-                </div>
-                <div className="text-center mb-4">
-                  <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
-                  <p className="text-sm text-gray-500">Code: {currentPageRhymes.top.code} • Pages: {currentPageRhymes.top.pages}</p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={() => onAddRhyme('top')}
-                    variant="outline"
-                    className="flex-1 bg-white/50 hover:bg-white"
-                  >
-                    <Replace className="w-4 h-4 mr-2" />
-                    Replace
-                  </Button>
-                  <Button
-                    onClick={() => onRemoveRhyme(currentPageRhymes.top, 'top')}
-                    variant="outline"
-                    className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
-                  >
-                    Remove
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center">
-                  <Button
-                    onClick={() => onAddRhyme('top')}
-                    className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 mb-4"
-                  >
-                    <Plus className="w-8 h-8" />
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Bottom Container (hidden if top is full page) */}
-        {showBottomContainer && (
-          <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
-            <CardContent className="p-6 min-h-[300px] flex flex-col">
-              {hasBottomRhyme ? (
-                <>
-                  <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden mb-4">
-                    <div 
-                      dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
-                      className="w-full h-full flex items-center justify-center"
-                    />
-                  </div>
-                  <div className="text-center mb-4">
-                    <p className="font-semibold text-gray-800">{currentPageRhymes.bottom.name}</p>
-                    <p className="text-sm text-gray-500">Code: {currentPageRhymes.bottom.code} • Pages: {currentPageRhymes.bottom.pages}</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => onAddRhyme('bottom')}
-                      variant="outline"
-                      className="flex-1 bg-white/50 hover:bg-white"
-                    >
-                      <Replace className="w-4 h-4 mr-2" />
-                      Replace
-                    </Button>
-                    <Button
-                      onClick={() => onRemoveRhyme(currentPageRhymes.bottom, 'bottom')}
-                      variant="outline"
-                      className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center">
-                    <Button
-                      onClick={() => onAddRhyme('bottom')}
-                      className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 mb-4"
-                    >
-                      <Plus className="w-8 h-8" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-      </div>
-
-      {/* Page Indicators */}
-      {totalPages > 1 && (
-        <div className="flex justify-center space-x-2">
-          {Array.from({ length: totalPages }, (_, index) => (
-            <button
-              key={index}
-              onClick={() => onPageChange(index)}
-              className={`w-3 h-3 rounded-full transition-colors duration-200 ${
-                index === currentPageIndex 
-                  ? 'bg-orange-400' 
-                  : 'bg-gray-300'
-              }`}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
 // Main Rhyme Selection Interface
 const RhymeSelectionPage = ({ school, grade, onBack }) => {
   const [availableRhymes, setAvailableRhymes] = useState({});
@@ -547,7 +286,7 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [showTreeMenu, setShowTreeMenu] = useState(false);
   const [showReusable, setShowReusable] = useState(false);
-  const [currentPosition, setCurrentPosition] = useState(null); // 'top' or 'bottom'
+  const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -557,12 +296,9 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
   }, []);
 
   const getNextAvailablePageIndex = () => {
-    // Find the highest page index currently used and add 1
     if (selectedRhymes.length === 0) return 0;
-    
     const usedIndices = selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined);
     const maxIndex = Math.max(...usedIndices);
-    
     return maxIndex + 1;
   };
 
@@ -572,7 +308,6 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       setAvailableRhymes(response.data);
     } catch (error) {
       console.error('Error fetching available rhymes:', error);
-      toast.error('Failed to load available rhymes');
     }
   };
 
@@ -590,14 +325,12 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
       const gradeSelections = response.data[grade] || [];
       
-      // Load SVG content for each selected rhyme
       const rhymesWithSvg = await Promise.all(
         gradeSelections.map(async (rhyme) => {
           try {
             const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
             return { ...rhyme, svgContent: svgResponse.data };
           } catch (error) {
-            console.error('Error loading SVG for', rhyme.code);
             return { ...rhyme, svgContent: null };
           }
         })
@@ -612,22 +345,15 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
   };
 
   const handleAddRhyme = (position) => {
-    console.log('handleAddRhyme called with position:', position);
     setCurrentPosition(position);
     setShowTreeMenu(true);
-    setShowReusable(false); // Reset to show available rhymes first
+    setShowReusable(false);
   };
 
   const handleRhymeSelect = async (rhyme) => {
     try {
       const pageIndex = currentPageIndex;
       
-      // Remove existing rhyme at same position first
-      setSelectedRhymes(prev => 
-        prev.filter(r => !(r.page_index === pageIndex && r.position === currentPosition))
-      );
-      
-      // Add to backend
       await axios.post(`${API}/rhymes/select`, {
         school_id: school.school_id,
         grade: grade,
@@ -635,10 +361,8 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
         rhyme_code: rhyme.code
       });
 
-      // Get SVG
       const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
       
-      // Add to state
       const newRhyme = {
         page_index: pageIndex,
         code: rhyme.code,
@@ -650,26 +374,18 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
       setSelectedRhymes(prev => [...prev, newRhyme]);
 
-      // Check if page complete and create new page
+      // Auto create new page after selection
       setTimeout(() => {
-        const pageRhymes = [...selectedRhymes.filter(r => r.page_index !== pageIndex), newRhyme].filter(r => r.page_index === pageIndex);
-        
-        const hasFullPage = pageRhymes.some(r => r.pages === 1.0);
-        const hasTop = pageRhymes.some(r => r.position === 'top' && r.pages === 0.5);
-        const hasBottom = pageRhymes.some(r => r.position === 'bottom' && r.pages === 0.5);
-        
-        if (hasFullPage || (hasTop && hasBottom)) {
-          const nextPage = getNextAvailablePageIndex();
-          setCurrentPageIndex(nextPage);
-        }
-      }, 300);
+        const nextPage = getNextAvailablePageIndex();
+        setCurrentPageIndex(nextPage);
+      }, 500);
 
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
       setShowTreeMenu(false);
       setCurrentPosition(null);
     } catch (error) {
-      console.error('Select error:', error);
+      console.error('Error selecting rhyme:', error);
     }
   };
 
@@ -696,6 +412,53 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     setShowReusable(!showReusable);
   };
 
+  // Calculate total pages
+  const calculateTotalPages = () => {
+    if (selectedRhymes.length === 0) return 1;
+    const uniquePages = [...new Set(selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined))];
+    if (!uniquePages.includes(currentPageIndex)) {
+      uniquePages.push(currentPageIndex);
+    }
+    const maxPageIndex = Math.max(...uniquePages, currentPageIndex);
+    return maxPageIndex + 1;
+  };
+
+  // Get rhymes for current page
+  const getCurrentPageRhymes = () => {
+    let pageRhymes = { top: null, bottom: null };
+    
+    const currentPageRhymes = selectedRhymes.filter(rhyme => 
+      rhyme && rhyme.page_index === currentPageIndex
+    );
+    
+    if (currentPageRhymes.length === 0) {
+      return pageRhymes;
+    }
+    
+    const fullPageRhyme = currentPageRhymes.find(rhyme => rhyme.pages === 1.0);
+    if (fullPageRhyme) {
+      pageRhymes.top = fullPageRhyme;
+      pageRhymes.bottom = null;
+      return pageRhymes;
+    }
+    
+    const halfPageRhymes = currentPageRhymes.filter(rhyme => rhyme.pages === 0.5);
+    if (halfPageRhymes.length > 0) {
+      halfPageRhymes.sort((a, b) => {
+        if (a.position === 'top' && b.position === 'bottom') return -1;
+        if (a.position === 'bottom' && b.position === 'top') return 1;
+        return a.code.localeCompare(b.code);
+      });
+      
+      pageRhymes.top = halfPageRhymes[0];
+      if (halfPageRhymes.length > 1) {
+        pageRhymes.bottom = halfPageRhymes[1];
+      }
+    }
+    
+    return pageRhymes;
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
@@ -706,6 +469,13 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       </div>
     );
   }
+
+  const totalPages = calculateTotalPages();
+  const currentPageRhymes = getCurrentPageRhymes();
+  const hasTopRhyme = currentPageRhymes.top !== null;
+  const hasBottomRhyme = currentPageRhymes.bottom !== null;
+  const isTopFullPage = hasTopRhyme && currentPageRhymes.top.pages === 1.0;
+  const showBottomContainer = !isTopFullPage;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50">
@@ -731,7 +501,7 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
         <div className="max-w-7xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[calc(100vh-200px)]">
             
-            {/* Tree Menu - Left Side (only shown when showTreeMenu is true) */}
+            {/* Tree Menu */}
             <div className={`lg:col-span-1 transition-all duration-300 ${showTreeMenu ? 'block' : 'hidden'}`}>
               <div className="mb-4">
                 <Button 
@@ -753,16 +523,153 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
               />
             </div>
 
-            {/* Right Side - Dual Container Carousel */}
+            {/* Dual Container Interface */}
             <div className={`${showTreeMenu ? 'lg:col-span-3' : 'lg:col-span-4'} flex flex-col items-center justify-center`}>
               <div className="w-full max-w-2xl">
-                <DualContainerCarousel
-                  selectedRhymes={selectedRhymes}
-                  currentPageIndex={currentPageIndex}
-                  onPageChange={handlePageChange}
-                  onRemoveRhyme={handleRemoveRhyme}
-                  onAddRhyme={handleAddRhyme}
-                />
+
+                {/* Navigation Controls */}
+                <div className="flex items-center justify-between mb-6">
+                  <Button
+                    onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
+                    disabled={currentPageIndex === 0}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <ChevronLeft className="w-4 h-4 mr-1" />
+                    Previous
+                  </Button>
+                  
+                  <div className="text-sm text-gray-600 font-medium">
+                    Page {currentPageIndex + 1} of {totalPages}
+                  </div>
+                  
+                  <Button
+                    onClick={() => handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
+                    disabled={currentPageIndex >= totalPages - 1}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Next
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
+
+                {/* Dual Container Layout */}
+                <div className="grid grid-cols-1 gap-6">
+                  
+                  {/* Top Container */}
+                  <Card className={`relative bg-white/80 backdrop-blur-sm border-0 shadow-xl transition-all duration-300 ${
+                    isTopFullPage ? 'min-h-[600px]' : 'min-h-[300px]'
+                  }`}>
+                    <CardContent className="p-6 min-h-[300px] flex flex-col">
+                      {hasTopRhyme ? (
+                        <>
+                          <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden mb-4">
+                            <div 
+                              dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
+                              className="w-full h-full flex items-center justify-center"
+                            />
+                          </div>
+                          <div className="text-center mb-4">
+                            <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
+                            <p className="text-sm text-gray-500">Code: {currentPageRhymes.top.code} • Pages: {currentPageRhymes.top.pages}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={() => handleAddRhyme('top')}
+                              variant="outline"
+                              className="flex-1 bg-white/50 hover:bg-white"
+                            >
+                              <Replace className="w-4 h-4 mr-2" />
+                              Replace
+                            </Button>
+                            <Button
+                              onClick={() => handleRemoveRhyme(currentPageRhymes.top, 'top')}
+                              variant="outline"
+                              className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex-1 flex items-center justify-center">
+                          <Button
+                            onClick={() => handleAddRhyme('top')}
+                            className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                          >
+                            <Plus className="w-8 h-8" />
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Bottom Container */}
+                  {showBottomContainer && (
+                    <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
+                      <CardContent className="p-6 min-h-[300px] flex flex-col">
+                        {hasBottomRhyme ? (
+                          <>
+                            <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden mb-4">
+                              <div 
+                                dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
+                                className="w-full h-full flex items-center justify-center"
+                              />
+                            </div>
+                            <div className="text-center mb-4">
+                              <p className="font-semibold text-gray-800">{currentPageRhymes.bottom.name}</p>
+                              <p className="text-sm text-gray-500">Code: {currentPageRhymes.bottom.code} • Pages: {currentPageRhymes.bottom.pages}</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                onClick={() => handleAddRhyme('bottom')}
+                                variant="outline"
+                                className="flex-1 bg-white/50 hover:bg-white"
+                              >
+                                <Replace className="w-4 h-4 mr-2" />
+                                Replace
+                              </Button>
+                              <Button
+                                onClick={() => handleRemoveRhyme(currentPageRhymes.bottom, 'bottom')}
+                                variant="outline"
+                                className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex-1 flex items-center justify-center">
+                            <Button
+                              onClick={() => handleAddRhyme('bottom')}
+                              className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                            >
+                              <Plus className="w-8 h-8" />
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+
+                {/* Page Indicators */}
+                {totalPages > 1 && (
+                  <div className="flex justify-center space-x-2 mt-6">
+                    {Array.from({ length: totalPages }, (_, index) => (
+                      <button
+                        key={index}
+                        onClick={() => handlePageChange(index)}
+                        className={`w-3 h-3 rounded-full transition-colors duration-200 ${
+                          index === currentPageIndex 
+                            ? 'bg-orange-400' 
+                            : 'bg-gray-300'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
