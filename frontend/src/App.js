@@ -143,7 +143,7 @@ const GradeSelectionPage = ({ school, onGradeSelect }) => {
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">Welcome, {school.school_name}!</h1>
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
           <p className="text-gray-600">School ID: {school.school_id}</p>
         </div>
 
