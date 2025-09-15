@@ -739,8 +739,10 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     setCurrentPageIndex(newPageIndex);
   };
 
-  const handleToggleReusable = () => {
-    setShowReusable(!showReusable);
+  const handleAddNewPage = () => {
+    const nextPageIndex = getNextAvailablePageIndex();
+    setCurrentPageIndex(nextPageIndex);
+    toast.success('New page created! You can add more rhymes.');
   };
 
   if (loading) {
