@@ -521,19 +521,6 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
         )}
       </div>
 
-      {/* Add New Page Button - when both containers are filled */}
-      {hasTopRhyme && (showBottomContainer ? hasBottomRhyme : true) && (
-        <div className="flex justify-center">
-          <Button
-            onClick={onAddNewPage}
-            className="bg-gradient-to-r from-green-400 to-blue-400 hover:from-green-500 hover:to-blue-500 text-white font-semibold px-6 py-2 rounded-xl"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add New Page
-          </Button>
-        </div>
-      )}
-
       {/* Page Indicators */}
       {totalPages > 1 && (
         <div className="flex justify-center space-x-2">
