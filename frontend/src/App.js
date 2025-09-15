@@ -739,6 +739,10 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     setCurrentPageIndex(newPageIndex);
   };
 
+  const handleToggleReusable = () => {
+    setShowReusable(!showReusable);
+  };
+
   const handleAddNewPage = () => {
     const nextPageIndex = getNextAvailablePageIndex();
     setCurrentPageIndex(nextPageIndex);
