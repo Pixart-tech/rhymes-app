@@ -629,8 +629,8 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       if (currentPosition === 'top') {
         // TOP POSITION LOGIC
         if (rhyme.pages === 1.0) {
-          // 1.0 page rhyme - create NEW page
-          pageIndex = getNextAvailablePageIndex();
+          // 1.0 page rhyme - ALWAYS create NEW page for future selections
+          pageIndex = currentPageIndex;
           shouldCreateNewPage = true;
         } else {
           // 0.5 page rhyme - use current page
@@ -686,9 +686,13 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       // Add new rhyme to state
       setSelectedRhymes(prev => [...prev, newRhyme]);
 
-      // If we created a new page, navigate to it
-      if (shouldCreateNewPage) {
-        setCurrentPageIndex(pageIndex);
+      // If 1.0 page rhyme selected, create new empty page for next selections
+      if (shouldCreateNewPage && rhyme.pages === 1.0) {
+        const nextPageIndex = getNextAvailablePageIndex();
+        setCurrentPageIndex(nextPageIndex); // Navigate to new empty page
+        toast.success(`Rhyme "${rhyme.name}" selected! New page created for next selections.`);
+      } else {
+        toast.success(`Rhyme "${rhyme.name}" selected for ${currentPosition} position!`);
       }
 
       // Refresh available rhymes
@@ -697,7 +701,6 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
       setShowTreeMenu(false);
       setCurrentPosition(null);
-      toast.success(`Rhyme "${rhyme.name}" selected for ${currentPosition} position!`);
     } catch (error) {
       console.error('Error selecting rhyme:', error);
       toast.error('Failed to select rhyme');
