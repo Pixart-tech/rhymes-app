@@ -242,24 +242,31 @@ async def remove_specific_rhyme_selection(school_id: str, grade: str, page_index
     if not selections:
         raise HTTPException(status_code=404, detail="No selections found for this page")
     
-    # Sort selections by creation time or code to determine position
-    selections.sort(key=lambda x: x.get("timestamp", datetime.utcnow()))
-    
-    # Determine which selection to remove based on position
+    # Find and remove the specific position rhyme
     selection_to_remove = None
-    if position == "top" and len(selections) >= 1:
-        selection_to_remove = selections[0]  # First selection is top
-    elif position == "bottom" and len(selections) >= 2:
-        selection_to_remove = selections[1]  # Second selection is bottom
-    elif position == "bottom" and len(selections) == 1:
-        # If only one selection and it's a 0.5 page rhyme, it could be bottom
-        if selections[0]["pages"] == 0.5:
-            selection_to_remove = selections[0]
+    for selection in selections:
+        # Use any available identifier to match position logic
+        if position == "top":
+            # Remove first rhyme found or any 1.0 page rhyme
+            if selection["pages"] == 1.0 or (selection["pages"] == 0.5 and not selection_to_remove):
+                selection_to_remove = selection
+                break
+        elif position == "bottom":
+            # Remove second 0.5 page rhyme or single 0.5 if it's the only one
+            if selection["pages"] == 0.5:
+                if len([s for s in selections if s["pages"] == 0.5]) > 1:
+                    # Find second 0.5 page rhyme
+                    half_page_selections = [s for s in selections if s["pages"] == 0.5]
+                    selection_to_remove = half_page_selections[1] if len(half_page_selections) > 1 else half_page_selections[0]
+                else:
+                    selection_to_remove = selection
+                break
     
     if not selection_to_remove:
-        raise HTTPException(status_code=404, detail=f"No {position} selection found")
+        # If no specific match, remove any selection from this page for the position
+        selection_to_remove = selections[0]
     
-    # Remove the specific selection
+    # Remove the selection
     result = await db.rhyme_selections.delete_one({
         "_id": selection_to_remove["_id"]
     })
