@@ -611,13 +611,13 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
   };
 
   const getNextAvailablePageIndex = () => {
-    // Find the next available page index
-    for (let i = 0; i < 25; i++) {
-      if (!selectedRhymes.find(rhyme => rhyme && rhyme.page_index === i)) {
-        return i;
-      }
-    }
-    return selectedRhymes.length;
+    // Find the highest page index currently used and add 1
+    if (selectedRhymes.length === 0) return 0;
+    
+    const usedIndices = selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined);
+    const maxIndex = Math.max(...usedIndices);
+    
+    return maxIndex + 1;
   };
 
   const handleRhymeSelect = async (rhyme) => {
