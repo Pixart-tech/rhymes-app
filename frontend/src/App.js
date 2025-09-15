@@ -346,51 +346,81 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
   
   // Show bottom container UNLESS top has a 1.0 page rhyme
   const showBottomContainer = !isTopFullPage;
-  
-  console.log('DEBUG:', {
-    hasTopRhyme,
-    hasBottomRhyme, 
-    isTopFullPage,
-    showBottomContainer,
-    topRhyme: currentPageRhymes.top,
-    bottomRhyme: currentPageRhymes.bottom
-  });
+
+  // Handle completely empty state
+  if (selectedRhymes.length === 0) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-xl font-semibold text-gray-800 text-center">Select Rhymes for this Grade</h2>
+        
+        <div className="grid grid-cols-1 gap-6">
+          {/* Initial Top Container */}
+          <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
+            <CardContent className="p-6 min-h-[300px] flex flex-col items-center justify-center">
+              <Button
+                onClick={() => onAddRhyme('top')}
+                className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+              >
+                <Plus className="w-8 h-8" />
+              </Button>
+              <p className="text-gray-600 text-sm mt-4">Top Position</p>
+            </CardContent>
+          </Card>
+
+          {/* Initial Bottom Container */}
+          <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
+            <CardContent className="p-6 min-h-[300px] flex flex-col items-center justify-center">
+              <Button
+                onClick={() => onAddRhyme('bottom')}
+                className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+              >
+                <Plus className="w-8 h-8" />
+              </Button>
+              <p className="text-gray-600 text-sm mt-4">Bottom Position (0.5 Pages Only)</p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Navigation Controls */}
-      <div className="flex items-center justify-between">
-        <Button
-          onClick={() => onPageChange(Math.max(0, currentPageIndex - 1))}
-          disabled={currentPageIndex === 0}
-          variant="outline"
-          size="sm"
-        >
-          <ChevronLeft className="w-4 h-4 mr-1" />
-          Previous
-        </Button>
-        
-        <div className="text-sm text-gray-600">
-          Page {currentPageIndex + 1} of {totalPages}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <Button
+            onClick={() => onPageChange(Math.max(0, currentPageIndex - 1))}
+            disabled={currentPageIndex === 0}
+            variant="outline"
+            size="sm"
+          >
+            <ChevronLeft className="w-4 h-4 mr-1" />
+            Previous
+          </Button>
+          
+          <div className="text-sm text-gray-600">
+            Page {currentPageIndex + 1} of {totalPages}
+          </div>
+          
+          <Button
+            onClick={() => onPageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
+            disabled={currentPageIndex >= totalPages - 1}
+            variant="outline"
+            size="sm"
+          >
+            Next
+            <ChevronRight className="w-4 h-4 ml-1" />
+          </Button>
         </div>
-        
-        <Button
-          onClick={() => onPageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
-          disabled={currentPageIndex >= totalPages - 1}
-          variant="outline"
-          size="sm"
-        >
-          Next
-          <ChevronRight className="w-4 h-4 ml-1" />
-        </Button>
-      </div>
+      )}
 
       {/* Dual Container Layout */}
       <div className="grid grid-cols-1 gap-6">
         
         {/* Top Container */}
         <Card className={`relative bg-white/80 backdrop-blur-sm border-0 shadow-xl transition-all duration-300 ${
-          isTopFullPage ? 'row-span-2' : ''
+          isTopFullPage ? 'min-h-[600px]' : 'min-h-[300px]'
         }`}>
           <CardContent className="p-6 min-h-[300px] flex flex-col">
             {hasTopRhyme ? (
@@ -425,12 +455,15 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center">
-                <Button
-                  onClick={() => onAddRhyme('top')}
-                  className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-                >
-                  <Plus className="w-8 h-8" />
-                </Button>
+                <div className="text-center">
+                  <Button
+                    onClick={() => onAddRhyme('top')}
+                    className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 mb-4"
+                  >
+                    <Plus className="w-8 h-8" />
+                  </Button>
+                  <p className="text-gray-600 text-sm">Top Position</p>
+                </div>
               </div>
             )}
           </CardContent>
@@ -472,12 +505,15 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
                 </>
               ) : (
                 <div className="flex-1 flex items-center justify-center">
-                  <Button
-                    onClick={() => onAddRhyme('bottom')}
-                    className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-                  >
-                    <Plus className="w-8 h-8" />
-                  </Button>
+                  <div className="text-center">
+                    <Button
+                      onClick={() => onAddRhyme('bottom')}
+                      className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 mb-4"
+                    >
+                      <Plus className="w-8 h-8" />
+                    </Button>
+                    <p className="text-gray-600 text-sm">Bottom Position (0.5 Pages Only)</p>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -486,19 +522,21 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
       </div>
 
       {/* Page Indicators */}
-      <div className="flex justify-center space-x-2">
-        {Array.from({ length: totalPages }, (_, index) => (
-          <button
-            key={index}
-            onClick={() => onPageChange(index)}
-            className={`w-3 h-3 rounded-full transition-colors duration-200 ${
-              index === currentPageIndex 
-                ? 'bg-orange-400' 
-                : 'bg-gray-300'
-            }`}
-          />
-        ))}
-      </div>
+      {totalPages > 1 && (
+        <div className="flex justify-center space-x-2">
+          {Array.from({ length: totalPages }, (_, index) => (
+            <button
+              key={index}
+              onClick={() => onPageChange(index)}
+              className={`w-3 h-3 rounded-full transition-colors duration-200 ${
+                index === currentPageIndex 
+                  ? 'bg-orange-400' 
+                  : 'bg-gray-300'
+              }`}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 };
