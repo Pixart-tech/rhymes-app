@@ -463,6 +463,19 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
                     <Plus className="w-8 h-8" />
                   </Button>
                   <p className="text-gray-600 text-sm">Top Position</p>
+                  {/* Show Replace option immediately after clicking + */}
+                  {showTreeMenu && currentPosition === 'top' && (
+                    <div className="mt-4">
+                      <Button
+                        onClick={() => {setShowTreeMenu(false); setCurrentPosition(null);}}
+                        variant="outline"
+                        size="sm"
+                        className="bg-white/70 hover:bg-white"
+                      >
+                        Cancel Selection
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
