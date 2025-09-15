@@ -288,23 +288,31 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
 const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange, onRemovePage, onAddRhyme }) => {
   // Calculate total pages based on selections
   const calculateTotalPages = () => {
-    let totalRhymes = selectedRhymes.filter(rhyme => rhyme !== null && rhyme !== undefined).length;
-    if (totalRhymes === 0) return 1;
+    if (selectedRhymes.length === 0) return 1;
     
-    // Count 1.0 page rhymes (each takes full page) and 0.5 page rhymes (2 per page)
-    let fullPageRhymes = 0;
-    let halfPageRhymes = 0;
-    
+    // Group rhymes by page_index
+    const pageGroups = {};
     selectedRhymes.forEach(rhyme => {
-      if (rhyme && rhyme.pages === 1.0) {
-        fullPageRhymes++;
-      } else if (rhyme && rhyme.pages === 0.5) {
-        halfPageRhymes++;
+      if (rhyme) {
+        if (!pageGroups[rhyme.page_index]) {
+          pageGroups[rhyme.page_index] = [];
+        }
+        pageGroups[rhyme.page_index].push(rhyme);
       }
     });
     
-    // Full page rhymes take 1 page each, half page rhymes take 1 page per 2 rhymes
-    return fullPageRhymes + Math.ceil(halfPageRhymes / 2);
+    // Count actual pages needed
+    let totalPages = 0;
+    Object.values(pageGroups).forEach(rhymes => {
+      const hasFullPage = rhymes.some(r => r.pages === 1.0);
+      if (hasFullPage) {
+        totalPages += 1; // Full page rhyme takes one page
+      } else {
+        totalPages += 1; // Half page rhymes (up to 2 per page) take one page
+      }
+    });
+    
+    return Math.max(totalPages, 1);
   };
 
   const totalPages = calculateTotalPages();
