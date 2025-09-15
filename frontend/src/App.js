@@ -290,29 +290,11 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
   const calculateTotalPages = () => {
     if (selectedRhymes.length === 0) return 1;
     
-    // Group rhymes by page_index
-    const pageGroups = {};
-    selectedRhymes.forEach(rhyme => {
-      if (rhyme) {
-        if (!pageGroups[rhyme.page_index]) {
-          pageGroups[rhyme.page_index] = [];
-        }
-        pageGroups[rhyme.page_index].push(rhyme);
-      }
-    });
+    // Get unique page indices
+    const uniquePages = [...new Set(selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined))];
     
-    // Count actual pages needed
-    let totalPages = 0;
-    Object.values(pageGroups).forEach(rhymes => {
-      const hasFullPage = rhymes.some(r => r.pages === 1.0);
-      if (hasFullPage) {
-        totalPages += 1; // Full page rhyme takes one page
-      } else {
-        totalPages += 1; // Half page rhymes (up to 2 per page) take one page
-      }
-    });
-    
-    return Math.max(totalPages, 1);
+    // Return the number of unique pages, minimum 1
+    return Math.max(uniquePages.length, 1);
   };
 
   const totalPages = calculateTotalPages();
