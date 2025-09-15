@@ -629,47 +629,42 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       if (currentPosition === 'top') {
         // TOP POSITION LOGIC
         if (rhyme.pages === 1.0) {
-          // 1.0 page rhyme - fills current page, auto-create new page
+          // 1.0 page rhyme - fills current page completely
           pageIndex = currentPageIndex;
-          shouldCreateNewPage = true;
+          shouldCreateNewPage = true; // Will create new page after this selection
         } else {
           // 0.5 page rhyme - use current page
           pageIndex = currentPageIndex;
         }
       } else if (currentPosition === 'bottom') {
-        // BOTTOM POSITION LOGIC - use current page, check if this completes the page
+        // BOTTOM POSITION LOGIC - use current page
         pageIndex = currentPageIndex;
         
-        // Check if top already has a 0.5 page rhyme - if so, this will complete the page
-        const currentPageRhymes = selectedRhymes.filter(r => r && r.page_index === pageIndex);
-        const hasTopHalfPage = currentPageRhymes.some(r => r.pages === 0.5);
-        
-        if (hasTopHalfPage && rhyme.pages === 0.5) {
-          // This bottom selection completes a page with two 0.5 page rhymes
-          shouldCreateNewPage = true;
-        }
+        // This bottom selection will complete the page (since top already has 0.5 page rhyme)
+        shouldCreateNewPage = true;
       } else {
         // Fallback
-        pageIndex = getNextAvailablePageIndex();
+        pageIndex = currentPageIndex;
       }
       
       // Remove existing rhyme at same position if replacing
       if (currentPosition) {
-        const currentPageRhymes = selectedRhymes.filter(r => r && r.page_index === pageIndex);
-        
-        if (currentPosition === 'top') {
-          // Remove existing top rhyme at this page
-          setSelectedRhymes(prev => 
-            prev.filter(r => !(r.page_index === pageIndex && 
-              (prev.filter(x => x.page_index === pageIndex).indexOf(r) === 0)))
-          );
-        } else if (currentPosition === 'bottom') {
-          // Remove existing bottom rhyme at this page
-          setSelectedRhymes(prev => 
-            prev.filter(r => !(r.page_index === pageIndex && 
-              (prev.filter(x => x.page_index === pageIndex).indexOf(r) === 1)))
-          );
-        }
+        setSelectedRhymes(prev => {
+          return prev.filter(r => {
+            if (r.page_index === pageIndex) {
+              if (currentPosition === 'top') {
+                // Remove existing top rhyme at this page
+                const pageRhymes = prev.filter(x => x.page_index === pageIndex);
+                return pageRhymes.indexOf(r) !== 0;
+              } else if (currentPosition === 'bottom') {
+                // Remove existing bottom rhyme at this page
+                const pageRhymes = prev.filter(x => x.page_index === pageIndex);
+                return pageRhymes.indexOf(r) !== 1;
+              }
+            }
+            return true;
+          });
+        });
       }
       
       await axios.post(`${API}/rhymes/select`, {
@@ -689,22 +684,25 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
         name: rhyme.name,
         pages: rhyme.pages,
         svgContent: svgResponse.data,
-        position: currentPosition // Track which position this was selected for
+        position: currentPosition
       };
 
       // Add new rhyme to state
       setSelectedRhymes(prev => [...prev, newRhyme]);
 
-      // Automatically create new page when page is filled
+      // Create new page when current page is completed
       if (shouldCreateNewPage) {
-        const nextPageIndex = getNextAvailablePageIndex();
-        setCurrentPageIndex(nextPageIndex); // Navigate to new empty page
-        
-        if (rhyme.pages === 1.0) {
-          toast.success(`Rhyme "${rhyme.name}" selected! Page completed - new empty page created.`);
-        } else {
-          toast.success(`Page completed with two rhymes! New empty page created automatically.`);
-        }
+        // Add a small delay to ensure state is updated, then create new page
+        setTimeout(() => {
+          const nextPageIndex = getNextAvailablePageIndex();
+          setCurrentPageIndex(nextPageIndex);
+          
+          if (rhyme.pages === 1.0) {
+            toast.success(`Page ${pageIndex + 1} completed with 1.0 page rhyme! Moving to new Page ${nextPageIndex + 1}.`);
+          } else {
+            toast.success(`Page ${pageIndex + 1} completed with two rhymes! Moving to new Page ${nextPageIndex + 1}.`);
+          }
+        }, 500);
       } else {
         toast.success(`Rhyme "${rhyme.name}" selected for ${currentPosition} position!`);
       }
