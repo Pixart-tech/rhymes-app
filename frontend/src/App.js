@@ -393,34 +393,32 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
 
   return (
     <div className="space-y-6">
-      {/* Navigation Controls */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <Button
-            onClick={() => onPageChange(Math.max(0, currentPageIndex - 1))}
-            disabled={currentPageIndex === 0}
-            variant="outline"
-            size="sm"
-          >
-            <ChevronLeft className="w-4 h-4 mr-1" />
-            Previous
-          </Button>
-          
-          <div className="text-sm text-gray-600">
-            Page {currentPageIndex + 1} of {totalPages}
-          </div>
-          
-          <Button
-            onClick={() => onPageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
-            disabled={currentPageIndex >= totalPages - 1}
-            variant="outline"
-            size="sm"
-          >
-            Next
-            <ChevronRight className="w-4 h-4 ml-1" />
-          </Button>
+      {/* Navigation Controls - Always show when more than 1 page */}
+      <div className="flex items-center justify-between">
+        <Button
+          onClick={() => onPageChange(Math.max(0, currentPageIndex - 1))}
+          disabled={currentPageIndex === 0}
+          variant="outline"
+          size="sm"
+        >
+          <ChevronLeft className="w-4 h-4 mr-1" />
+          Previous
+        </Button>
+        
+        <div className="text-sm text-gray-600 font-medium">
+          Page {currentPageIndex + 1} of {totalPages}
         </div>
-      )}
+        
+        <Button
+          onClick={() => onPageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
+          disabled={currentPageIndex >= totalPages - 1}
+          variant="outline"
+          size="sm"
+        >
+          Next
+          <ChevronRight className="w-4 h-4 ml-1" />
+        </Button>
+      </div>
 
       {/* Dual Container Layout */}
       <div className="grid grid-cols-1 gap-6">
