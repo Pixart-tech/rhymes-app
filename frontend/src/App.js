@@ -290,11 +290,18 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
   const calculateTotalPages = () => {
     if (selectedRhymes.length === 0) return 1;
     
-    // Get unique page indices
+    // Get unique page indices and sort them
     const uniquePages = [...new Set(selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined))];
+    uniquePages.sort((a, b) => a - b);
     
-    // Return the number of unique pages, minimum 1
-    return Math.max(uniquePages.length, 1);
+    // Always include current page index in the count
+    if (!uniquePages.includes(currentPageIndex)) {
+      uniquePages.push(currentPageIndex);
+    }
+    
+    // Return the number of pages (highest index + 1, minimum 1)
+    const maxPageIndex = Math.max(...uniquePages, currentPageIndex);
+    return maxPageIndex + 1;
   };
 
   const totalPages = calculateTotalPages();
