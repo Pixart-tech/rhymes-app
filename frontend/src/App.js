@@ -675,19 +675,16 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
   const handleRemoveRhyme = async (rhyme, position) => {
     try {
-      // Call backend to remove
       await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${rhyme.page_index}/${position}`);
       
-      // Remove from frontend state immediately
       setSelectedRhymes(prev => 
-        prev.filter(r => !(r.code === rhyme.code && r.page_index === rhyme.page_index && r.position === position))
+        prev.filter(r => !(r.page_index === rhyme.page_index && r.position === position))
       );
 
-      // Refresh data
-      fetchAvailableRhymes();
-      fetchReusableRhymes();
+      await fetchAvailableRhymes();
+      await fetchReusableRhymes();
     } catch (error) {
-      console.error('Remove error:', error);
+      console.error('Error removing rhyme:', error);
     }
   };
 
