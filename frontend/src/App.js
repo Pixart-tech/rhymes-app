@@ -285,7 +285,7 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
 };
 
 // Dual Container Carousel Component
-const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange, onRemovePage, onAddRhyme, onAddNewPage, showTreeMenu, currentPosition, onCancelSelection }) => {
+const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange, onRemovePage, onAddRhyme, onAddNewPage }) => {
   // Calculate total pages based on selections
   const calculateTotalPages = () => {
     if (selectedRhymes.length === 0) return 1;
