@@ -330,9 +330,6 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
       return pageRhymes;
     }
     
-    // Sort by selection order (you can modify this logic as needed)
-    currentPageRhymes.sort((a, b) => a.code.localeCompare(b.code));
-    
     // Handle 1.0 page rhymes (takes full page)
     const fullPageRhyme = currentPageRhymes.find(rhyme => rhyme.pages === 1.0);
     if (fullPageRhyme) {
@@ -341,9 +338,16 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
       return pageRhymes;
     }
     
-    // Handle 0.5 page rhymes (can have up to 2 per page)
+    // Handle 0.5 page rhymes - assign based on position metadata or order
     const halfPageRhymes = currentPageRhymes.filter(rhyme => rhyme.pages === 0.5);
     if (halfPageRhymes.length > 0) {
+      // Sort by position preference if available, otherwise by code
+      halfPageRhymes.sort((a, b) => {
+        if (a.position === 'top' && b.position === 'bottom') return -1;
+        if (a.position === 'bottom' && b.position === 'top') return 1;
+        return a.code.localeCompare(b.code);
+      });
+      
       pageRhymes.top = halfPageRhymes[0];
       if (halfPageRhymes.length > 1) {
         pageRhymes.bottom = halfPageRhymes[1];
