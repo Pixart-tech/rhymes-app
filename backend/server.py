@@ -229,6 +229,46 @@ async def remove_rhyme_selection(school_id: str, grade: str, page_index: int):
     
     return {"message": "Selection removed successfully"}
 
+@api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}/{position}")
+async def remove_specific_rhyme_selection(school_id: str, grade: str, page_index: int, position: str):
+    """Remove a specific rhyme selection for a position (top/bottom)"""
+    # Get all selections for this page
+    selections = await db.rhyme_selections.find({
+        "school_id": school_id,
+        "grade": grade,
+        "page_index": page_index
+    }).to_list(None)
+    
+    if not selections:
+        raise HTTPException(status_code=404, detail="No selections found for this page")
+    
+    # Sort selections by creation time or code to determine position
+    selections.sort(key=lambda x: x.get("timestamp", datetime.utcnow()))
+    
+    # Determine which selection to remove based on position
+    selection_to_remove = None
+    if position == "top" and len(selections) >= 1:
+        selection_to_remove = selections[0]  # First selection is top
+    elif position == "bottom" and len(selections) >= 2:
+        selection_to_remove = selections[1]  # Second selection is bottom
+    elif position == "bottom" and len(selections) == 1:
+        # If only one selection and it's a 0.5 page rhyme, it could be bottom
+        if selections[0]["pages"] == 0.5:
+            selection_to_remove = selections[0]
+    
+    if not selection_to_remove:
+        raise HTTPException(status_code=404, detail=f"No {position} selection found")
+    
+    # Remove the specific selection
+    result = await db.rhyme_selections.delete_one({
+        "_id": selection_to_remove["_id"]
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Selection not found")
+    
+    return {"message": f"{position.capitalize()} selection removed successfully"}
+
 @api_router.get("/rhymes/status/{school_id}")
 async def get_grade_status(school_id: str):
     """Get selection status for all grades"""
