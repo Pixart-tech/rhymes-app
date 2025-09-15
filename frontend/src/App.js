@@ -436,7 +436,7 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
         </Card>
 
         {/* Bottom Container (hidden if top is full page) */}
-        {!isTopFullPage && (
+        {showBottomContainer && (
           <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
             <CardContent className="p-6 min-h-[300px] flex flex-col">
               {hasBottomRhyme ? (
