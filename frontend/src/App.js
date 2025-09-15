@@ -349,6 +349,11 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
   const hasTopRhyme = currentPageRhymes.top !== null;
   const hasBottomRhyme = currentPageRhymes.bottom !== null;
   const isTopFullPage = hasTopRhyme && currentPageRhymes.top.pages === 1.0;
+  
+  // Show bottom container if:
+  // 1. Top is not a full page rhyme (1.0), OR
+  // 2. There's no top rhyme at all
+  const showBottomContainer = !isTopFullPage;
 
   return (
     <div className="space-y-6">
