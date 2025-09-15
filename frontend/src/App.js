@@ -176,7 +176,7 @@ const GradeSelectionPage = ({ school, onGradeSelect }) => {
   );
 };
 
-// Tree Menu Component
+// Tree Menu Component  
 const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onToggleReusable, hideFullPageRhymes }) => {
   const [expandedGroups, setExpandedGroups] = useState({});
 
@@ -223,9 +223,6 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
             {showReusable ? 'Show Available' : 'Show Reusable'}
           </Button>
         </div>
-        {hideFullPageRhymes && (
-          <p className="text-xs text-orange-600 mt-1">Only 0.5 page rhymes available for bottom position</p>
-        )}
       </div>
       
       <div className="p-2">
@@ -285,7 +282,7 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
 };
 
 // Dual Container Carousel Component
-const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange, onRemovePage, onAddRhyme }) => {
+const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange, onRemoveRhyme, onAddRhyme }) => {
   // Calculate total pages based on selections
   const calculateTotalPages = () => {
     if (selectedRhymes.length === 0) return 1;
@@ -330,7 +327,7 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
     // Handle 0.5 page rhymes - assign based on position metadata or order
     const halfPageRhymes = currentPageRhymes.filter(rhyme => rhyme.pages === 0.5);
     if (halfPageRhymes.length > 0) {
-      // Sort by position preference if available, otherwise by code
+      // Sort by position preference if available, otherwise by selection order
       halfPageRhymes.sort((a, b) => {
         if (a.position === 'top' && b.position === 'bottom') return -1;
         if (a.position === 'bottom' && b.position === 'top') return 1;
@@ -355,7 +352,7 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
   const showBottomContainer = !isTopFullPage;
 
   // Handle completely empty state
-  if (selectedRhymes.length === 0) {
+  if (selectedRhymes.length === 0 && currentPageIndex === 0) {
     return (
       <div className="space-y-6">
         <h2 className="text-xl font-semibold text-gray-800 text-center">Select Rhymes for this Grade</h2>
@@ -370,7 +367,6 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
               >
                 <Plus className="w-8 h-8" />
               </Button>
-              <p className="text-gray-600 text-sm mt-4">Top Position</p>
             </CardContent>
           </Card>
 
@@ -383,7 +379,6 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
               >
                 <Plus className="w-8 h-8" />
               </Button>
-              <p className="text-gray-600 text-sm mt-4">Bottom Position (0.5 Pages Only)</p>
             </CardContent>
           </Card>
         </div>
@@ -393,7 +388,7 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
 
   return (
     <div className="space-y-6">
-      {/* Navigation Controls - Always show when more than 1 page */}
+      {/* Navigation Controls - Always show */}
       <div className="flex items-center justify-between">
         <Button
           onClick={() => onPageChange(Math.max(0, currentPageIndex - 1))}
@@ -450,7 +445,7 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
                     Replace
                   </Button>
                   <Button
-                    onClick={() => onRemovePage(currentPageRhymes.top.page_index)}
+                    onClick={() => onRemoveRhyme(currentPageRhymes.top, 'top')}
                     variant="outline"
                     className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
                   >
@@ -467,7 +462,6 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
                   >
                     <Plus className="w-8 h-8" />
                   </Button>
-                  <p className="text-gray-600 text-sm">Top Position</p>
                 </div>
               </div>
             )}
@@ -500,7 +494,7 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
                       Replace
                     </Button>
                     <Button
-                      onClick={() => onRemovePage(currentPageRhymes.bottom.page_index)}
+                      onClick={() => onRemoveRhyme(currentPageRhymes.bottom, 'bottom')}
                       variant="outline"
                       className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
                     >
@@ -517,7 +511,6 @@ const DualContainerCarousel = ({ selectedRhymes, currentPageIndex, onPageChange,
                     >
                       <Plus className="w-8 h-8" />
                     </Button>
-                    <p className="text-gray-600 text-sm">Bottom Position (0.5 Pages Only)</p>
                   </div>
                 </div>
               )}
@@ -562,6 +555,16 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     fetchReusableRhymes();
     fetchSelectedRhymes();
   }, []);
+
+  const getNextAvailablePageIndex = () => {
+    // Find the highest page index currently used and add 1
+    if (selectedRhymes.length === 0) return 0;
+    
+    const usedIndices = selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined);
+    const maxIndex = Math.max(...usedIndices);
+    
+    return maxIndex + 1;
+  };
 
   const fetchAvailableRhymes = async () => {
     try {
@@ -615,61 +618,32 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     setShowReusable(false); // Reset to show available rhymes first
   };
 
-  const getNextAvailablePageIndex = () => {
-    // Find the highest page index currently used and add 1
-    if (selectedRhymes.length === 0) return 0;
-    
-    const usedIndices = selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined);
-    const maxIndex = Math.max(...usedIndices);
-    
-    return maxIndex + 1;
-  };
-
   const handleRhymeSelect = async (rhyme) => {
     try {
-      let pageIndex;
-      let shouldCreateNewPage = false;
-      
-      // Determine page index and carousel logic
-      if (currentPosition === 'top') {
-        // TOP POSITION LOGIC
-        if (rhyme.pages === 1.0) {
-          // 1.0 page rhyme - fills current page completely
-          pageIndex = currentPageIndex;
-          shouldCreateNewPage = true; // Will create new page after this selection
-        } else {
-          // 0.5 page rhyme - use current page
-          pageIndex = currentPageIndex;
-        }
-      } else if (currentPosition === 'bottom') {
-        // BOTTOM POSITION LOGIC - use current page
-        pageIndex = currentPageIndex;
-        
-        // This bottom selection will complete the page (since top already has 0.5 page rhyme)
-        shouldCreateNewPage = true;
-      } else {
-        // Fallback
-        pageIndex = currentPageIndex;
-      }
+      let pageIndex = currentPageIndex;
       
       // Remove existing rhyme at same position if replacing
       if (currentPosition) {
         setSelectedRhymes(prev => {
           return prev.filter(r => {
-            if (r.page_index === pageIndex) {
-              if (currentPosition === 'top') {
-                // Remove existing top rhyme at this page
-                const pageRhymes = prev.filter(x => x.page_index === pageIndex);
-                return pageRhymes.indexOf(r) !== 0;
-              } else if (currentPosition === 'bottom') {
-                // Remove existing bottom rhyme at this page
-                const pageRhymes = prev.filter(x => x.page_index === pageIndex);
-                return pageRhymes.indexOf(r) !== 1;
-              }
+            if (r.page_index === pageIndex && r.position === currentPosition) {
+              return false; // Remove rhyme with same position
             }
             return true;
           });
         });
+        
+        // Remove from backend too
+        const existingRhyme = selectedRhymes.find(r => 
+          r.page_index === pageIndex && r.position === currentPosition
+        );
+        if (existingRhyme) {
+          try {
+            await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${existingRhyme.page_index}/${currentPosition}`);
+          } catch (error) {
+            console.log('Error removing existing rhyme:', error);
+          }
+        }
       }
       
       await axios.post(`${API}/rhymes/select`, {
@@ -695,22 +669,17 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
       // Add new rhyme to state
       setSelectedRhymes(prev => [...prev, newRhyme]);
 
-      // Create new page when current page is completed
-      if (shouldCreateNewPage) {
-        // Add a small delay to ensure state is updated, then create new page
-        setTimeout(() => {
-          const nextPageIndex = getNextAvailablePageIndex();
-          setCurrentPageIndex(nextPageIndex);
-          
-          if (rhyme.pages === 1.0) {
-            toast.success(`Page ${pageIndex + 1} completed with 1.0 page rhyme! Moving to new Page ${nextPageIndex + 1}.`);
-          } else {
-            toast.success(`Page ${pageIndex + 1} completed with two rhymes! Moving to new Page ${nextPageIndex + 1}.`);
-          }
-        }, 500);
-      } else {
-        toast.success(`Rhyme "${rhyme.name}" selected for ${currentPosition} position!`);
-      }
+      // AUTOMATICALLY CREATE NEW PAGE AFTER SELECTION
+      setTimeout(() => {
+        const nextPageIndex = getNextAvailablePageIndex();
+        setCurrentPageIndex(nextPageIndex);
+        
+        if (rhyme.pages === 1.0) {
+          toast.success(`${rhyme.name} selected! New page created automatically.`);
+        } else {
+          toast.success(`${rhyme.name} selected! New page created for more rhymes.`);
+        }
+      }, 800);
 
       // Refresh available rhymes
       await fetchAvailableRhymes();
@@ -724,15 +693,18 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     }
   };
 
-  const handleRemovePage = async (pageIndex) => {
+  const handleRemoveRhyme = async (rhyme, position) => {
     try {
-      await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${pageIndex}`);
+      await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${rhyme.page_index}/${position}`);
       
-      setSelectedRhymes(prev => prev.filter(rhyme => rhyme.page_index !== pageIndex));
+      // Remove only the specific rhyme from state
+      setSelectedRhymes(prev => 
+        prev.filter(r => !(r.page_index === rhyme.page_index && r.position === position))
+      );
 
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
-      toast.success('Rhyme removed successfully!');
+      toast.success(`${rhyme.name} removed from ${position} position!`);
     } catch (error) {
       console.error('Error removing rhyme:', error);
       toast.error('Failed to remove rhyme');
@@ -811,7 +783,7 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
                   selectedRhymes={selectedRhymes}
                   currentPageIndex={currentPageIndex}
                   onPageChange={handlePageChange}
-                  onRemovePage={handleRemovePage}
+                  onRemoveRhyme={handleRemoveRhyme}
                   onAddRhyme={handleAddRhyme}
                 />
               </div>
