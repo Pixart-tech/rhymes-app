@@ -810,7 +810,6 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
                   onPageChange={handlePageChange}
                   onRemovePage={handleRemovePage}
                   onAddRhyme={handleAddRhyme}
-                  onAddNewPage={handleAddNewPage}
                 />
               </div>
             </div>
