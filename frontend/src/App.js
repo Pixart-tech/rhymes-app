@@ -650,13 +650,16 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
       setSelectedRhymes(prev => [...prev, newRhyme]);
 
-      // Only create new page if no higher page exists
+      // Check if page complete and create new page
       setTimeout(() => {
-        const existingPages = [...new Set(selectedRhymes.map(r => r.page_index))];
-        const maxExistingPage = Math.max(...existingPages, pageIndex);
+        const pageRhymes = [...selectedRhymes.filter(r => r.page_index !== pageIndex), newRhyme].filter(r => r.page_index === pageIndex);
         
-        if (pageIndex >= maxExistingPage) {
-          const nextPage = pageIndex + 1;
+        const hasFullPage = pageRhymes.some(r => r.pages === 1.0);
+        const hasTop = pageRhymes.some(r => r.position === 'top' && r.pages === 0.5);
+        const hasBottom = pageRhymes.some(r => r.position === 'bottom' && r.pages === 0.5);
+        
+        if (hasFullPage || (hasTop && hasBottom)) {
+          const nextPage = getNextAvailablePageIndex();
           setCurrentPageIndex(nextPage);
         }
       }, 300);
