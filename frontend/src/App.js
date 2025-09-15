@@ -604,8 +604,10 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
   };
 
   const handleAddRhyme = (position) => {
+    console.log('handleAddRhyme called with position:', position);
     setCurrentPosition(position);
     setShowTreeMenu(true);
+    setShowReusable(false); // Reset to show available rhymes first
   };
 
   const getNextAvailablePageIndex = () => {
