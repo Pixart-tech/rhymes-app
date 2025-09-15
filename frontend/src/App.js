@@ -746,51 +746,15 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
             {/* Right Side - Dual Container Carousel */}
             <div className={`${showTreeMenu ? 'lg:col-span-3' : 'lg:col-span-4'} flex flex-col items-center justify-center`}>
-              {selectedRhymes.length === 0 ? (
-                // Initial state - empty with dual containers
-                <div className="w-full max-w-2xl">
-                  <h2 className="text-xl font-semibold text-gray-800 text-center mb-6">Select Rhymes for {grade}</h2>
-                  
-                  <div className="grid grid-cols-1 gap-6">
-                    {/* Initial Top Container */}
-                    <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
-                      <CardContent className="p-6 min-h-[300px] flex flex-col items-center justify-center">
-                        <Button
-                          onClick={() => handleAddRhyme('top')}
-                          className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-                        >
-                          <Plus className="w-8 h-8" />
-                        </Button>
-                        <p className="text-gray-600 text-sm mt-4">Top Position</p>
-                      </CardContent>
-                    </Card>
-
-                    {/* Initial Bottom Container */}
-                    <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
-                      <CardContent className="p-6 min-h-[300px] flex flex-col items-center justify-center">
-                        <Button
-                          onClick={() => handleAddRhyme('bottom')}
-                          className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-                        >
-                          <Plus className="w-8 h-8" />
-                        </Button>
-                        <p className="text-gray-600 text-sm mt-4">Bottom Position (0.5 Pages Only)</p>
-                      </CardContent>
-                    </Card>
-                  </div>
-                </div>
-              ) : (
-                // Dual Container Carousel
-                <div className="w-full max-w-2xl">
-                  <DualContainerCarousel
-                    selectedRhymes={selectedRhymes}
-                    currentPageIndex={currentPageIndex}
-                    onPageChange={handlePageChange}
-                    onRemovePage={handleRemovePage}
-                    onAddRhyme={handleAddRhyme}
-                  />
-                </div>
-              )}
+              <div className="w-full max-w-2xl">
+                <DualContainerCarousel
+                  selectedRhymes={selectedRhymes}
+                  currentPageIndex={currentPageIndex}
+                  onPageChange={handlePageChange}
+                  onRemovePage={handleRemovePage}
+                  onAddRhyme={handleAddRhyme}
+                />
+              </div>
             </div>
           </div>
         </div>
