@@ -620,30 +620,14 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
   const handleRhymeSelect = async (rhyme) => {
     try {
-      let pageIndex = currentPageIndex;
+      const pageIndex = currentPageIndex;
       
-      // Remove existing rhyme at same position if replacing
-      if (currentPosition) {
-        setSelectedRhymes(prev => {
-          return prev.filter(r => {
-            // Only remove rhyme with same page_index AND same position
-            return !(r.page_index === pageIndex && r.position === currentPosition);
-          });
-        });
-        
-        // Remove from backend too
-        const existingRhyme = selectedRhymes.find(r => 
-          r.page_index === pageIndex && r.position === currentPosition
-        );
-        if (existingRhyme) {
-          try {
-            await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${existingRhyme.page_index}/${currentPosition}`);
-          } catch (error) {
-            console.log('Error removing existing rhyme:', error);
-          }
-        }
-      }
+      // Remove existing rhyme at same position first
+      setSelectedRhymes(prev => 
+        prev.filter(r => !(r.page_index === pageIndex && r.position === currentPosition))
+      );
       
+      // Add to backend
       await axios.post(`${API}/rhymes/select`, {
         school_id: school.school_id,
         grade: grade,
@@ -651,10 +635,10 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
         rhyme_code: rhyme.code
       });
 
-      // Load SVG content
+      // Get SVG
       const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
       
-      // Create new rhyme object with position metadata
+      // Add to state
       const newRhyme = {
         page_index: pageIndex,
         code: rhyme.code,
@@ -664,47 +648,28 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
         position: currentPosition
       };
 
-      // Add new rhyme to state
       setSelectedRhymes(prev => [...prev, newRhyme]);
 
-      // Check if page is COMPLETE and needs new page
+      // Check if page complete
       setTimeout(() => {
-        const currentPageRhymes = [...selectedRhymes.filter(r => r.page_index !== pageIndex), newRhyme];
-        const pageRhymes = currentPageRhymes.filter(r => r.page_index === pageIndex);
+        const pageRhymes = [...selectedRhymes.filter(r => r.page_index !== pageIndex), newRhyme].filter(r => r.page_index === pageIndex);
         
-        let isPageComplete = false;
+        const hasFullPage = pageRhymes.some(r => r.pages === 1.0);
+        const hasTop = pageRhymes.some(r => r.position === 'top' && r.pages === 0.5);
+        const hasBottom = pageRhymes.some(r => r.position === 'bottom' && r.pages === 0.5);
         
-        // Page is complete if:
-        // 1. Has 1.0 page rhyme (takes full page)
-        // 2. Has both top (0.5) and bottom (0.5) rhymes
-        const hasFullPageRhyme = pageRhymes.some(r => r.pages === 1.0);
-        const hasTopHalf = pageRhymes.some(r => r.position === 'top' && r.pages === 0.5);
-        const hasBottomHalf = pageRhymes.some(r => r.position === 'bottom' && r.pages === 0.5);
-        
-        if (hasFullPageRhyme) {
-          isPageComplete = true;
-        } else if (hasTopHalf && hasBottomHalf) {
-          isPageComplete = true;
+        if (hasFullPage || (hasTop && hasBottom)) {
+          const nextPage = getNextAvailablePageIndex();
+          setCurrentPageIndex(nextPage);
         }
-        
-        if (isPageComplete) {
-          const nextPageIndex = getNextAvailablePageIndex();
-          setCurrentPageIndex(nextPageIndex);
-          toast.success(`Page ${pageIndex + 1} completed! Moved to Page ${nextPageIndex + 1}.`);
-        } else {
-          toast.success(`${rhyme.name} added to ${currentPosition} position!`);
-        }
-      }, 500);
+      }, 300);
 
-      // Refresh available rhymes
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
-
       setShowTreeMenu(false);
       setCurrentPosition(null);
     } catch (error) {
-      console.error('Error selecting rhyme:', error);
-      toast.error('Failed to select rhyme');
+      console.error('Select error:', error);
     }
   };
 
