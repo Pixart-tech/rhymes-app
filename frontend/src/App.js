@@ -650,10 +650,15 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
       setSelectedRhymes(prev => [...prev, newRhyme]);
 
-      // ALWAYS create next page after ANY selection (for 25 rhymes goal)
+      // Only create new page if no higher page exists
       setTimeout(() => {
-        const nextPage = getNextAvailablePageIndex();
-        setCurrentPageIndex(nextPage);
+        const existingPages = [...new Set(selectedRhymes.map(r => r.page_index))];
+        const maxExistingPage = Math.max(...existingPages, pageIndex);
+        
+        if (pageIndex >= maxExistingPage) {
+          const nextPage = pageIndex + 1;
+          setCurrentPageIndex(nextPage);
+        }
       }, 300);
 
       await fetchAvailableRhymes();
