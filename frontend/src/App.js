@@ -73,6 +73,7 @@ const AuthPage = ({ onAuth }) => {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700">School Name</label>
+              console.log(schoolName)
               <Input
                 type="text"
                 placeholder="Enter your school name"
@@ -391,6 +392,11 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
   const handleRemoveRhyme = async (rhyme, position) => {
     try {
+      console.log(rhyme.page_index)
+      console.log(school.school_id)
+      console.log(grade)
+      console.log(position)
+
       await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${rhyme.page_index}/${position}`);
       
       setSelectedRhymes(prev => 
