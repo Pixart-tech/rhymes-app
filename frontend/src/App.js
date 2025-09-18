@@ -307,6 +307,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  const MAX_RHYMES_PER_GRADE = 25;
+
   useEffect(() => {
     fetchAvailableRhymes();
     fetchReusableRhymes();
@@ -330,7 +332,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     }
 
     const maxIndex = Math.max(...numericIndices);
-    return maxIndex + 1;
+    return Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE - 1);
   };
 
   const fetchAvailableRhymes = async () => {
@@ -384,7 +386,30 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const handleRhymeSelect = async (rhyme) => {
     try {
       const pageIndex = currentPageIndex;
-      
+      const normalizedPosition = typeof currentPosition === 'string'
+        ? currentPosition.toLowerCase()
+        : 'top';
+
+      const rhymesForPage = Array.isArray(selectedRhymes)
+        ? selectedRhymes.filter(r => Number(r?.page_index) === Number(pageIndex))
+        : [];
+
+      const isReplacement = rhymesForPage.some(existing => {
+        if (!existing) return false;
+        const candidatePosition = resolveRhymePosition(existing, {
+          rhymesForContext: selectedRhymes
+        });
+        return candidatePosition === normalizedPosition;
+      });
+
+      const totalSelected = Array.isArray(selectedRhymes) ? selectedRhymes.length : 0;
+      if (!isReplacement && totalSelected >= MAX_RHYMES_PER_GRADE) {
+        toast.error('Max of 25 rhymes per grade');
+        setShowTreeMenu(false);
+        setCurrentPosition(null);
+        return;
+      }
+
       await axios.post(`${API}/rhymes/select`, {
         school_id: school.school_id,
         grade: grade,
@@ -400,10 +425,24 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         name: rhyme.name,
         pages: rhyme.pages,
         svgContent: svgResponse.data,
-        position: currentPosition
+        position: normalizedPosition
       };
 
-      setSelectedRhymes(prev => [...prev, newRhyme]);
+      setSelectedRhymes(prev => {
+        const prevArray = Array.isArray(prev) ? prev : [];
+        const filtered = prevArray.filter(existing => {
+          if (!existing) return false;
+          if (Number(existing.page_index) !== Number(pageIndex)) {
+            return true;
+          }
+          const candidatePosition = resolveRhymePosition(existing, {
+            rhymesForContext: prevArray
+          });
+          return candidatePosition !== normalizedPosition;
+        });
+
+        return [...filtered, newRhyme];
+      });
 
       // Auto create new page after selection
       setTimeout(() => {
@@ -525,7 +564,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   };
 
   const handlePageChange = (newPageIndex) => {
-    setCurrentPageIndex(newPageIndex);
+    const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_RHYMES_PER_GRADE - 1));
+    setCurrentPageIndex(clampedIndex);
   };
 
   const handleToggleReusable = () => {
@@ -548,7 +588,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     const currentIndex = Number(currentPageIndex) || 0;
     const maxIndex = Math.max(highestFilledIndex, currentIndex, nextAvailableIndex);
 
-    return maxIndex + 1;
+    return Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
   };
 
   // Get rhymes for current page
