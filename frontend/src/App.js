@@ -73,7 +73,6 @@ const AuthPage = ({ onAuth }) => {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700">School Name</label>
-              console.log(schoolName)
               <Input
                 type="text"
                 placeholder="Enter your school name"
@@ -300,6 +299,7 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     if (selectedRhymes.length === 0) return 0;
     const usedIndices = selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined);
     const maxIndex = Math.max(...usedIndices);
+    console.log(maxIndex)
     return maxIndex + 1;
   };
 
@@ -390,25 +390,39 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     }
   };
 
-  const handleRemoveRhyme = async (rhyme, position) => {
-    try {
-      console.log(rhyme.page_index)
-      console.log(school.school_id)
-      console.log(grade)
-      console.log(position)
+  const handleRemoveRhyme = async (rhyme) => {
+  if (!rhyme || !rhyme.code) {
+    console.error("handleRemoveRhyme: missing rhyme or code", rhyme);
+    return;
+  }
 
-      await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${rhyme.page_index}/${position}`);
-      
-      setSelectedRhymes(prev => 
-        prev.filter(r => !(r.page_index === rhyme.page_index && r.position === position))
-      );
+  const position = (rhyme.position || "").toLowerCase();
 
-      await fetchAvailableRhymes();
-      await fetchReusableRhymes();
-    } catch (error) {
-      console.error('Error removing rhyme:', error);
-    }
-  };
+  console.log("→ Deleting rhyme (request):", {
+    code: rhyme.code,
+    position,
+    currentPageIndex,
+    grade
+  });
+
+  try {
+    const res = await axios.delete(
+      `/api/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`
+    );
+    console.log("← Delete response:", res.data);
+
+    setSelectedRhymes(prev => prev.filter(r =>
+      !(Number(r.page_index) === Number(currentPageIndex) &&
+        r.code === rhyme.code &&
+        (r.position || "").toLowerCase() === position)
+    
+    ));
+    await fetchAvailableRhymes();
+    await fetchReusableRhymes();
+  } catch (err) {
+    console.error("Delete failed:", err.response?.data || err.message);
+  }
+};
 
   const handlePageChange = (newPageIndex) => {
     setCurrentPageIndex(newPageIndex);
@@ -430,40 +444,35 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
   };
 
   // Get rhymes for current page
-  const getCurrentPageRhymes = () => {
-    let pageRhymes = { top: null, bottom: null };
-    
-    const currentPageRhymes = selectedRhymes.filter(rhyme => 
-      rhyme && rhyme.page_index === currentPageIndex
-    );
-    
-    if (currentPageRhymes.length === 0) {
-      return pageRhymes;
-    }
-    
-    const fullPageRhyme = currentPageRhymes.find(rhyme => rhyme.pages === 1.0);
-    if (fullPageRhyme) {
-      pageRhymes.top = fullPageRhyme;
+const getCurrentPageRhymes = () => {
+  const pageRhymes = { top: null, bottom: null };
+
+  if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) return pageRhymes;
+
+  // Prefer full-page rhyme
+  for (const r of selectedRhymes) {
+    if (!r) continue;
+    if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+    if (r.pages === 1 || r.pages === 1.0) {
+      pageRhymes.top = r;
       pageRhymes.bottom = null;
       return pageRhymes;
     }
-    
-    const halfPageRhymes = currentPageRhymes.filter(rhyme => rhyme.pages === 0.5);
-    if (halfPageRhymes.length > 0) {
-      halfPageRhymes.sort((a, b) => {
-        if (a.position === 'top' && b.position === 'bottom') return -1;
-        if (a.position === 'bottom' && b.position === 'top') return 1;
-        return a.code.localeCompare(b.code);
-      });
-      
-      pageRhymes.top = halfPageRhymes[0];
-      if (halfPageRhymes.length > 1) {
-        pageRhymes.bottom = halfPageRhymes[1];
-      }
+  }
+
+  // Place half-page rhymes by explicit position (do not infer)
+  for (const r of selectedRhymes) {
+    if (!r) continue;
+    if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+    if (r.pages === 0.5 || r.pages === '0.5') {
+      const pos = (r.position || '').toString().toLowerCase();
+      if (pos === 'top') pageRhymes.top = r;
+      else if (pos === 'bottom') pageRhymes.bottom = r;
     }
-    
-    return pageRhymes;
-  };
+  }
+
+  return pageRhymes;
+};
 
   if (loading) {
     return (
@@ -590,7 +599,21 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
                               Replace
                             </Button>
                             <Button
-                              onClick={() => handleRemoveRhyme(currentPageRhymes.top, 'top')}
+                              onClick={() => {
+                                if (currentPageRhymes.top) {
+
+
+                                
+                                    handleRemoveRhyme(currentPageRhymes.top, 'top');
+                                } else {
+                                  console.warn('No top rhyme to remove');
+                                }
+
+                              }
+                                
+        
+                              
+                              }
                               variant="outline"
                               className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
                             >

@@ -215,32 +215,34 @@ async def select_rhyme(input: RhymeSelectionCreate):
     
     return selection_obj
 
-@api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}")
-async def remove_rhyme_selection(school_id: str, grade: str, page_index: int):
-    """Remove a rhyme selection for a specific page index"""
-    result = await db.rhyme_selections.delete_many({
-        "school_id": school_id,
-        "grade": grade,
-        "page_index": page_index
-    })
+# @api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}")
+# async def remove_rhyme_selection(school_id: str, grade: str, page_index: int):
+#     """Remove a rhyme selection for a specific page index"""
+#     result = await db.rhyme_selections.delete_many({
+#         "school_id": school_id,
+#         "grade": grade,
+#         "page_index": page_index
+#     })
     
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Selection not found")
+#     if result.deleted_count == 0:
+#         raise HTTPException(status_code=404, detail="Selection not found")
     
-    return {"message": "Selection removed successfully"}
+#     return {"message": "Selection removed successfully"}
 
 @api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}/{position}")
-async def remove_specific_rhyme_selection(school_id: str, grade: str, page_index: int, position: str):
+async def remove_specific_rhyme_selection(school_id: str, grade: str, page_index : int, position: str):
     """Remove a specific rhyme selection for a position (top/bottom)"""
     # Get all selections for this page
     selections = await db.rhyme_selections.find({
         "school_id": school_id,
         "grade": grade,
-        "page_index": page_index
+        "page_index": page_index,
+        
     }).to_list(None)
     
     if not selections:
-        raise HTTPException(status_code=404, detail="No selections found for this page")
+        # raise HTTPException(status_code=404, detail="No selections found for this page")
+        return {"message":f"selection is removed"}
     
     # Find and remove the specific position rhyme
     selection_to_remove = None
@@ -262,9 +264,9 @@ async def remove_specific_rhyme_selection(school_id: str, grade: str, page_index
                     selection_to_remove = selection
                 break
     
-    if not selection_to_remove:
-        # If no specific match, remove any selection from this page for the position
-        selection_to_remove = selections[0]
+    # if not selection_to_remove:
+    #     # If no specific match, remove any selection from this page for the position
+    #     selection_to_remove = selections[0]
     
     # Remove the selection
     result = await db.rhyme_selections.delete_one({
