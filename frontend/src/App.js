@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
 
@@ -96,9 +96,10 @@ const AuthPage = ({ onAuth }) => {
 };
 
 // Grade Selection Page
-const GradeSelectionPage = ({ school, onGradeSelect }) => {
+const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   const grades = [
     { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
@@ -139,12 +140,28 @@ const GradeSelectionPage = ({ school, onGradeSelect }) => {
     );
   }
 
+  const handleLogoutClick = () => {
+    if (typeof onLogout === 'function') {
+      onLogout();
+    }
+    navigate('/');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
       <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
-          <p className="text-gray-600">School ID: {school.school_id}</p>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8 text-center md:text-left">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
+            <p className="text-gray-600">School ID: {school.school_id}</p>
+          </div>
+          <Button
+            onClick={handleLogoutClick}
+            variant="outline"
+            className="bg-white/80 hover:bg-white border-gray-200"
+          >
+            Logout
+          </Button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -279,7 +296,7 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
 };
 
 // Main Rhyme Selection Interface
-const RhymeSelectionPage = ({ school, grade, onBack }) => {
+const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [availableRhymes, setAvailableRhymes] = useState({});
   const [reusableRhymes, setReusableRhymes] = useState({});
   const [selectedRhymes, setSelectedRhymes] = useState([]);
@@ -288,6 +305,7 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
   const [showReusable, setShowReusable] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchAvailableRhymes();
@@ -592,13 +610,27 @@ const getCurrentPageRhymes = () => {
               <h1 className="text-2xl font-bold text-gray-800 capitalize">{grade} Grade - Rhyme Selection</h1>
               <p className="text-gray-600">{school.school_name} ({school.school_id})</p>
             </div>
-            <Button 
-              onClick={onBack}
-              variant="outline" 
-              className="bg-white/80 hover:bg-white border-gray-200"
-            >
-              Back to Grades
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={onBack}
+                variant="outline"
+                className="bg-white/80 hover:bg-white border-gray-200"
+              >
+                Back to Grades
+              </Button>
+              <Button
+                onClick={() => {
+                  if (typeof onLogout === 'function') {
+                    onLogout();
+                  }
+                  navigate('/');
+                }}
+                variant="outline"
+                className="bg-white/80 hover:bg-white border-gray-200 text-red-600 hover:text-red-700"
+              >
+                Logout
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -807,6 +839,11 @@ function App() {
     setSelectedGrade(null);
   };
 
+  const handleLogout = () => {
+    setSelectedGrade(null);
+    setSchool(null);
+  };
+
   return (
     <div className="App">
       <Toaster position="top-right" />
@@ -816,12 +853,17 @@ function App() {
             !school ? (
               <AuthPage onAuth={handleAuth} />
             ) : !selectedGrade ? (
-              <GradeSelectionPage school={school} onGradeSelect={handleGradeSelect} />
+              <GradeSelectionPage
+                school={school}
+                onGradeSelect={handleGradeSelect}
+                onLogout={handleLogout}
+              />
             ) : (
-              <RhymeSelectionPage 
-                school={school} 
-                grade={selectedGrade} 
-                onBack={handleBack} 
+              <RhymeSelectionPage
+                school={school}
+                grade={selectedGrade}
+                onBack={handleBack}
+                onLogout={handleLogout}
               />
             )
           } />
