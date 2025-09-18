@@ -402,39 +402,109 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
     }
   };
 
-  const handleRemoveRhyme = async (rhyme) => {
-  if (!rhyme || !rhyme.code) {
-    console.error("handleRemoveRhyme: missing rhyme or code", rhyme);
-    return;
-  }
+  const resolveRhymePosition = (rhyme, {
+    explicitPosition,
+    rhymesForContext
+  } = {}) => {
+    const normalizePosition = (value) => {
+      if (!value && value !== 0) return '';
+      const normalized = value.toString().trim().toLowerCase();
+      return normalized === 'top' || normalized === 'bottom' ? normalized : '';
+    };
 
-  const position = (rhyme.position || "").toLowerCase();
+    const normalizedExplicit = normalizePosition(explicitPosition);
+    if (normalizedExplicit) {
+      return normalizedExplicit;
+    }
 
-  console.log("→ Deleting rhyme (request):", {
-    code: rhyme.code,
-    position,
-    currentPageIndex,
-    grade
-  });
+    const normalizedFromRhyme = normalizePosition(rhyme?.position);
+    if (normalizedFromRhyme) {
+      return normalizedFromRhyme;
+    }
 
-  try {
-    const res = await axios.delete(
-      `/api/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`
-    );
-    console.log("← Delete response:", res.data);
+    const parsePages = (pagesValue) => {
+      if (typeof pagesValue === 'number') {
+        return Number.isFinite(pagesValue) ? pagesValue : null;
+      }
+      if (typeof pagesValue === 'string' && pagesValue.trim() !== '') {
+        const parsed = Number(pagesValue);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
 
-    setSelectedRhymes(prev => prev.filter(r =>
-      !(Number(r.page_index) === Number(currentPageIndex) &&
-        r.code === rhyme.code &&
-        (r.position || "").toLowerCase() === position)
-    
-    ));
-    await fetchAvailableRhymes();
-    await fetchReusableRhymes();
-  } catch (err) {
-    console.error("Delete failed:", err.response?.data || err.message);
-  }
-};
+    const pages = parsePages(rhyme?.pages);
+    if (pages === 1 || pages === 1.0) {
+      return 'top';
+    }
+
+    if (pages === 0.5) {
+      const pageIndex = Number(rhyme?.page_index);
+      const normalizedPageIndex = Number.isFinite(pageIndex)
+        ? pageIndex
+        : Number(currentPageIndex);
+      const contextRhymes = Array.isArray(rhymesForContext) ? rhymesForContext : selectedRhymes;
+      const halfPageRhymes = (contextRhymes || []).filter((r) => {
+        if (!r) return false;
+        if (Number(r.page_index) !== normalizedPageIndex) return false;
+        return parsePages(r.pages) === 0.5;
+      });
+
+      if (halfPageRhymes.length === 1) {
+        return 'top';
+      }
+
+      const matchIndex = halfPageRhymes.findIndex((r) => r?.code === rhyme?.code);
+      if (matchIndex === 0) {
+        return 'top';
+      }
+      if (matchIndex === 1) {
+        return 'bottom';
+      }
+
+      if (matchIndex > 1) {
+        return 'bottom';
+      }
+    }
+
+    return 'top';
+  };
+
+  const handleRemoveRhyme = async (rhyme, explicitPosition) => {
+    if (!rhyme || !rhyme.code) {
+      console.error("handleRemoveRhyme: missing rhyme or code", rhyme);
+      return;
+    }
+
+    const position = resolveRhymePosition(rhyme, { explicitPosition });
+
+    console.log("→ Deleting rhyme (request):", {
+      code: rhyme.code,
+      position,
+      currentPageIndex,
+      grade
+    });
+
+    try {
+      const res = await axios.delete(
+        `/api/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`
+      );
+      console.log("← Delete response:", res.data);
+
+      setSelectedRhymes(prev => prev.filter(r => {
+        if (Number(r.page_index) !== Number(currentPageIndex)) return true;
+        if (r.code !== rhyme.code) return true;
+        const candidatePosition = resolveRhymePosition(r, {
+          rhymesForContext: prev
+        });
+        return candidatePosition !== position;
+      }));
+      await fetchAvailableRhymes();
+      await fetchReusableRhymes();
+    } catch (err) {
+      console.error("Delete failed:", err.response?.data || err.message);
+    }
+  };
 
   const handlePageChange = (newPageIndex) => {
     setCurrentPageIndex(newPageIndex);
@@ -621,19 +691,11 @@ const getCurrentPageRhymes = () => {
                             <Button
                               onClick={() => {
                                 if (currentPageRhymes.top) {
-
-
-                                
-                                    handleRemoveRhyme(currentPageRhymes.top, 'top');
+                                  handleRemoveRhyme(currentPageRhymes.top, 'top');
                                 } else {
                                   console.warn('No top rhyme to remove');
                                 }
-
-                              }
-                                
-        
-                              
-                              }
+                              }}
                               variant="outline"
                               className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
                             >
