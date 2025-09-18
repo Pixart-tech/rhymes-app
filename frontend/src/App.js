@@ -296,10 +296,22 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
   }, []);
 
   const getNextAvailablePageIndex = () => {
-    if (selectedRhymes.length === 0) return 0;
-    const usedIndices = selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined);
-    const maxIndex = Math.max(...usedIndices);
-    console.log(maxIndex)
+    if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) {
+      return 0;
+    }
+
+    const numericIndices = selectedRhymes
+      .map(rhyme => {
+        const index = Number(rhyme?.page_index);
+        return Number.isFinite(index) ? index : null;
+      })
+      .filter(index => index !== null);
+
+    if (numericIndices.length === 0) {
+      return 0;
+    }
+
+    const maxIndex = Math.max(...numericIndices);
     return maxIndex + 1;
   };
 
@@ -434,13 +446,21 @@ const RhymeSelectionPage = ({ school, grade, onBack }) => {
 
   // Calculate total pages
   const calculateTotalPages = () => {
-    if (selectedRhymes.length === 0) return 1;
-    const uniquePages = [...new Set(selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined))];
-    if (!uniquePages.includes(currentPageIndex)) {
-      uniquePages.push(currentPageIndex);
-    }
-    const maxPageIndex = Math.max(...uniquePages, currentPageIndex);
-    return maxPageIndex + 1;
+    const numericIndices = Array.isArray(selectedRhymes)
+      ? selectedRhymes
+          .map(rhyme => {
+            const index = Number(rhyme?.page_index);
+            return Number.isFinite(index) ? index : null;
+          })
+          .filter(index => index !== null)
+      : [];
+
+    const highestFilledIndex = numericIndices.length > 0 ? Math.max(...numericIndices) : -1;
+    const nextAvailableIndex = Number(getNextAvailablePageIndex()) || 0;
+    const currentIndex = Number(currentPageIndex) || 0;
+    const maxIndex = Math.max(highestFilledIndex, currentIndex, nextAvailableIndex);
+
+    return maxIndex + 1;
   };
 
   // Get rhymes for current page
