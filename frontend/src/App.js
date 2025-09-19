@@ -477,7 +477,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       const filtered = prevArray.filter(existing => !removals.includes(existing));
 
-      
+
       const nextArray = sortSelections([...filtered, baseRhyme]);
       const totalSelected = nextArray.length;
       const isReplacement = removals.length > 0;
@@ -499,6 +499,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       setSelectedRhymes(nextArray);
 
+
+=======
+
       const baseRhyme = {
         page_index: pageIndex,
         code: rhyme.code,
@@ -507,6 +510,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         svgContent: null,
         position: normalizedPosition
       };
+
 
 
       try {
@@ -535,15 +539,17 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             return existing;
           });
-        });
-
+        })
       } catch (svgError) {
         console.error('Error fetching rhyme SVG:', svgError);
       }
+=======
+
+      
 
 
         return [...filtered, baseRhyme];
-      });
+      
 
 
       try {
