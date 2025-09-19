@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
 
@@ -96,10 +96,9 @@ const AuthPage = ({ onAuth }) => {
 };
 
 // Grade Selection Page
-const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
+const GradeSelectionPage = ({ school, onGradeSelect }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
 
   const grades = [
     { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
@@ -140,28 +139,12 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
     );
   }
 
-  const handleLogoutClick = () => {
-    if (typeof onLogout === 'function') {
-      onLogout();
-    }
-    navigate('/');
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
       <div className="max-w-4xl mx-auto">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8 text-center md:text-left">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
-            <p className="text-gray-600">School ID: {school.school_id}</p>
-          </div>
-          <Button
-            onClick={handleLogoutClick}
-            variant="outline"
-            className="bg-white/80 hover:bg-white border-gray-200"
-          >
-            Logout
-          </Button>
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
+          <p className="text-gray-600">School ID: {school.school_id}</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -296,7 +279,7 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
 };
 
 // Main Rhyme Selection Interface
-const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
+const RhymeSelectionPage = ({ school, grade, onBack }) => {
   const [availableRhymes, setAvailableRhymes] = useState({});
   const [reusableRhymes, setReusableRhymes] = useState({});
   const [selectedRhymes, setSelectedRhymes] = useState([]);
@@ -305,9 +288,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [showReusable, setShowReusable] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
-
-  const MAX_RHYMES_PER_GRADE = 25;
 
   useEffect(() => {
     fetchAvailableRhymes();
@@ -315,74 +295,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     fetchSelectedRhymes();
   }, []);
 
-    const computePageUsage = (rhymesList = selectedRhymes) => {
-      const usageMap = new Map();
-      let highestIndex = -1;
-      let lowestIndex = Number.POSITIVE_INFINITY;
-
-      if (Array.isArray(rhymesList)) {
-        rhymesList.forEach((selection) => {
-          if (!selection) return;
-          const numericIndex = Number(selection?.page_index);
-          if (!Number.isFinite(numericIndex) || numericIndex < 0) {
-            return;
-          }
-
-          const pageIndex = numericIndex;
-          const pagesValue = parsePagesValue(selection?.pages);
-          const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
-
-          if (pagesValue === 0.5) {
-            const slot = normalizeSlot(selection?.position, 'top') || 'top';
-            entry[slot] = true;
-          } else {
-            entry.top = true;
-            entry.bottom = true;
-          }
-
-          usageMap.set(pageIndex, entry);
-          highestIndex = Math.max(highestIndex, pageIndex);
-          lowestIndex = Math.min(lowestIndex, pageIndex);
-        });
-      }
-
-      return {
-        usageMap,
-        highestIndex,
-        lowestIndex: lowestIndex === Number.POSITIVE_INFINITY ? -1 : lowestIndex
-      };
-    };
-
-    const computeNextAvailablePageInfoFromUsage = ({ usageMap, highestIndex }) => {
-      for (let index = 0; index < MAX_RHYMES_PER_GRADE; index += 1) {
-        const entry = usageMap.get(index);
-        if (!entry) {
-          return { index, hasCapacity: true, highestIndex };
-        }
-        if (!entry.top || !entry.bottom) {
-          return { index, hasCapacity: true, highestIndex };
-        }
-      }
-
-      const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_RHYMES_PER_GRADE - 1);
-      return { index: fallbackIndex, hasCapacity: false, highestIndex };
-    };
-
-    const computeInitialPageIndexFromUsage = ({ lowestIndex }) => {
-      if (!Number.isFinite(lowestIndex) || lowestIndex < 0) {
-        return 0;
-      }
-      return Math.max(0, lowestIndex);
-    };
-
-    const computeNextAvailablePageInfo = (rhymesList = selectedRhymes) => {
-      const usage = computePageUsage(rhymesList);
-      const info = computeNextAvailablePageInfoFromUsage(usage);
-      return {
-        ...info,
-        lowestIndex: usage.lowestIndex
-      };
-    };
+  const getNextAvailablePageIndex = () => {
+    if (selectedRhymes.length === 0) return 0;
+    const usedIndices = selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined);
+    const maxIndex = Math.max(...usedIndices);
+    return maxIndex + 1;
+  };
 
   const fetchAvailableRhymes = async () => {
     try {
@@ -411,19 +329,14 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         gradeSelections.map(async (rhyme) => {
           try {
             const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-            return { ...rhyme, position: rhyme.position || null, svgContent: svgResponse.data };
+            return { ...rhyme, svgContent: svgResponse.data };
           } catch (error) {
-            return { ...rhyme, position: rhyme.position || null, svgContent: null };
+            return { ...rhyme, svgContent: null };
           }
         })
       );
-
-      const sortedSelections = sortSelections(rhymesWithSvg);
-      const usage = computePageUsage(sortedSelections);
-      const initialIndex = computeInitialPageIndexFromUsage(usage);
-
-      setSelectedRhymes(sortedSelections);
-      setCurrentPageIndex(initialIndex);
+      
+      setSelectedRhymes(rhymesWithSvg);
     } catch (error) {
       console.error('Error fetching selected rhymes:', error);
     } finally {
@@ -437,168 +350,35 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     setShowReusable(false);
   };
 
-  const normalizeSlot = (value, fallback = '') => {
-    if (value === null || value === undefined) return fallback;
-    const normalized = value.toString().trim().toLowerCase();
-    return normalized === 'top' || normalized === 'bottom' ? normalized : fallback;
-  };
-
-  const parsePagesValue = (pagesValue) => {
-    if (typeof pagesValue === 'number') {
-      return Number.isFinite(pagesValue) ? pagesValue : null;
-    }
-    if (typeof pagesValue === 'string') {
-      const trimmed = pagesValue.trim();
-      if (trimmed === '') {
-        return null;
-      }
-      const parsed = Number(trimmed);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    return null;
-  };
-
-  const sortSelections = (selections) => {
-    if (!Array.isArray(selections)) {
-      return [];
-    }
-
-    const getPositionWeight = (selection) => {
-      const normalized = normalizeSlot(selection?.position, 'top');
-      return normalized === 'bottom' ? 1 : 0;
-    };
-
-    return [...selections].sort((a, b) => {
-      const indexA = Number(a?.page_index ?? 0);
-      const indexB = Number(b?.page_index ?? 0);
-
-      if (indexA !== indexB) {
-        return indexA - indexB;
-      }
-
-      return getPositionWeight(a) - getPositionWeight(b);
-    });
-  };
-
-  const computeRemovalsForSelection = ({ selections, pageIndex, normalizedPosition, newPages }) => {
-    if (!Array.isArray(selections) || selections.length === 0) {
-      return [];
-    }
-
-    return selections.filter(existing => {
-      if (!existing) return false;
-      if (Number(existing.page_index) !== Number(pageIndex)) {
-        return false;
-      }
-
-      const existingPages = parsePagesValue(existing.pages) ?? 1;
-
-      if (newPages > 0.5) {
-        return true;
-      }
-
-      if (existingPages > 0.5) {
-        return true;
-      }
-
-      const existingPosition = normalizeSlot(existing.position, 'top');
-
-      if (existingPosition) {
-        return existingPosition === normalizedPosition;
-      }
-
-      return normalizedPosition === 'top';
-    });
-  };
-
   const handleRhymeSelect = async (rhyme) => {
     try {
       const pageIndex = currentPageIndex;
-      const prevArray = Array.isArray(selectedRhymes) ? selectedRhymes : [];
-      const pagesValue = parsePagesValue(rhyme?.pages) ?? 1;
-      const normalizedPosition = pagesValue === 0.5
-        ? normalizeSlot(currentPosition, 'top') || 'top'
-        : 'top';
-
-      const removals = computeRemovalsForSelection({
-        selections: prevArray,
-        pageIndex,
-        normalizedPosition,
-        newPages: pagesValue
-      });
-
-      const filtered = prevArray.filter(existing => !removals.includes(existing));
-
-      const baseRhyme = {
-        page_index: pageIndex,
-        code: rhyme.code,
-        name: rhyme.name,
-        pages: rhyme.pages,
-        svgContent: null,
-        position: normalizedPosition
-      };
-
-      const nextArray = sortSelections([...filtered, baseRhyme]);
-      const totalSelected = nextArray.length;
-      const isReplacement = removals.length > 0;
-
-      if (!isReplacement && totalSelected > MAX_RHYMES_PER_GRADE) {
-        toast.error('Max of 25 rhymes per grade');
-        setShowTreeMenu(false);
-        setCurrentPosition(null);
-        return;
-      }
-
+      
       await axios.post(`${API}/rhymes/select`, {
         school_id: school.school_id,
         grade: grade,
         page_index: pageIndex,
-        rhyme_code: rhyme.code,
-        position: normalizedPosition
+        rhyme_code: rhyme.code
       });
 
-      setSelectedRhymes(nextArray);
+      const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
+      
+      const newRhyme = {
+        page_index: pageIndex,
+        code: rhyme.code,
+        name: rhyme.name,
+        pages: rhyme.pages,
+        svgContent: svgResponse.data,
+        position: currentPosition
+      };
 
-      try {
-        const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-        const svgContent = svgResponse.data;
+      setSelectedRhymes(prev => [...prev, newRhyme]);
 
-        setSelectedRhymes(prev => {
-          const prevArrayInner = Array.isArray(prev) ? prev : [];
-
-          return prevArrayInner.map(existing => {
-            if (!existing) return existing;
-            if (Number(existing.page_index) !== Number(pageIndex)) {
-              return existing;
-            }
-
-            const candidatePosition = resolveRhymePosition(existing, {
-              rhymesForContext: prevArrayInner
-            });
-
-            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
-              return {
-                ...existing,
-                svgContent
-              };
-            }
-
-            return existing;
-          });
-        });
-      } catch (svgError) {
-        console.error('Error fetching rhyme SVG:', svgError);
-      }
-
-      const nextInfo = computeNextAvailablePageInfo(nextArray);
-
-      if (isReplacement) {
-        setCurrentPageIndex(pageIndex);
-      } else {
-        setTimeout(() => {
-          setCurrentPageIndex(nextInfo.index);
-        }, 400);
-      }
+      // Auto create new page after selection
+      setTimeout(() => {
+        const nextPage = getNextAvailablePageIndex();
+        setCurrentPageIndex(nextPage);
+      }, 500);
 
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
@@ -609,234 +389,73 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     }
   };
 
-  const resolveRhymePosition = (rhyme, {
-    explicitPosition,
-    rhymesForContext
-  } = {}) => {
-    const normalizedExplicit = normalizeSlot(explicitPosition);
-    if (normalizedExplicit) {
-      return normalizedExplicit;
-    }
-
-    const normalizedFromRhyme = normalizeSlot(rhyme?.position);
-    if (normalizedFromRhyme) {
-      return normalizedFromRhyme;
-    }
-
-    const pages = parsePagesValue(rhyme?.pages);
-    if (pages === 1 || pages === 1.0) {
-      return 'top';
-    }
-
-    if (pages === 0.5) {
-      const pageIndex = Number(rhyme?.page_index);
-      const normalizedPageIndex = Number.isFinite(pageIndex)
-        ? pageIndex
-        : Number(currentPageIndex);
-      const contextRhymes = Array.isArray(rhymesForContext) ? rhymesForContext : selectedRhymes;
-      const halfPageRhymes = (contextRhymes || []).filter((r) => {
-        if (!r) return false;
-        if (Number(r.page_index) !== normalizedPageIndex) return false;
-        return parsePagesValue(r.pages) === 0.5;
-      });
-
-      if (halfPageRhymes.length === 1) {
-        return 'top';
-      }
-
-      const matchIndex = halfPageRhymes.findIndex((r) => r?.code === rhyme?.code);
-      if (matchIndex === 0) {
-        return 'top';
-      }
-      if (matchIndex === 1) {
-        return 'bottom';
-      }
-
-      if (matchIndex > 1) {
-        return 'bottom';
-      }
-    }
-
-    return 'top';
-  };
-
-  const handleRemoveRhyme = async (rhyme, explicitPosition) => {
-    if (!rhyme || !rhyme.code) {
-      console.error("handleRemoveRhyme: missing rhyme or code", rhyme);
-      return;
-    }
-
-    const position = resolveRhymePosition(rhyme, { explicitPosition });
-
-    console.log("→ Deleting rhyme (request):", {
-      code: rhyme.code,
-      position,
-      currentPageIndex,
-      grade
-    });
-
+  const handleRemoveRhyme = async (rhyme, position) => {
     try {
-      const res = await axios.delete(
-        `/api/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`
+      await axios.delete(`${API}/rhymes/remove/${school.school_id}/${grade}/${rhyme.page_index}/${position}`);
+      
+      setSelectedRhymes(prev => 
+        prev.filter(r => !(r.page_index === rhyme.page_index && r.position === position))
       );
-      console.log("← Delete response:", res.data);
 
-      setSelectedRhymes(prev => prev.filter(r => {
-        if (Number(r.page_index) !== Number(currentPageIndex)) return true;
-        if (r.code !== rhyme.code) return true;
-        const candidatePosition = resolveRhymePosition(r, {
-          rhymesForContext: prev
-        });
-        return candidatePosition !== position;
-      }));
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
-    } catch (err) {
-      console.error("Delete failed:", err.response?.data || err.message);
+    } catch (error) {
+      console.error('Error removing rhyme:', error);
     }
   };
 
   const handlePageChange = (newPageIndex) => {
-    const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_RHYMES_PER_GRADE - 1));
-    setCurrentPageIndex(clampedIndex);
+    setCurrentPageIndex(newPageIndex);
   };
 
   const handleToggleReusable = () => {
     setShowReusable(!showReusable);
   };
 
-  const pageUsage = useMemo(() => computePageUsage(selectedRhymes), [selectedRhymes]);
-  const nextPageInfo = useMemo(() => computeNextAvailablePageInfoFromUsage(pageUsage), [pageUsage]);
-  const nextAvailablePageIndex = nextPageInfo.index;
-  const hasNextPageCapacity = nextPageInfo.hasCapacity;
-  const highestFilledIndex = nextPageInfo.highestIndex;
-
   // Calculate total pages
   const calculateTotalPages = () => {
-    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex : -1;
-    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex : 0;
-    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex : 0;
-
-    const candidates = [normalizedHighest, normalizedNext, normalizedCurrent]
-      .filter(index => Number.isFinite(index) && index >= 0);
-
-    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
-
-    return Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
+    if (selectedRhymes.length === 0) return 1;
+    const uniquePages = [...new Set(selectedRhymes.map(rhyme => rhyme?.page_index).filter(idx => idx !== undefined))];
+    if (!uniquePages.includes(currentPageIndex)) {
+      uniquePages.push(currentPageIndex);
+    }
+    const maxPageIndex = Math.max(...uniquePages, currentPageIndex);
+    return maxPageIndex + 1;
   };
-
-  useEffect(() => {
-    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex : -1;
-    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex : 0;
-    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex : 0;
-
-    const candidates = [normalizedHighest, normalizedNext, normalizedCurrent]
-      .filter(index => Number.isFinite(index) && index >= 0);
-
-    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
-    const total = Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
-
-    if (total <= 0) {
-      if (currentPageIndex !== 0) {
-        setCurrentPageIndex(0);
-      }
-      return;
-    }
-
-    const maxAllowed = total - 1;
-    if (currentPageIndex > maxAllowed) {
-      setCurrentPageIndex(Math.max(0, maxAllowed));
-    }
-  }, [highestFilledIndex, nextAvailablePageIndex, currentPageIndex]);
-
-  const groupedSelections = useMemo(() => {
-    const pagesMap = new Map();
-
-    if (Array.isArray(selectedRhymes)) {
-      selectedRhymes.forEach((selection) => {
-        if (!selection) return;
-
-        const numericIndex = Number(selection?.page_index);
-        if (!Number.isFinite(numericIndex) || numericIndex < 0) {
-          return;
-        }
-
-        const pageIndex = numericIndex;
-        const existing = pagesMap.get(pageIndex) || { pageIndex, slots: [] };
-        const pagesValue = parsePagesValue(selection?.pages);
-
-        if (pagesValue === 0.5) {
-          const slot = normalizeSlot(selection?.position, 'top') || 'top';
-          existing.slots.push({
-            key: `${pageIndex}-${selection.code}-${slot}`,
-            label: slot === 'top' ? 'Top Half' : 'Bottom Half',
-            position: slot,
-            selection
-          });
-        } else {
-          existing.slots.push({
-            key: `${pageIndex}-${selection.code}-full`,
-            label: 'Full Page',
-            position: 'full',
-            selection
-          });
-        }
-
-        pagesMap.set(pageIndex, existing);
-      });
-    }
-
-    const slotWeight = { full: 0, top: 1, bottom: 2 };
-
-    const entries = Array.from(pagesMap.values())
-      .map(entry => ({
-        ...entry,
-        slots: entry.slots.sort((a, b) => (slotWeight[a.position] ?? 0) - (slotWeight[b.position] ?? 0))
-      }))
-      .sort((a, b) => a.pageIndex - b.pageIndex);
-
-    if (hasNextPageCapacity && !entries.some(entry => entry.pageIndex === nextAvailablePageIndex)) {
-      entries.push({
-        pageIndex: nextAvailablePageIndex,
-        slots: [],
-        isPlaceholder: true
-      });
-      entries.sort((a, b) => a.pageIndex - b.pageIndex);
-    }
-
-    return entries;
-  }, [selectedRhymes, hasNextPageCapacity, nextAvailablePageIndex]);
 
   // Get rhymes for current page
   const getCurrentPageRhymes = () => {
-    const pageRhymes = { top: null, bottom: null };
-
-    if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) return pageRhymes;
-
-    // Prefer full-page rhyme
-    for (const r of selectedRhymes) {
-      if (!r) continue;
-      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
-      const pages = parsePagesValue(r.pages);
-      if (pages === 1) {
-        pageRhymes.top = r;
-        pageRhymes.bottom = null;
-        return pageRhymes;
+    let pageRhymes = { top: null, bottom: null };
+    
+    const currentPageRhymes = selectedRhymes.filter(rhyme => 
+      rhyme && rhyme.page_index === currentPageIndex
+    );
+    
+    if (currentPageRhymes.length === 0) {
+      return pageRhymes;
+    }
+    
+    const fullPageRhyme = currentPageRhymes.find(rhyme => rhyme.pages === 1.0);
+    if (fullPageRhyme) {
+      pageRhymes.top = fullPageRhyme;
+      pageRhymes.bottom = null;
+      return pageRhymes;
+    }
+    
+    const halfPageRhymes = currentPageRhymes.filter(rhyme => rhyme.pages === 0.5);
+    if (halfPageRhymes.length > 0) {
+      halfPageRhymes.sort((a, b) => {
+        if (a.position === 'top' && b.position === 'bottom') return -1;
+        if (a.position === 'bottom' && b.position === 'top') return 1;
+        return a.code.localeCompare(b.code);
+      });
+      
+      pageRhymes.top = halfPageRhymes[0];
+      if (halfPageRhymes.length > 1) {
+        pageRhymes.bottom = halfPageRhymes[1];
       }
     }
-
-    // Place half-page rhymes by explicit position (do not infer)
-    for (const r of selectedRhymes) {
-      if (!r) continue;
-      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
-      const pages = parsePagesValue(r.pages);
-      if (pages === 0.5) {
-        const pos = normalizeSlot(r.position, 'top') || 'top';
-        if (pos === 'top') pageRhymes.top = r;
-        else if (pos === 'bottom') pageRhymes.bottom = r;
-      }
-    }
-
+    
     return pageRhymes;
   };
 
@@ -855,9 +474,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const currentPageRhymes = getCurrentPageRhymes();
   const hasTopRhyme = currentPageRhymes.top !== null;
   const hasBottomRhyme = currentPageRhymes.bottom !== null;
-  const isTopFullPage = hasTopRhyme && parsePagesValue(currentPageRhymes.top.pages) === 1;
+  const isTopFullPage = hasTopRhyme && currentPageRhymes.top.pages === 1.0;
   const showBottomContainer = !isTopFullPage;
-  const totalSelectedRhymes = Array.isArray(selectedRhymes) ? selectedRhymes.length : 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50">
@@ -869,27 +487,13 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
               <h1 className="text-2xl font-bold text-gray-800 capitalize">{grade} Grade - Rhyme Selection</h1>
               <p className="text-gray-600">{school.school_name} ({school.school_id})</p>
             </div>
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={onBack}
-                variant="outline"
-                className="bg-white/80 hover:bg-white border-gray-200"
-              >
-                Back to Grades
-              </Button>
-              <Button
-                onClick={() => {
-                  if (typeof onLogout === 'function') {
-                    onLogout();
-                  }
-                  navigate('/');
-                }}
-                variant="outline"
-                className="bg-white/80 hover:bg-white border-gray-200 text-red-600 hover:text-red-700"
-              >
-                Logout
-              </Button>
-            </div>
+            <Button 
+              onClick={onBack}
+              variant="outline" 
+              className="bg-white/80 hover:bg-white border-gray-200"
+            >
+              Back to Grades
+            </Button>
           </div>
         </div>
 
@@ -924,7 +528,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
               <div className="w-full max-w-2xl">
 
                 {/* Navigation Controls */}
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-6">
                   <Button
                     onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
                     disabled={currentPageIndex === 0}
@@ -948,30 +552,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                     Next
                     <ChevronRight className="w-4 h-4 ml-1" />
                   </Button>
-                </div>
-
-                <div className="flex items-center justify-center mb-6">
-                  {hasNextPageCapacity ? (
-                    <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-gray-600">
-                      <span>
-                        Next available page: <span className="font-semibold text-gray-700">Page {nextAvailablePageIndex + 1}</span>
-                      </span>
-                      <Button
-                        onClick={() => handlePageChange(nextAvailablePageIndex)}
-                        variant="outline"
-                        size="sm"
-                        disabled={nextAvailablePageIndex === currentPageIndex}
-                      >
-                        {nextAvailablePageIndex === currentPageIndex
-                          ? 'Viewing next page'
-                          : `Go to Page ${nextAvailablePageIndex + 1}`}
-                      </Button>
-                    </div>
-                  ) : (
-                    <span className="text-sm text-gray-500">
-                      All {MAX_RHYMES_PER_GRADE} pages are currently filled.
-                    </span>
-                  )}
                 </div>
 
                 {/* Dual Container Layout */}
@@ -1004,13 +584,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                               Replace
                             </Button>
                             <Button
-                              onClick={() => {
-                                if (currentPageRhymes.top) {
-                                  handleRemoveRhyme(currentPageRhymes.top, 'top');
-                                } else {
-                                  console.warn('No top rhyme to remove');
-                                }
-                              }}
+                              onClick={() => handleRemoveRhyme(currentPageRhymes.top, 'top')}
                               variant="outline"
                               className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
                             >
@@ -1099,98 +673,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
               </div>
             </div>
           </div>
-
-          <div className="mt-6">
-            <SelectedRhymesOverview
-              groupedSelections={groupedSelections}
-              activePage={currentPageIndex}
-              onPageSelect={handlePageChange}
-              nextAvailablePageIndex={nextAvailablePageIndex}
-              hasAvailableSlot={hasNextPageCapacity}
-              totalSelected={totalSelectedRhymes}
-            />
-          </div>
         </div>
       </div>
     </div>
-  );
-};
-
-const SelectedRhymesOverview = ({
-  groupedSelections,
-  activePage,
-  onPageSelect,
-  nextAvailablePageIndex,
-  hasAvailableSlot,
-  totalSelected
-}) => {
-  if (!Array.isArray(groupedSelections) || groupedSelections.length === 0) {
-    return null;
-  }
-
-  const filledPages = groupedSelections.filter(entry => entry.slots.length > 0).length;
-
-  return (
-    <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-lg font-semibold text-gray-800">Selected Rhymes Overview</CardTitle>
-        <p className="text-sm text-gray-500">
-          {totalSelected} {totalSelected === 1 ? 'rhyme' : 'rhymes'} placed across {filledPages}{' '}
-          {filledPages === 1 ? 'page' : 'pages'}.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-3 max-h-72 overflow-y-auto pr-2">
-        {groupedSelections.map(({ pageIndex, slots, isPlaceholder }) => (
-          <div
-            key={pageIndex}
-            className={`flex items-start justify-between rounded-lg border p-3 transition-colors duration-200 ${
-              pageIndex === activePage ? 'border-orange-400 bg-orange-50/60' : 'border-gray-200 bg-white/70'
-            }`}
-          >
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-gray-700">Page {pageIndex + 1}</span>
-                {pageIndex === nextAvailablePageIndex && hasAvailableSlot && (
-                  <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 border-0">
-                    Next
-                  </Badge>
-                )}
-                {pageIndex === activePage && (
-                  <Badge variant="outline" className="border-orange-300 text-orange-600">
-                    Viewing
-                  </Badge>
-                )}
-              </div>
-              {slots.length > 0 ? (
-                <ul className="mt-2 space-y-1 text-sm text-gray-600">
-                  {slots.map(slot => (
-                    <li key={slot.key}>
-                      <span className="font-medium text-gray-700">{slot.label}:</span>{' '}
-                      {slot.selection.name} ({slot.selection.code})
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-2 text-sm text-gray-500 italic">
-                  {isPlaceholder
-                    ? 'Ready for a new rhyme selection.'
-                    : 'This page currently has no assigned rhymes.'}
-                </p>
-              )}
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onPageSelect(pageIndex)}
-              className="text-orange-500 hover:text-orange-600"
-              disabled={activePage === pageIndex}
-            >
-              {activePage === pageIndex ? 'Viewing' : 'View'}
-            </Button>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
   );
 };
 
@@ -1211,11 +696,6 @@ function App() {
     setSelectedGrade(null);
   };
 
-  const handleLogout = () => {
-    setSelectedGrade(null);
-    setSchool(null);
-  };
-
   return (
     <div className="App">
       <Toaster position="top-right" />
@@ -1225,17 +705,12 @@ function App() {
             !school ? (
               <AuthPage onAuth={handleAuth} />
             ) : !selectedGrade ? (
-              <GradeSelectionPage
-                school={school}
-                onGradeSelect={handleGradeSelect}
-                onLogout={handleLogout}
-              />
+              <GradeSelectionPage school={school} onGradeSelect={handleGradeSelect} />
             ) : (
-              <RhymeSelectionPage
-                school={school}
-                grade={selectedGrade}
-                onBack={handleBack}
-                onLogout={handleLogout}
+              <RhymeSelectionPage 
+                school={school} 
+                grade={selectedGrade} 
+                onBack={handleBack} 
               />
             )
           } />
