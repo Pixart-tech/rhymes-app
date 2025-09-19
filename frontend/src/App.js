@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
@@ -315,25 +315,67 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     fetchSelectedRhymes();
   }, []);
 
-  const getNextAvailablePageIndex = (rhymesList = selectedRhymes) => {
-    if (!Array.isArray(rhymesList) || rhymesList.length === 0) {
-      return 0;
-    }
+    const computePageUsage = (rhymesList = selectedRhymes) => {
+      const usageMap = new Map();
+      let highestIndex = -1;
+      let lowestIndex = Number.POSITIVE_INFINITY;
 
-    const numericIndices = rhymesList
-      .map(rhyme => {
-        const index = Number(rhyme?.page_index);
-        return Number.isFinite(index) ? index : null;
-      })
-      .filter(index => index !== null);
+      if (Array.isArray(rhymesList)) {
+        rhymesList.forEach((selection) => {
+          if (!selection) return;
+          const numericIndex = Number(selection?.page_index);
+          if (!Number.isFinite(numericIndex) || numericIndex < 0) {
+            return;
+          }
 
-    if (numericIndices.length === 0) {
-      return 0;
-    }
+          const pageIndex = numericIndex;
+          const pagesValue = parsePagesValue(selection?.pages);
+          const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
 
-    const maxIndex = Math.max(...numericIndices);
-    return Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE - 1);
-  };
+          if (pagesValue === 0.5) {
+            const slot = normalizeSlot(selection?.position, 'top') || 'top';
+            entry[slot] = true;
+          } else {
+            entry.top = true;
+            entry.bottom = true;
+          }
+
+          usageMap.set(pageIndex, entry);
+          highestIndex = Math.max(highestIndex, pageIndex);
+          lowestIndex = Math.min(lowestIndex, pageIndex);
+        });
+      }
+
+      return {
+        usageMap,
+        highestIndex,
+        lowestIndex: lowestIndex === Number.POSITIVE_INFINITY ? -1 : lowestIndex
+      };
+    };
+
+    const computeNextAvailablePageInfoFromUsage = ({ usageMap, highestIndex }) => {
+      for (let index = 0; index < MAX_RHYMES_PER_GRADE; index += 1) {
+        const entry = usageMap.get(index);
+        if (!entry) {
+          return { index, hasCapacity: true, highestIndex };
+        }
+        if (!entry.top || !entry.bottom) {
+          return { index, hasCapacity: true, highestIndex };
+        }
+      }
+
+      const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_RHYMES_PER_GRADE - 1);
+      return { index: fallbackIndex, hasCapacity: false, highestIndex };
+    };
+
+    const computeNextAvailablePageInfo = (rhymesList = selectedRhymes) => {
+      const usage = computePageUsage(rhymesList);
+      const info = computeNextAvailablePageInfoFromUsage(usage);
+      return {
+        ...info,
+        lowestIndex: usage.lowestIndex
+      };
+    };
 
   const fetchAvailableRhymes = async () => {
     try {
@@ -370,8 +412,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       );
 
       const sortedSelections = sortSelections(rhymesWithSvg);
+      const usage = computePageUsage(sortedSelections);
+      const nextInfo = computeNextAvailablePageInfoFromUsage(usage);
+      const initialIndex = Number.isFinite(nextInfo.index) ? nextInfo.index : 0;
+
       setSelectedRhymes(sortedSelections);
-      setCurrentPageIndex(getNextAvailablePageIndex(sortedSelections));
+      setCurrentPageIndex(initialIndex);
     } catch (error) {
       console.error('Error fetching selected rhymes:', error);
     } finally {
@@ -477,6 +523,14 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       const filtered = prevArray.filter(existing => !removals.includes(existing));
 
+      const baseRhyme = {
+        page_index: pageIndex,
+        code: rhyme.code,
+        name: rhyme.name,
+        pages: rhyme.pages,
+        svgContent: null,
+        position: normalizedPosition
+      };
 
       const nextArray = sortSelections([...filtered, baseRhyme]);
       const totalSelected = nextArray.length;
@@ -498,20 +552,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       });
 
       setSelectedRhymes(nextArray);
-
-
-=======
-
-      const baseRhyme = {
-        page_index: pageIndex,
-        code: rhyme.code,
-        name: rhyme.name,
-        pages: rhyme.pages,
-        svgContent: null,
-        position: normalizedPosition
-      };
-
-
 
       try {
         const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
@@ -539,55 +579,20 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             return existing;
           });
-        })
-      } catch (svgError) {
-        console.error('Error fetching rhyme SVG:', svgError);
-      }
-=======
-
-      
-
-
-        return [...filtered, baseRhyme];
-      
-
-
-      try {
-        const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-        const svgContent = svgResponse.data;
-
-        setSelectedRhymes(prev => {
-          const prevArray = Array.isArray(prev) ? prev : [];
-
-          return prevArray.map(existing => {
-            if (!existing) return existing;
-            if (Number(existing.page_index) !== Number(pageIndex)) {
-              return existing;
-            }
-
-            const candidatePosition = resolveRhymePosition(existing, {
-              rhymesForContext: prevArray
-            });
-
-            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
-              return {
-                ...existing,
-                svgContent
-              };
-            }
-
-            return existing;
-          });
         });
       } catch (svgError) {
         console.error('Error fetching rhyme SVG:', svgError);
       }
 
-      // Auto create new page after selection
-      setTimeout(() => {
-        const nextPage = getNextAvailablePageIndex(nextArray);
-        setCurrentPageIndex(nextPage);
-      }, 500);
+      const nextInfo = computeNextAvailablePageInfo(nextArray);
+
+      if (isReplacement) {
+        setCurrentPageIndex(pageIndex);
+      } else {
+        setTimeout(() => {
+          setCurrentPageIndex(nextInfo.index);
+        }, 400);
+      }
 
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
@@ -694,24 +699,49 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     setShowReusable(!showReusable);
   };
 
+  const pageUsage = useMemo(() => computePageUsage(selectedRhymes), [selectedRhymes]);
+  const nextPageInfo = useMemo(() => computeNextAvailablePageInfoFromUsage(pageUsage), [pageUsage]);
+  const nextAvailablePageIndex = nextPageInfo.index;
+  const hasNextPageCapacity = nextPageInfo.hasCapacity;
+  const highestFilledIndex = nextPageInfo.highestIndex;
+
   // Calculate total pages
   const calculateTotalPages = () => {
-    const numericIndices = Array.isArray(selectedRhymes)
-      ? selectedRhymes
-          .map(rhyme => {
-            const index = Number(rhyme?.page_index);
-            return Number.isFinite(index) ? index : null;
-          })
-          .filter(index => index !== null)
-      : [];
+    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex : -1;
+    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex : 0;
+    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex : 0;
 
-    const highestFilledIndex = numericIndices.length > 0 ? Math.max(...numericIndices) : -1;
-    const nextAvailableIndex = Number(getNextAvailablePageIndex()) || 0;
-    const currentIndex = Number(currentPageIndex) || 0;
-    const maxIndex = Math.max(highestFilledIndex, currentIndex, nextAvailableIndex);
+    const candidates = [normalizedHighest, normalizedNext, normalizedCurrent]
+      .filter(index => Number.isFinite(index) && index >= 0);
+
+    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
 
     return Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
   };
+
+  useEffect(() => {
+    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex : -1;
+    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex : 0;
+    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex : 0;
+
+    const candidates = [normalizedHighest, normalizedNext, normalizedCurrent]
+      .filter(index => Number.isFinite(index) && index >= 0);
+
+    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
+    const total = Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
+
+    if (total <= 0) {
+      if (currentPageIndex !== 0) {
+        setCurrentPageIndex(0);
+      }
+      return;
+    }
+
+    const maxAllowed = total - 1;
+    if (currentPageIndex > maxAllowed) {
+      setCurrentPageIndex(Math.max(0, maxAllowed));
+    }
+  }, [highestFilledIndex, nextAvailablePageIndex, currentPageIndex]);
 
   // Get rhymes for current page
   const getCurrentPageRhymes = () => {
@@ -723,7 +753,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     for (const r of selectedRhymes) {
       if (!r) continue;
       if (Number(r.page_index) !== Number(currentPageIndex)) continue;
-      if (r.pages === 1 || r.pages === 1.0) {
+      const pages = parsePagesValue(r.pages);
+      if (pages === 1) {
         pageRhymes.top = r;
         pageRhymes.bottom = null;
         return pageRhymes;
@@ -734,8 +765,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     for (const r of selectedRhymes) {
       if (!r) continue;
       if (Number(r.page_index) !== Number(currentPageIndex)) continue;
-      if (r.pages === 0.5 || r.pages === '0.5') {
-        const pos = (r.position || '').toString().toLowerCase();
+      const pages = parsePagesValue(r.pages);
+      if (pages === 0.5) {
+        const pos = normalizeSlot(r.position, 'top') || 'top';
         if (pos === 'top') pageRhymes.top = r;
         else if (pos === 'bottom') pageRhymes.bottom = r;
       }
@@ -759,7 +791,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const currentPageRhymes = getCurrentPageRhymes();
   const hasTopRhyme = currentPageRhymes.top !== null;
   const hasBottomRhyme = currentPageRhymes.bottom !== null;
-  const isTopFullPage = hasTopRhyme && currentPageRhymes.top.pages === 1.0;
+  const isTopFullPage = hasTopRhyme && parsePagesValue(currentPageRhymes.top.pages) === 1;
   const showBottomContainer = !isTopFullPage;
 
   return (
@@ -827,7 +859,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
               <div className="w-full max-w-2xl">
 
                 {/* Navigation Controls */}
-                <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center justify-between mb-4">
                   <Button
                     onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
                     disabled={currentPageIndex === 0}
@@ -851,6 +883,30 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                     Next
                     <ChevronRight className="w-4 h-4 ml-1" />
                   </Button>
+                </div>
+
+                <div className="flex items-center justify-center mb-6">
+                  {hasNextPageCapacity ? (
+                    <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-gray-600">
+                      <span>
+                        Next available page: <span className="font-semibold text-gray-700">Page {nextAvailablePageIndex + 1}</span>
+                      </span>
+                      <Button
+                        onClick={() => handlePageChange(nextAvailablePageIndex)}
+                        variant="outline"
+                        size="sm"
+                        disabled={nextAvailablePageIndex === currentPageIndex}
+                      >
+                        {nextAvailablePageIndex === currentPageIndex
+                          ? 'Viewing next page'
+                          : `Go to Page ${nextAvailablePageIndex + 1}`}
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-gray-500">
+                      All {MAX_RHYMES_PER_GRADE} pages are currently filled.
+                    </span>
+                  )}
                 </div>
 
                 {/* Dual Container Layout */}
@@ -978,6 +1034,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
               </div>
             </div>
           </div>
+
         </div>
       </div>
     </div>
