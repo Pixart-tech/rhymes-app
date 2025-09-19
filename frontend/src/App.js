@@ -810,47 +810,47 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50">
-      <div className="p-6">
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-6 sm:px-6">
         {/* Header */}
-        <div className="max-w-7xl mx-auto mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800 capitalize">{grade} Grade - Rhyme Selection</h1>
-              <p className="text-gray-600">{school.school_name} ({school.school_id})</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={onBack}
-                variant="outline"
-                className="bg-white/80 hover:bg-white border-gray-200"
-              >
-                Back to Grades
-              </Button>
-              <Button
-                onClick={() => {
-                  if (typeof onLogout === 'function') {
-                    onLogout();
-                  }
-                  navigate('/');
-                }}
-                variant="outline"
-                className="bg-white/80 hover:bg-white border-gray-200 text-red-600 hover:text-red-700"
-              >
-                Logout
-              </Button>
-            </div>
+        <div className="mb-6 flex flex-shrink-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800 capitalize">{grade} Grade - Rhyme Selection</h1>
+            <p className="text-gray-600">{school.school_name} ({school.school_id})</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={onBack}
+              variant="outline"
+              className="bg-white/80 hover:bg-white border-gray-200"
+            >
+              Back to Grades
+            </Button>
+            <Button
+              onClick={() => {
+                if (typeof onLogout === 'function') {
+                  onLogout();
+                }
+                navigate('/');
+              }}
+              variant="outline"
+              className="bg-white/80 hover:bg-white border-gray-200 text-red-600 hover:text-red-700"
+            >
+              Logout
+            </Button>
           </div>
         </div>
 
         {/* Main Content */}
-        <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[calc(100vh-200px)]">
+        <div className="flex-1 overflow-hidden">
+          <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-4">
             
             {/* Tree Menu */}
-            <div className={`lg:col-span-1 transition-all duration-300 ${showTreeMenu ? 'block' : 'hidden'}`}>
-              <div className="mb-4">
-                <Button 
-                  onClick={() => {setShowTreeMenu(false); setCurrentPosition(null);}}
+            <div
+              className={`lg:col-span-1 transition-all duration-300 ${showTreeMenu ? 'flex' : 'hidden'} ${showTreeMenu ? 'lg:flex' : 'lg:hidden'} min-h-0 flex-col`}
+            >
+              <div className="mb-4 flex-shrink-0">
+                <Button
+                  onClick={() => { setShowTreeMenu(false); setCurrentPosition(null); }}
                   variant="outline"
                   className="w-full mb-2"
                 >
@@ -858,162 +858,122 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                   Close Menu
                 </Button>
               </div>
-              <TreeMenu 
-                rhymesData={availableRhymes}
-                reusableRhymes={reusableRhymes}
-                showReusable={showReusable}
-                onRhymeSelect={handleRhymeSelect}
-                onToggleReusable={handleToggleReusable}
-                hideFullPageRhymes={currentPosition === 'bottom'}
-              />
+              <div className="flex-1 min-h-0">
+                <TreeMenu
+                  rhymesData={availableRhymes}
+                  reusableRhymes={reusableRhymes}
+                  showReusable={showReusable}
+                  onRhymeSelect={handleRhymeSelect}
+                  onToggleReusable={handleToggleReusable}
+                  hideFullPageRhymes={currentPosition === 'bottom'}
+                />
+              </div>
             </div>
 
             {/* Dual Container Interface */}
-            <div className={`${showTreeMenu ? 'lg:col-span-3' : 'lg:col-span-4'} flex flex-col items-center justify-center`}>
-              <div className="w-full max-w-2xl">
+            <div
+              className={`${showTreeMenu ? 'lg:col-span-3' : 'lg:col-span-4'} min-h-0 flex flex-col items-center`}
+            >
+              <div className="flex h-full w-full max-w-2xl flex-col">
 
                 {/* Navigation Controls */}
-                <div className="flex items-center justify-between mb-4">
-                  <Button
-                    onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
-                    disabled={currentPageIndex === 0}
-                    variant="outline"
-                    size="sm"
-                  >
-                    <ChevronLeft className="w-4 h-4 mr-1" />
-                    Previous
-                  </Button>
-                  
-                  <div className="text-sm text-gray-600 font-medium">
-                    Page {currentPageIndex + 1} of {totalPages}
-                  </div>
-                  
-                  <Button
-                    onClick={() => handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
-                    disabled={currentPageIndex >= totalPages - 1}
-                    variant="outline"
-                    size="sm"
-                  >
-                    Next
-                    <ChevronRight className="w-4 h-4 ml-1" />
-                  </Button>
-                </div>
+                <div className="flex-shrink-0 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <Button
+                      onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
+                      disabled={currentPageIndex === 0}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-1" />
+                      Previous
+                    </Button>
 
-                <div className="flex items-center justify-center mb-6">
-                  {hasNextPageCapacity ? (
-                    <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-gray-600">
-                      <span>
-                        Next available page: <span className="font-semibold text-gray-700">Page {nextAvailablePageIndex + 1}</span>
-                      </span>
-                      <Button
-                        onClick={() => handlePageChange(nextAvailablePageIndex)}
-                        variant="outline"
-                        size="sm"
-                        disabled={nextAvailablePageIndex === currentPageIndex}
-                      >
-                        {nextAvailablePageIndex === currentPageIndex
-                          ? 'Viewing next page'
-                          : `Go to Page ${nextAvailablePageIndex + 1}`}
-                      </Button>
+                    <div className="text-sm text-gray-600 font-medium">
+                      Page {currentPageIndex + 1} of {totalPages}
                     </div>
-                  ) : (
-                    <span className="text-sm text-gray-500">
-                      All {MAX_RHYMES_PER_GRADE} pages are currently filled.
-                    </span>
-                  )}
+
+                    <Button
+                      onClick={() => handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
+                      disabled={currentPageIndex >= totalPages - 1}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Next
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center justify-center">
+                    {hasNextPageCapacity ? (
+                      <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-gray-600">
+                        <span>
+                          Next available page: <span className="font-semibold text-gray-700">Page {nextAvailablePageIndex + 1}</span>
+                        </span>
+                        <Button
+                          onClick={() => handlePageChange(nextAvailablePageIndex)}
+                          variant="outline"
+                          size="sm"
+                          disabled={nextAvailablePageIndex === currentPageIndex}
+                        >
+                          {nextAvailablePageIndex === currentPageIndex
+                            ? 'Viewing next page'
+                            : `Go to Page ${nextAvailablePageIndex + 1}`}
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-500">
+                        All {MAX_RHYMES_PER_GRADE} pages are currently filled.
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                {/* Dual Container Layout */}
-                <div className="flex justify-center">
-                  <div className="relative w-full max-w-4xl">
-                    <div className="relative aspect-[210/297] w-full">
-                      <div className="absolute inset-0 rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl overflow-hidden">
-                        {showBottomContainer && (
-                          <div className="absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent pointer-events-none" />
-                        )}
-                        <div className="flex h-full flex-col">
-                          <div
-                            className={`relative flex-1 p-6 sm:p-8 flex flex-col ${
-                              showBottomContainer ? 'border-b border-gray-200' : ''
-                            }`}
-                          >
-                            {hasTopRhyme ? (
-                              <div className="relative flex flex-1 flex-col pr-24 sm:pr-32">
-                                <Button
-                                  onClick={() => handleAddRhyme('top')}
-                                  variant="outline"
-                                  className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
-                                >
-                                  <Replace className="w-4 h-4 mr-2" />
-                                  Replace
-                                </Button>
-                                <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-xl overflow-hidden">
-                                  <div
-                                    dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
-                                    className="w-full h-full flex items-center justify-center"
-                                  />
-                                </div>
-                                <div className="text-center mt-4 space-y-1">
-                                  <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
-                                  <p className="text-sm text-gray-500">
-                                    Code: {currentPageRhymes.top.code} • Pages: {currentPageRhymes.top.pages}
-                                  </p>
-                                </div>
-                                <div className="mt-4 flex justify-center sm:justify-end">
-                                  <Button
-                                    onClick={() => {
-                                      if (currentPageRhymes.top) {
-                                        handleRemoveRhyme(currentPageRhymes.top, 'top');
-                                      } else {
-                                        console.warn('No top rhyme to remove');
-                                      }
-                                    }}
-                                    variant="outline"
-                                    className="bg-white/70 hover:bg-white text-red-600 hover:text-red-700"
-                                  >
-                                    Remove
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="flex-1 flex items-center justify-center">
-                                <Button
-                                  onClick={() => handleAddRhyme('top')}
-                                  className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-                                >
-                                  <Plus className="w-8 h-8" />
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <div className="flex-1 min-h-0 py-6">
+                    <div className="flex h-full items-center justify-center">
+                      <div className="relative flex h-full w-full max-w-4xl">
+                        <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
                           {showBottomContainer && (
-                            <div className="relative flex-1 p-6 sm:p-8 flex flex-col">
-                              {hasBottomRhyme ? (
-                                <div className="relative flex flex-1 flex-col pr-24 sm:pr-32">
+                            <div className="pointer-events-none absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
+                          )}
+                          <div className="flex h-full flex-col">
+                            <div
+                              className={`relative flex flex-1 min-h-0 flex-col p-6 sm:p-8 ${
+                                showBottomContainer ? 'border-b border-gray-200' : ''
+                              }`}
+                            >
+                              {hasTopRhyme ? (
+                                <div className="relative flex flex-1 min-h-0 flex-col pr-24 sm:pr-32">
                                   <Button
-                                    onClick={() => handleAddRhyme('bottom')}
+                                    onClick={() => handleAddRhyme('top')}
                                     variant="outline"
                                     className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
                                   >
                                     <Replace className="w-4 h-4 mr-2" />
                                     Replace
                                   </Button>
-                                  <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-xl overflow-hidden">
+                                  <div className="flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
                                     <div
-                                      dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
-                                      className="w-full h-full flex items-center justify-center"
+                                      dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
+                                      className="flex h-full w-full items-center justify-center"
                                     />
                                   </div>
-                                  <div className="text-center mt-4 space-y-1">
-                                    <p className="font-semibold text-gray-800">{currentPageRhymes.bottom.name}</p>
+                                  <div className="mt-4 space-y-1 text-center">
+                                    <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
                                     <p className="text-sm text-gray-500">
-                                      Code: {currentPageRhymes.bottom.code} • Pages: {currentPageRhymes.bottom.pages}
+                                      Code: {currentPageRhymes.top.code} • Pages: {currentPageRhymes.top.pages}
                                     </p>
                                   </div>
                                   <div className="mt-4 flex justify-center sm:justify-end">
                                     <Button
-                                      onClick={() => handleRemoveRhyme(currentPageRhymes.bottom, 'bottom')}
+                                      onClick={() => {
+                                        if (currentPageRhymes.top) {
+                                          handleRemoveRhyme(currentPageRhymes.top, 'top');
+                                        } else {
+                                          console.warn('No top rhyme to remove');
+                                        }
+                                      }}
                                       variant="outline"
                                       className="bg-white/70 hover:bg-white text-red-600 hover:text-red-700"
                                     >
@@ -1022,39 +982,86 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   </div>
                                 </div>
                               ) : (
-                                <div className="flex-1 flex items-center justify-center">
+                                <div className="flex flex-1 items-center justify-center">
                                   <Button
-                                    onClick={() => handleAddRhyme('bottom')}
-                                    className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                                    onClick={() => handleAddRhyme('top')}
+                                    className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
                                   >
-                                    <Plus className="w-8 h-8" />
+                                    <Plus className="h-8 w-8" />
                                   </Button>
                                 </div>
                               )}
                             </div>
-                          )}
+
+                            {showBottomContainer && (
+                              <div className="relative flex-1 min-h-0 p-6 sm:p-8">
+                                {hasBottomRhyme ? (
+                                  <div className="relative flex flex-1 min-h-0 flex-col pr-24 sm:pr-32">
+                                    <Button
+                                      onClick={() => handleAddRhyme('bottom')}
+                                      variant="outline"
+                                      className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
+                                    >
+                                      <Replace className="w-4 h-4 mr-2" />
+                                      Replace
+                                    </Button>
+                                    <div className="flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
+                                      <div
+                                        dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
+                                        className="flex h-full w-full items-center justify-center"
+                                      />
+                                    </div>
+                                    <div className="mt-4 space-y-1 text-center">
+                                      <p className="font-semibold text-gray-800">{currentPageRhymes.bottom.name}</p>
+                                      <p className="text-sm text-gray-500">
+                                        Code: {currentPageRhymes.bottom.code} • Pages: {currentPageRhymes.bottom.pages}
+                                      </p>
+                                    </div>
+                                    <div className="mt-4 flex justify-center sm:justify-end">
+                                      <Button
+                                        onClick={() => handleRemoveRhyme(currentPageRhymes.bottom, 'bottom')}
+                                        variant="outline"
+                                        className="bg-white/70 hover:bg-white text-red-600 hover:text-red-700"
+                                      >
+                                        Remove
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-1 items-center justify-center">
+                                    <Button
+                                      onClick={() => handleAddRhyme('bottom')}
+                                      className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                    >
+                                      <Plus className="h-8 w-8" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Page Indicators */}
-                {totalPages > 1 && (
-                  <div className="flex justify-center space-x-2 mt-6">
-                    {Array.from({ length: totalPages }, (_, index) => (
-                      <button
-                        key={index}
-                        onClick={() => handlePageChange(index)}
-                        className={`w-3 h-3 rounded-full transition-colors duration-200 ${
-                          index === currentPageIndex 
-                            ? 'bg-orange-400' 
-                            : 'bg-gray-300'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                )}
+                  {/* Page Indicators */}
+                  {totalPages > 1 && (
+                    <div className="mt-6 flex justify-center space-x-2">
+                      {Array.from({ length: totalPages }, (_, index) => (
+                        <button
+                          key={index}
+                          onClick={() => handlePageChange(index)}
+                          className={`h-3 w-3 rounded-full transition-colors duration-200 ${
+                            index === currentPageIndex
+                              ? 'bg-orange-400'
+                              : 'bg-gray-300'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
