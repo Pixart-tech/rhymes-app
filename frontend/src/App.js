@@ -910,109 +910,119 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 </div>
 
                 {/* Dual Container Layout */}
-                <div className="grid grid-cols-1 gap-6">
-                  
-                  {/* Top Container */}
-                  <Card className={`relative bg-white/80 backdrop-blur-sm border-0 shadow-xl transition-all duration-300 ${
-                    isTopFullPage ? 'min-h-[600px]' : 'min-h-[300px]'
-                  }`}>
-                    <CardContent className="p-6 min-h-[300px] flex flex-col">
-                      {hasTopRhyme ? (
-                        <>
-                          <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden mb-4">
-                            <div 
-                              dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
-                              className="w-full h-full flex items-center justify-center"
-                            />
-                          </div>
-                          <div className="text-center mb-4">
-                            <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
-                            <p className="text-sm text-gray-500">Code: {currentPageRhymes.top.code} • Pages: {currentPageRhymes.top.pages}</p>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button
-                              onClick={() => handleAddRhyme('top')}
-                              variant="outline"
-                              className="flex-1 bg-white/50 hover:bg-white"
-                            >
-                              <Replace className="w-4 h-4 mr-2" />
-                              Replace
-                            </Button>
-                            <Button
-                              onClick={() => {
-                                if (currentPageRhymes.top) {
-                                  handleRemoveRhyme(currentPageRhymes.top, 'top');
-                                } else {
-                                  console.warn('No top rhyme to remove');
-                                }
-                              }}
-                              variant="outline"
-                              className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="flex-1 flex items-center justify-center">
-                          <Button
-                            onClick={() => handleAddRhyme('top')}
-                            className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-                          >
-                            <Plus className="w-8 h-8" />
-                          </Button>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  {/* Bottom Container */}
-                  {showBottomContainer && (
-                    <Card className="relative bg-white/80 backdrop-blur-sm border-0 shadow-xl">
-                      <CardContent className="p-6 min-h-[300px] flex flex-col">
-                        {hasBottomRhyme ? (
-                          <>
-                            <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden mb-4">
-                              <div 
-                                dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
-                                className="w-full h-full flex items-center justify-center"
-                              />
-                            </div>
-                            <div className="text-center mb-4">
-                              <p className="font-semibold text-gray-800">{currentPageRhymes.bottom.name}</p>
-                              <p className="text-sm text-gray-500">Code: {currentPageRhymes.bottom.code} • Pages: {currentPageRhymes.bottom.pages}</p>
-                            </div>
-                            <div className="flex gap-2">
-                              <Button
-                                onClick={() => handleAddRhyme('bottom')}
-                                variant="outline"
-                                className="flex-1 bg-white/50 hover:bg-white"
-                              >
-                                <Replace className="w-4 h-4 mr-2" />
-                                Replace
-                              </Button>
-                              <Button
-                                onClick={() => handleRemoveRhyme(currentPageRhymes.bottom, 'bottom')}
-                                variant="outline"
-                                className="flex-1 bg-white/50 hover:bg-white text-red-600 hover:text-red-700"
-                              >
-                                Remove
-                              </Button>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex-1 flex items-center justify-center">
-                            <Button
-                              onClick={() => handleAddRhyme('bottom')}
-                              className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-                            >
-                              <Plus className="w-8 h-8" />
-                            </Button>
-                          </div>
+                <div className="flex justify-center">
+                  <div className="relative w-full max-w-4xl">
+                    <div className="relative aspect-[210/297] w-full">
+                      <div className="absolute inset-0 rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl overflow-hidden">
+                        {showBottomContainer && (
+                          <div className="absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent pointer-events-none" />
                         )}
-                      </CardContent>
-                    </Card>
-                  )}
+                        <div className="flex h-full flex-col">
+                          <div
+                            className={`relative flex-1 p-6 sm:p-8 flex flex-col ${
+                              showBottomContainer ? 'border-b border-gray-200' : ''
+                            }`}
+                          >
+                            {hasTopRhyme ? (
+                              <div className="relative flex flex-1 flex-col pr-24 sm:pr-32">
+                                <Button
+                                  onClick={() => handleAddRhyme('top')}
+                                  variant="outline"
+                                  className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
+                                >
+                                  <Replace className="w-4 h-4 mr-2" />
+                                  Replace
+                                </Button>
+                                <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-xl overflow-hidden">
+                                  <div
+                                    dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
+                                    className="w-full h-full flex items-center justify-center"
+                                  />
+                                </div>
+                                <div className="text-center mt-4 space-y-1">
+                                  <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
+                                  <p className="text-sm text-gray-500">
+                                    Code: {currentPageRhymes.top.code} • Pages: {currentPageRhymes.top.pages}
+                                  </p>
+                                </div>
+                                <div className="mt-4 flex justify-center sm:justify-end">
+                                  <Button
+                                    onClick={() => {
+                                      if (currentPageRhymes.top) {
+                                        handleRemoveRhyme(currentPageRhymes.top, 'top');
+                                      } else {
+                                        console.warn('No top rhyme to remove');
+                                      }
+                                    }}
+                                    variant="outline"
+                                    className="bg-white/70 hover:bg-white text-red-600 hover:text-red-700"
+                                  >
+                                    Remove
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex-1 flex items-center justify-center">
+                                <Button
+                                  onClick={() => handleAddRhyme('top')}
+                                  className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                                >
+                                  <Plus className="w-8 h-8" />
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+
+                          {showBottomContainer && (
+                            <div className="relative flex-1 p-6 sm:p-8 flex flex-col">
+                              {hasBottomRhyme ? (
+                                <div className="relative flex flex-1 flex-col pr-24 sm:pr-32">
+                                  <Button
+                                    onClick={() => handleAddRhyme('bottom')}
+                                    variant="outline"
+                                    className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
+                                  >
+                                    <Replace className="w-4 h-4 mr-2" />
+                                    Replace
+                                  </Button>
+                                  <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-xl overflow-hidden">
+                                    <div
+                                      dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
+                                      className="w-full h-full flex items-center justify-center"
+                                    />
+                                  </div>
+                                  <div className="text-center mt-4 space-y-1">
+                                    <p className="font-semibold text-gray-800">{currentPageRhymes.bottom.name}</p>
+                                    <p className="text-sm text-gray-500">
+                                      Code: {currentPageRhymes.bottom.code} • Pages: {currentPageRhymes.bottom.pages}
+                                    </p>
+                                  </div>
+                                  <div className="mt-4 flex justify-center sm:justify-end">
+                                    <Button
+                                      onClick={() => handleRemoveRhyme(currentPageRhymes.bottom, 'bottom')}
+                                      variant="outline"
+                                      className="bg-white/70 hover:bg-white text-red-600 hover:text-red-700"
+                                    >
+                                      Remove
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex-1 flex items-center justify-center">
+                                  <Button
+                                    onClick={() => handleAddRhyme('bottom')}
+                                    className="w-24 h-24 rounded-full bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                                  >
+                                    <Plus className="w-8 h-8" />
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Page Indicators */}
