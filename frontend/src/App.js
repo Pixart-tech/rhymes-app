@@ -315,12 +315,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     fetchSelectedRhymes();
   }, []);
 
-  const getNextAvailablePageIndex = () => {
-    if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) {
+  const getNextAvailablePageIndex = (rhymesList = selectedRhymes) => {
+    if (!Array.isArray(rhymesList) || rhymesList.length === 0) {
       return 0;
     }
 
-    const numericIndices = selectedRhymes
+    const numericIndices = rhymesList
       .map(rhyme => {
         const index = Number(rhyme?.page_index);
         return Number.isFinite(index) ? index : null;
@@ -362,14 +362,16 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         gradeSelections.map(async (rhyme) => {
           try {
             const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-            return { ...rhyme, svgContent: svgResponse.data };
+            return { ...rhyme, position: rhyme.position || null, svgContent: svgResponse.data };
           } catch (error) {
-            return { ...rhyme, svgContent: null };
+            return { ...rhyme, position: rhyme.position || null, svgContent: null };
           }
         })
       );
-      
-      setSelectedRhymes(rhymesWithSvg);
+
+      const sortedSelections = sortSelections(rhymesWithSvg);
+      setSelectedRhymes(sortedSelections);
+      setCurrentPageIndex(getNextAvailablePageIndex(sortedSelections));
     } catch (error) {
       console.error('Error fetching selected rhymes:', error);
     } finally {
@@ -383,27 +385,112 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     setShowReusable(false);
   };
 
+  const normalizeSlot = (value, fallback = '') => {
+    if (value === null || value === undefined) return fallback;
+    const normalized = value.toString().trim().toLowerCase();
+    return normalized === 'top' || normalized === 'bottom' ? normalized : fallback;
+  };
+
+  const parsePagesValue = (pagesValue) => {
+    if (typeof pagesValue === 'number') {
+      return Number.isFinite(pagesValue) ? pagesValue : null;
+    }
+    if (typeof pagesValue === 'string') {
+      const trimmed = pagesValue.trim();
+      if (trimmed === '') {
+        return null;
+      }
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+
+  const sortSelections = (selections) => {
+    if (!Array.isArray(selections)) {
+      return [];
+    }
+
+    const getPositionWeight = (selection) => {
+      const normalized = normalizeSlot(selection?.position, 'top');
+      return normalized === 'bottom' ? 1 : 0;
+    };
+
+    return [...selections].sort((a, b) => {
+      const indexA = Number(a?.page_index ?? 0);
+      const indexB = Number(b?.page_index ?? 0);
+
+      if (indexA !== indexB) {
+        return indexA - indexB;
+      }
+
+      return getPositionWeight(a) - getPositionWeight(b);
+    });
+  };
+
+  const computeRemovalsForSelection = ({ selections, pageIndex, normalizedPosition, newPages }) => {
+    if (!Array.isArray(selections) || selections.length === 0) {
+      return [];
+    }
+
+    return selections.filter(existing => {
+      if (!existing) return false;
+      if (Number(existing.page_index) !== Number(pageIndex)) {
+        return false;
+      }
+
+      const existingPages = parsePagesValue(existing.pages) ?? 1;
+
+      if (newPages > 0.5) {
+        return true;
+      }
+
+      if (existingPages > 0.5) {
+        return true;
+      }
+
+      const existingPosition = normalizeSlot(existing.position, 'top');
+
+      if (existingPosition) {
+        return existingPosition === normalizedPosition;
+      }
+
+      return normalizedPosition === 'top';
+    });
+  };
+
   const handleRhymeSelect = async (rhyme) => {
     try {
       const pageIndex = currentPageIndex;
-      const normalizedPosition = typeof currentPosition === 'string'
-        ? currentPosition.toLowerCase()
+      const prevArray = Array.isArray(selectedRhymes) ? selectedRhymes : [];
+      const pagesValue = parsePagesValue(rhyme?.pages) ?? 1;
+      const normalizedPosition = pagesValue === 0.5
+        ? normalizeSlot(currentPosition, 'top') || 'top'
         : 'top';
 
-      const rhymesForPage = Array.isArray(selectedRhymes)
-        ? selectedRhymes.filter(r => Number(r?.page_index) === Number(pageIndex))
-        : [];
-
-      const isReplacement = rhymesForPage.some(existing => {
-        if (!existing) return false;
-        const candidatePosition = resolveRhymePosition(existing, {
-          rhymesForContext: selectedRhymes
-        });
-        return candidatePosition === normalizedPosition;
+      const removals = computeRemovalsForSelection({
+        selections: prevArray,
+        pageIndex,
+        normalizedPosition,
+        newPages: pagesValue
       });
 
-      const totalSelected = Array.isArray(selectedRhymes) ? selectedRhymes.length : 0;
-      if (!isReplacement && totalSelected >= MAX_RHYMES_PER_GRADE) {
+      const filtered = prevArray.filter(existing => !removals.includes(existing));
+
+      const baseRhyme = {
+        page_index: pageIndex,
+        code: rhyme.code,
+        name: rhyme.name,
+        pages: pagesValue,
+        svgContent: null,
+        position: normalizedPosition
+      };
+
+      const nextArray = sortSelections([...filtered, baseRhyme]);
+      const totalSelected = nextArray.length;
+      const isReplacement = removals.length > 0;
+
+      if (!isReplacement && totalSelected > MAX_RHYMES_PER_GRADE) {
         toast.error('Max of 25 rhymes per grade');
         setShowTreeMenu(false);
         setCurrentPosition(null);
@@ -414,39 +501,46 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         school_id: school.school_id,
         grade: grade,
         page_index: pageIndex,
-        rhyme_code: rhyme.code
-      });
-
-      const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-      
-      const newRhyme = {
-        page_index: pageIndex,
-        code: rhyme.code,
-        name: rhyme.name,
-        pages: rhyme.pages,
-        svgContent: svgResponse.data,
+        rhyme_code: rhyme.code,
         position: normalizedPosition
-      };
-
-      setSelectedRhymes(prev => {
-        const prevArray = Array.isArray(prev) ? prev : [];
-        const filtered = prevArray.filter(existing => {
-          if (!existing) return false;
-          if (Number(existing.page_index) !== Number(pageIndex)) {
-            return true;
-          }
-          const candidatePosition = resolveRhymePosition(existing, {
-            rhymesForContext: prevArray
-          });
-          return candidatePosition !== normalizedPosition;
-        });
-
-        return [...filtered, newRhyme];
       });
+
+      setSelectedRhymes(nextArray);
+
+      try {
+        const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
+        const svgContent = svgResponse.data;
+
+        setSelectedRhymes(prev => {
+          const prevArrayInner = Array.isArray(prev) ? prev : [];
+
+          return prevArrayInner.map(existing => {
+            if (!existing) return existing;
+            if (Number(existing.page_index) !== Number(pageIndex)) {
+              return existing;
+            }
+
+            const candidatePosition = resolveRhymePosition(existing, {
+              rhymesForContext: prevArrayInner
+            });
+
+            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+              return {
+                ...existing,
+                svgContent
+              };
+            }
+
+            return existing;
+          });
+        });
+      } catch (svgError) {
+        console.error('Error fetching rhyme SVG:', svgError);
+      }
 
       // Auto create new page after selection
       setTimeout(() => {
-        const nextPage = getNextAvailablePageIndex();
+        const nextPage = getNextAvailablePageIndex(nextArray);
         setCurrentPageIndex(nextPage);
       }, 500);
 
@@ -463,34 +557,17 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     explicitPosition,
     rhymesForContext
   } = {}) => {
-    const normalizePosition = (value) => {
-      if (!value && value !== 0) return '';
-      const normalized = value.toString().trim().toLowerCase();
-      return normalized === 'top' || normalized === 'bottom' ? normalized : '';
-    };
-
-    const normalizedExplicit = normalizePosition(explicitPosition);
+    const normalizedExplicit = normalizeSlot(explicitPosition);
     if (normalizedExplicit) {
       return normalizedExplicit;
     }
 
-    const normalizedFromRhyme = normalizePosition(rhyme?.position);
+    const normalizedFromRhyme = normalizeSlot(rhyme?.position);
     if (normalizedFromRhyme) {
       return normalizedFromRhyme;
     }
 
-    const parsePages = (pagesValue) => {
-      if (typeof pagesValue === 'number') {
-        return Number.isFinite(pagesValue) ? pagesValue : null;
-      }
-      if (typeof pagesValue === 'string' && pagesValue.trim() !== '') {
-        const parsed = Number(pagesValue);
-        return Number.isFinite(parsed) ? parsed : null;
-      }
-      return null;
-    };
-
-    const pages = parsePages(rhyme?.pages);
+    const pages = parsePagesValue(rhyme?.pages);
     if (pages === 1 || pages === 1.0) {
       return 'top';
     }
@@ -504,7 +581,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       const halfPageRhymes = (contextRhymes || []).filter((r) => {
         if (!r) return false;
         if (Number(r.page_index) !== normalizedPageIndex) return false;
-        return parsePages(r.pages) === 0.5;
+        return parsePagesValue(r.pages) === 0.5;
       });
 
       if (halfPageRhymes.length === 1) {
@@ -592,35 +669,35 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   };
 
   // Get rhymes for current page
-const getCurrentPageRhymes = () => {
-  const pageRhymes = { top: null, bottom: null };
+  const getCurrentPageRhymes = () => {
+    const pageRhymes = { top: null, bottom: null };
 
-  if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) return pageRhymes;
+    if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) return pageRhymes;
 
-  // Prefer full-page rhyme
-  for (const r of selectedRhymes) {
-    if (!r) continue;
-    if (Number(r.page_index) !== Number(currentPageIndex)) continue;
-    if (r.pages === 1 || r.pages === 1.0) {
-      pageRhymes.top = r;
-      pageRhymes.bottom = null;
-      return pageRhymes;
+    // Prefer full-page rhyme
+    for (const r of selectedRhymes) {
+      if (!r) continue;
+      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+      if (r.pages === 1 || r.pages === 1.0) {
+        pageRhymes.top = r;
+        pageRhymes.bottom = null;
+        return pageRhymes;
+      }
     }
-  }
 
-  // Place half-page rhymes by explicit position (do not infer)
-  for (const r of selectedRhymes) {
-    if (!r) continue;
-    if (Number(r.page_index) !== Number(currentPageIndex)) continue;
-    if (r.pages === 0.5 || r.pages === '0.5') {
-      const pos = (r.position || '').toString().toLowerCase();
-      if (pos === 'top') pageRhymes.top = r;
-      else if (pos === 'bottom') pageRhymes.bottom = r;
+    // Place half-page rhymes by explicit position (do not infer)
+    for (const r of selectedRhymes) {
+      if (!r) continue;
+      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+      if (r.pages === 0.5 || r.pages === '0.5') {
+        const pos = (r.position || '').toString().toLowerCase();
+        if (pos === 'top') pageRhymes.top = r;
+        else if (pos === 'bottom') pageRhymes.bottom = r;
+      }
     }
-  }
 
-  return pageRhymes;
-};
+    return pageRhymes;
+  };
 
   if (loading) {
     return (
