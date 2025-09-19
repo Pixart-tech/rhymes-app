@@ -477,14 +477,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       const filtered = prevArray.filter(existing => !removals.includes(existing));
 
-      const baseRhyme = {
-        page_index: pageIndex,
-        code: rhyme.code,
-        name: rhyme.name,
-        pages: pagesValue,
-        svgContent: null,
-        position: normalizedPosition
-      };
 
       const nextArray = sortSelections([...filtered, baseRhyme]);
       const totalSelected = nextArray.length;
@@ -507,6 +499,20 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       setSelectedRhymes(nextArray);
 
+
+=======
+
+      const baseRhyme = {
+        page_index: pageIndex,
+        code: rhyme.code,
+        name: rhyme.name,
+        pages: rhyme.pages,
+        svgContent: null,
+        position: normalizedPosition
+      };
+
+
+
       try {
         const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
         const svgContent = svgResponse.data;
@@ -522,6 +528,45 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             const candidatePosition = resolveRhymePosition(existing, {
               rhymesForContext: prevArrayInner
+            });
+
+            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+              return {
+                ...existing,
+                svgContent
+              };
+            }
+
+            return existing;
+          });
+        })
+      } catch (svgError) {
+        console.error('Error fetching rhyme SVG:', svgError);
+      }
+=======
+
+      
+
+
+        return [...filtered, baseRhyme];
+      
+
+
+      try {
+        const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
+        const svgContent = svgResponse.data;
+
+        setSelectedRhymes(prev => {
+          const prevArray = Array.isArray(prev) ? prev : [];
+
+          return prevArray.map(existing => {
+            if (!existing) return existing;
+            if (Number(existing.page_index) !== Number(pageIndex)) {
+              return existing;
+            }
+
+            const candidatePosition = resolveRhymePosition(existing, {
+              rhymesForContext: prevArray
             });
 
             if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
