@@ -723,7 +723,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     for (const r of selectedRhymes) {
       if (!r) continue;
       if (Number(r.page_index) !== Number(currentPageIndex)) continue;
-      if (r.pages === 1 || r.pages === 1.0) {
+      const pages = parsePagesValue(r.pages);
+      if (pages === 1) {
         pageRhymes.top = r;
         pageRhymes.bottom = null;
         return pageRhymes;
@@ -734,8 +735,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     for (const r of selectedRhymes) {
       if (!r) continue;
       if (Number(r.page_index) !== Number(currentPageIndex)) continue;
-      if (r.pages === 0.5 || r.pages === '0.5') {
-        const pos = (r.position || '').toString().toLowerCase();
+      const pages = parsePagesValue(r.pages);
+      if (pages === 0.5) {
+        const pos = normalizeSlot(r.position, 'top') || 'top';
         if (pos === 'top') pageRhymes.top = r;
         else if (pos === 'bottom') pageRhymes.bottom = r;
       }
@@ -759,7 +761,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const currentPageRhymes = getCurrentPageRhymes();
   const hasTopRhyme = currentPageRhymes.top !== null;
   const hasBottomRhyme = currentPageRhymes.bottom !== null;
-  const isTopFullPage = hasTopRhyme && currentPageRhymes.top.pages === 1.0;
+  const isTopFullPage = hasTopRhyme && parsePagesValue(currentPageRhymes.top.pages) === 1;
   const showBottomContainer = !isTopFullPage;
 
   return (
