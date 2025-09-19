@@ -64,6 +64,22 @@ class GradeStatus(BaseModel):
     selected_count: int
     total_available: int
 
+
+class RhymeSelectionDetail(BaseModel):
+    id: Optional[str] = None
+    page_index: int
+    rhyme_code: str
+    rhyme_name: str
+    pages: float
+    position: Optional[str] = None
+    timestamp: Optional[datetime] = None
+
+
+class SchoolWithSelections(School):
+    total_selections: int = 0
+    last_updated: Optional[datetime] = None
+    grades: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
+
 # Authentication endpoints
 @api_router.post("/auth/login", response_model=School)
 async def login_school(input: SchoolCreate):
@@ -340,6 +356,129 @@ async def get_grade_status(school_id: str):
         })
     
     return status
+
+
+@api_router.get("/admin/schools", response_model=List[SchoolWithSelections])
+async def get_all_schools_with_selections():
+    """Return all schools with their rhyme selections grouped by grade."""
+    school_docs = await db.schools.find().sort("timestamp", -1).to_list(None)
+
+    if not school_docs:
+        return []
+
+    school_ids = [doc.get("school_id") for doc in school_docs if doc.get("school_id")]
+
+    selection_docs = []
+    if school_ids:
+        selection_docs = await db.rhyme_selections.find({
+            "school_id": {"$in": school_ids}
+        }).to_list(None)
+
+    selections_by_school: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    latest_selection_timestamp: Dict[str, datetime] = {}
+
+    for selection in selection_docs:
+        school_id = selection.get("school_id")
+        grade = selection.get("grade")
+
+        if not school_id or not grade:
+            continue
+
+        school_bucket = selections_by_school.setdefault(school_id, {})
+        grade_bucket = school_bucket.setdefault(grade, [])
+        grade_bucket.append(selection)
+
+        timestamp = selection.get("timestamp")
+        if timestamp:
+            existing = latest_selection_timestamp.get(school_id)
+            if not existing or timestamp > existing:
+                latest_selection_timestamp[school_id] = timestamp
+
+    def sort_key(selection: Dict[str, Any]):
+        page_index = selection.get("page_index")
+        try:
+            normalized_page = int(page_index)
+        except (TypeError, ValueError):
+            normalized_page = 0
+
+        position = (selection.get("position") or "top").strip().lower()
+        position_weight = 1 if position == "bottom" else 0
+
+        return (normalized_page, position_weight)
+
+    schools_with_details: List[SchoolWithSelections] = []
+
+    for doc in school_docs:
+        school_id = doc.get("school_id")
+        base_payload = {
+            "id": doc.get("id"),
+            "school_id": school_id,
+            "school_name": doc.get("school_name"),
+            "timestamp": doc.get("timestamp"),
+        }
+
+        grade_map: Dict[str, List[RhymeSelectionDetail]] = {}
+
+        for grade, selections in selections_by_school.get(school_id, {}).items():
+            sorted_selections = sorted(selections, key=sort_key)
+            detailed_selections: List[RhymeSelectionDetail] = []
+
+            for selection in sorted_selections:
+                page_index_raw = selection.get("page_index", 0)
+                try:
+                    page_index = int(page_index_raw)
+                except (TypeError, ValueError):
+                    page_index = 0
+
+                pages_raw = selection.get("pages", 0)
+                try:
+                    pages_value = float(pages_raw)
+                except (TypeError, ValueError):
+                    pages_value = 0.0
+
+                detailed_selections.append(
+                    RhymeSelectionDetail(
+                        id=selection.get("id"),
+                        page_index=page_index,
+                        rhyme_code=selection.get("rhyme_code"),
+                        rhyme_name=selection.get("rhyme_name"),
+                        pages=pages_value,
+                        position=selection.get("position"),
+                        timestamp=selection.get("timestamp"),
+                    )
+                )
+
+            grade_map[grade] = detailed_selections
+
+        total_selections = sum(len(items) for items in grade_map.values())
+        last_updated = latest_selection_timestamp.get(school_id) or doc.get("timestamp")
+
+        schools_with_details.append(
+            SchoolWithSelections(
+                **base_payload,
+                total_selections=total_selections,
+                last_updated=last_updated,
+                grades=grade_map,
+            )
+        )
+
+    return schools_with_details
+
+
+@api_router.delete("/admin/schools/{school_id}")
+async def delete_school(school_id: str):
+    """Delete a school and all of its rhyme selections."""
+    school_result = await db.schools.delete_one({"school_id": school_id})
+    selection_result = await db.rhyme_selections.delete_many({"school_id": school_id})
+
+    if school_result.deleted_count == 0 and selection_result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    return {
+        "message": "School and associated rhymes removed successfully",
+        "removed_school": school_result.deleted_count,
+        "removed_selections": selection_result.deleted_count,
+    }
 
 @api_router.get("/rhymes/svg/{rhyme_code}")
 async def get_rhyme_svg(rhyme_code: str):

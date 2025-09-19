@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
 
+import AdminDashboard from './AdminDashboard';
+
 // Components
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
@@ -24,6 +26,7 @@ const AuthPage = ({ onAuth }) => {
   const [schoolId, setSchoolId] = useState('');
   const [schoolName, setSchoolName] = useState('');
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -87,6 +90,14 @@ const AuthPage = ({ onAuth }) => {
               className="w-full h-12 bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white font-semibold rounded-xl transition-all duration-300 transform hover:scale-105"
             >
               {loading ? 'Authenticating...' : 'Enter School'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate('/admin')}
+              className="w-full h-12 border-orange-200 bg-white/70 text-orange-600 hover:bg-white"
+            >
+              Open Admin Dashboard
             </Button>
           </form>
         </CardContent>
@@ -414,7 +425,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       const sortedSelections = sortSelections(rhymesWithSvg);
       const usage = computePageUsage(sortedSelections);
       const nextInfo = computeNextAvailablePageInfoFromUsage(usage);
-      const initialIndex = Number.isFinite(nextInfo.index) ? nextInfo.index : 0;
+      const hasExistingSelections = Array.isArray(sortedSelections) && sortedSelections.length > 0;
+      const initialIndex = hasExistingSelections && Number.isFinite(usage.lowestIndex) && usage.lowestIndex >= 0
+        ? usage.lowestIndex
+        : (Number.isFinite(nextInfo.index) ? nextInfo.index : 0);
 
       setSelectedRhymes(sortedSelections);
       setCurrentPageIndex(initialIndex);
@@ -1078,6 +1092,7 @@ function App() {
       <Toaster position="top-right" />
       <BrowserRouter>
         <Routes>
+          <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/" element={
             !school ? (
               <AuthPage onAuth={handleAuth} />
