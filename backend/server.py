@@ -49,6 +49,7 @@ class RhymeSelection(BaseModel):
     rhyme_code: str
     rhyme_name: str
     pages: float
+    position: str = "top"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 class RhymeSelectionCreate(BaseModel):
@@ -56,6 +57,7 @@ class RhymeSelectionCreate(BaseModel):
     grade: str
     page_index: int
     rhyme_code: str
+    position: Optional[str] = None
 
 class GradeStatus(BaseModel):
     grade: str
@@ -147,7 +149,8 @@ async def get_selected_rhymes(school_id: str):
             "page_index": selection["page_index"],
             "code": selection["rhyme_code"],
             "name": selection["rhyme_name"],
-            "pages": selection["pages"]
+            "pages": selection["pages"],
+            "position": selection.get("position")
         })
     
     # Sort by page_index
@@ -196,18 +199,48 @@ async def select_rhyme(input: RhymeSelectionCreate):
     
     rhyme_data = RHYMES_DATA[input.rhyme_code]
     
-    # Remove existing selection for this page index if any
-    await db.rhyme_selections.delete_many({
+    pages = float(rhyme_data[1])
+
+    # Normalize position (half-page rhymes can occupy top or bottom)
+    requested_position = (input.position or "").strip().lower()
+    normalized_position = "bottom" if pages == 0.5 and requested_position == "bottom" else "top"
+
+    page_query = {
         "school_id": input.school_id,
         "grade": input.grade,
         "page_index": input.page_index
-    })
-    
+    }
+
+    existing_selections = await db.rhyme_selections.find(page_query).to_list(None)
+
+    for existing in existing_selections:
+        existing_pages = float(existing.get("pages", 1))
+        existing_position = (existing.get("position") or "top").lower()
+
+        should_remove = False
+
+        if pages > 0.5:
+            # Full-page rhyme replaces everything on the page
+            should_remove = True
+        else:
+            # Half-page rhymes should only replace conflicting entries
+            if existing_pages > 0.5:
+                should_remove = True
+            elif existing_position == normalized_position:
+                should_remove = True
+            elif existing.get("position") is None and normalized_position == "top":
+                # Legacy records without a stored position occupy the top slot
+                should_remove = True
+
+        if should_remove:
+            await db.rhyme_selections.delete_one({"_id": existing["_id"]})
+
     # Create new selection
     selection_dict = input.dict()
     selection_dict.update({
         "rhyme_name": rhyme_data[0],
-        "pages": rhyme_data[1]
+        "pages": pages,
+        "position": normalized_position
     })
     
     selection_obj = RhymeSelection(**selection_dict)
@@ -245,29 +278,37 @@ async def remove_specific_rhyme_selection(school_id: str, grade: str, page_index
         return {"message":f"selection is removed"}
     
     # Find and remove the specific position rhyme
+    target_position = position.lower()
     selection_to_remove = None
+
     for selection in selections:
-        # Use any available identifier to match position logic
-        if position == "top":
-            # Remove first rhyme found or any 1.0 page rhyme
-            if selection["pages"] == 1.0 or (selection["pages"] == 0.5 and not selection_to_remove):
+        pages = float(selection.get("pages", 0))
+        stored_position = (selection.get("position") or "top").lower()
+
+        if pages > 0.5:
+            if target_position == "top":
                 selection_to_remove = selection
                 break
-        elif position == "bottom":
-            # Remove second 0.5 page rhyme or single 0.5 if it's the only one
-            if selection["pages"] == 0.5:
-                if len([s for s in selections if s["pages"] == 0.5]) > 1:
-                    # Find second 0.5 page rhyme
-                    half_page_selections = [s for s in selections if s["pages"] == 0.5]
-                    selection_to_remove = half_page_selections[1] if len(half_page_selections) > 1 else half_page_selections[0]
-                else:
-                    selection_to_remove = selection
+        elif pages == 0.5:
+            if stored_position == target_position:
+                selection_to_remove = selection
+                break
+            if selection.get("position") is None and target_position == "top":
+                selection_to_remove = selection
+                break
+
+    if not selection_to_remove:
+        for selection in selections:
+            if target_position == "top" and selection.get("pages") != 0.5:
+                selection_to_remove = selection
+                break
+            if target_position == "bottom" and selection.get("pages") == 0.5:
+                selection_to_remove = selection
                 break
     
-    # if not selection_to_remove:
-    #     # If no specific match, remove any selection from this page for the position
-    #     selection_to_remove = selections[0]
-    
+    if not selection_to_remove:
+        raise HTTPException(status_code=404, detail="Selection not found for the specified position")
+
     # Remove the selection
     result = await db.rhyme_selections.delete_one({
         "_id": selection_to_remove["_id"]
