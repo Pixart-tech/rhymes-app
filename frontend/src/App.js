@@ -362,9 +362,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         gradeSelections.map(async (rhyme) => {
           try {
             const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-            return { ...rhyme, svgContent: svgResponse.data };
+            return { ...rhyme, position: rhyme.position || null, svgContent: svgResponse.data };
           } catch (error) {
-            return { ...rhyme, svgContent: null };
+            return { ...rhyme, position: rhyme.position || null, svgContent: null };
           }
         })
       );
@@ -414,7 +414,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         school_id: school.school_id,
         grade: grade,
         page_index: pageIndex,
-        rhyme_code: rhyme.code
+        rhyme_code: rhyme.code,
+        position: normalizedPosition
       });
 
       const baseRhyme = {
@@ -621,35 +622,35 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   };
 
   // Get rhymes for current page
-const getCurrentPageRhymes = () => {
-  const pageRhymes = { top: null, bottom: null };
+  const getCurrentPageRhymes = () => {
+    const pageRhymes = { top: null, bottom: null };
 
-  if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) return pageRhymes;
+    if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) return pageRhymes;
 
-  // Prefer full-page rhyme
-  for (const r of selectedRhymes) {
-    if (!r) continue;
-    if (Number(r.page_index) !== Number(currentPageIndex)) continue;
-    if (r.pages === 1 || r.pages === 1.0) {
-      pageRhymes.top = r;
-      pageRhymes.bottom = null;
-      return pageRhymes;
+    // Prefer full-page rhyme
+    for (const r of selectedRhymes) {
+      if (!r) continue;
+      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+      if (r.pages === 1 || r.pages === 1.0) {
+        pageRhymes.top = r;
+        pageRhymes.bottom = null;
+        return pageRhymes;
+      }
     }
-  }
 
-  // Place half-page rhymes by explicit position (do not infer)
-  for (const r of selectedRhymes) {
-    if (!r) continue;
-    if (Number(r.page_index) !== Number(currentPageIndex)) continue;
-    if (r.pages === 0.5 || r.pages === '0.5') {
-      const pos = (r.position || '').toString().toLowerCase();
-      if (pos === 'top') pageRhymes.top = r;
-      else if (pos === 'bottom') pageRhymes.bottom = r;
+    // Place half-page rhymes by explicit position (do not infer)
+    for (const r of selectedRhymes) {
+      if (!r) continue;
+      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+      if (r.pages === 0.5 || r.pages === '0.5') {
+        const pos = (r.position || '').toString().toLowerCase();
+        if (pos === 'top') pageRhymes.top = r;
+        else if (pos === 'bottom') pageRhymes.bottom = r;
+      }
     }
-  }
 
-  return pageRhymes;
-};
+    return pageRhymes;
+  };
 
   if (loading) {
     return (
