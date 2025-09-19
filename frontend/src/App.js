@@ -417,14 +417,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         rhyme_code: rhyme.code
       });
 
-      const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-      
-      const newRhyme = {
+      const baseRhyme = {
         page_index: pageIndex,
         code: rhyme.code,
         name: rhyme.name,
         pages: rhyme.pages,
-        svgContent: svgResponse.data,
+        svgContent: null,
         position: normalizedPosition
       };
 
@@ -441,8 +439,39 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
           return candidatePosition !== normalizedPosition;
         });
 
-        return [...filtered, newRhyme];
+        return [...filtered, baseRhyme];
       });
+
+      try {
+        const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
+        const svgContent = svgResponse.data;
+
+        setSelectedRhymes(prev => {
+          const prevArray = Array.isArray(prev) ? prev : [];
+
+          return prevArray.map(existing => {
+            if (!existing) return existing;
+            if (Number(existing.page_index) !== Number(pageIndex)) {
+              return existing;
+            }
+
+            const candidatePosition = resolveRhymePosition(existing, {
+              rhymesForContext: prevArray
+            });
+
+            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+              return {
+                ...existing,
+                svgContent
+              };
+            }
+
+            return existing;
+          });
+        });
+      } catch (svgError) {
+        console.error('Error fetching rhyme SVG:', svgError);
+      }
 
       // Auto create new page after selection
       setTimeout(() => {
