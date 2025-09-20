@@ -922,11 +922,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                               }`}
                             >
                               {hasTopRhyme ? (
-                                <div className="relative flex flex-1 min-h-0 flex-col pr-24 sm:pr-32">
+                                <div className="relative flex flex-1 min-h-0 flex-col">
+                                  <div className="pointer-events-none absolute inset-y-0 right-0 w-20 sm:w-24 bg-gradient-to-l from-white via-white/90 to-transparent" />
                                   <Button
                                     onClick={() => handleAddRhyme('top')}
                                     variant="outline"
-                                    className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
+                                    className="absolute right-0 sm:right-2 top-3 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 bg-gradient-to-l from-white via-white/90 to-transparent backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:from-white hover:via-white hover:to-white/60 shadow-md"
                                   >
                                     <Replace className="w-4 h-4 mr-2" />
                                     Replace
@@ -974,11 +975,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                             {showBottomContainer && (
                               <div className="relative flex-1 min-h-0 p-6 sm:p-8">
                                 {hasBottomRhyme ? (
-                                  <div className="relative flex flex-1 min-h-0 flex-col pr-24 sm:pr-32">
+                                  <div className="relative flex flex-1 min-h-0 flex-col">
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 w-20 sm:w-24 bg-gradient-to-l from-white via-white/90 to-transparent" />
                                     <Button
                                       onClick={() => handleAddRhyme('bottom')}
                                       variant="outline"
-                                      className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
+                                      className="absolute right-0 sm:right-2 top-3 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 bg-gradient-to-l from-white via-white/90 to-transparent backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:from-white hover:via-white hover:to-white/60 shadow-md"
                                     >
                                       <Replace className="w-4 h-4 mr-2" />
                                       Replace
