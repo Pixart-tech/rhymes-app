@@ -323,7 +323,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const treeMenuVisibilityClass = showTreeMenu
     ? 'translate-x-0 opacity-100 pointer-events-auto'
     : '-translate-x-full opacity-0 pointer-events-none';
-  const layoutGridClass = 'lg:grid-cols-[minmax(0,1fr)]';
+  const treeMenuDesktopVisibility = 'lg:translate-x-0 lg:opacity-100 lg:pointer-events-auto';
+  const layoutGridClass = 'lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]';
   const [showReusable, setShowReusable] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -952,7 +953,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             {/* Tree Menu */}
             <div
-              className={`absolute inset-y-0 left-0 z-30 flex h-full min-h-0 w-72 max-w-full transform flex-col overflow-hidden bg-white shadow-xl transition-transform transition-opacity duration-300 ease-in-out ${treeMenuVisibilityClass} lg:w-80`}
+              className={`absolute inset-y-0 left-0 z-30 flex h-full min-h-0 w-72 max-w-full transform flex-col overflow-hidden bg-white shadow-xl transition-transform transition-opacity duration-300 ease-in-out ${treeMenuVisibilityClass} ${treeMenuDesktopVisibility} lg:relative lg:inset-auto lg:z-auto lg:w-full lg:max-w-none lg:transform-none lg:shadow-none lg:transition-none lg:col-span-1`}
             >
               <div className="mb-4 flex-shrink-0 lg:hidden">
                 <Button
@@ -980,7 +981,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             {/* Dual Container Interface */}
             <div
-              className="min-h-0 flex w-full max-w-4xl flex-col items-center self-start"
+              className="min-h-0 flex w-full max-w-4xl flex-col items-center self-start lg:col-span-1 lg:justify-self-center"
             >
               <div className="flex h-full w-full max-w-2xl flex-col">
 
