@@ -928,7 +928,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   <Button
                                     onClick={() => handleAddRhyme('top')}
                                     variant="outline"
-                                    className="absolute right-0 sm:right-2 top-3 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 bg-gradient-to-l from-white via-white/90 to-transparent backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:from-white hover:via-white hover:to-white/60 shadow-md"
+                                    className="absolute top-3 right-3 sm:right-4 bg-gradient-to-l from-white via-white/90 to-transparent backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:from-white hover:via-white hover:to-white/60 shadow-md"
                                   >
                                     <Replace className="w-4 h-4 mr-2" />
                                     Replace
@@ -981,7 +981,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     <Button
                                       onClick={() => handleAddRhyme('bottom')}
                                       variant="outline"
-                                      className="absolute right-0 sm:right-2 top-3 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 bg-gradient-to-l from-white via-white/90 to-transparent backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:from-white hover:via-white hover:to-white/60 shadow-md"
+                                      className="absolute top-3 right-3 sm:right-4 bg-gradient-to-l from-white via-white/90 to-transparent backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:from-white hover:via-white hover:to-white/60 shadow-md"
                                     >
                                       <Replace className="w-4 h-4 mr-2" />
                                       Replace
