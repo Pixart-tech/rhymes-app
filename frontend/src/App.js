@@ -810,7 +810,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50">
-      <div className="mx-auto flex h-screen max-w-7xl flex-col items-stretch justify-start overflow-hidden px-4 py-4 sm:px-6">
+      <div className="mx-auto flex h-screen max-w-7xl flex-col items-stretch justify-start overflow-hidden px-4 pt-2 pb-4 sm:px-6">
         {/* Header */}
         <div className="mb-6 flex flex-shrink-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -879,7 +879,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
               <div className="flex h-full w-full max-w-2xl flex-col">
 
                 {/* Navigation Controls */}
-                <div className="flex-shrink-0 space-y-6">
+                <div className="flex-shrink-0 space-y-3">
                   <div className="flex items-center justify-between">
                     <Button
                       onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
