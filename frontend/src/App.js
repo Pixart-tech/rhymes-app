@@ -952,7 +952,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                   <div className="flex-1 min-h-0 pb-6">
                     <Carousel
                       className="flex h-full w-full"
-                      opts={{ align: 'center', containScroll: 'trimSnaps' }}
+                      opts={{
+                        align: 'center',
+                        containScroll: 'trimSnaps',
+                        draggable: false,
+                        dragFree: false,
+                      }}
                       setApi={setCarouselApi}
                     >
                       <CarouselContent className="ml-0 h-full">
