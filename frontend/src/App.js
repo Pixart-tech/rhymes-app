@@ -322,6 +322,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [showReusable, setShowReusable] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isRefreshingRhymes, setIsRefreshingRhymes] = useState(false);
   const navigate = useNavigate();
 
   const MAX_RHYMES_PER_GRADE = 25;
@@ -644,16 +645,25 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         }, 400);
       }
 
-      await fetchAvailableRhymes();
-      await fetchReusableRhymes();
       setShowTreeMenu(false);
       setCurrentPosition(null);
+
+      setIsRefreshingRhymes(true);
+      try {
+        await Promise.all([
+          fetchAvailableRhymes(),
+          fetchReusableRhymes()
+        ]);
+      } finally {
+        setIsRefreshingRhymes(false);
+      }
     } catch (error) {
       console.error('Error selecting rhyme:', error);
       setSelectedRhymes(previousSelections);
       saveSelectionsToSession(grade, previousSelections);
       setShowTreeMenu(false);
       setCurrentPosition(null);
+      setIsRefreshingRhymes(false);
     }
   };
 
@@ -748,10 +758,18 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         return filteredSelections;
       });
       setCurrentPageIndex(targetPageIndex);
-      await fetchAvailableRhymes();
-      await fetchReusableRhymes();
+      setIsRefreshingRhymes(true);
+      try {
+        await Promise.all([
+          fetchAvailableRhymes(),
+          fetchReusableRhymes()
+        ]);
+      } finally {
+        setIsRefreshingRhymes(false);
+      }
     } catch (err) {
       console.error("Delete failed:", err.response?.data || err.message);
+      setIsRefreshingRhymes(false);
     }
   };
 
@@ -959,7 +977,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                 {/* Navigation Controls */}
                 <div className="flex-shrink-0 space-y-3 pb-1">
-                <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between">
                   <Button
                     onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
                     disabled={currentPageIndex === 0}
@@ -974,7 +992,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                       Page {currentPageIndex + 1} of {displayTotalPages}
                     </div>
 
-                  <Button
+                    <Button
                       onClick={() => handlePageChange(Math.min(displayTotalPages - 1, currentPageIndex + 1))}
                       disabled={currentPageIndex >= displayTotalPages - 1}
                       variant="outline"
@@ -984,6 +1002,19 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                       <ChevronRight className="w-4 h-4 ml-1" />
                     </Button>
                   </div>
+                  {isRefreshingRhymes && (
+                    <div
+                      className="flex items-center justify-center gap-2 text-xs font-medium text-orange-500"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span
+                        className="h-3 w-3 rounded-full border-2 border-orange-400 border-t-transparent animate-spin"
+                        aria-hidden="true"
+                      />
+                      <span>Refreshing rhyme lists…</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex-1 min-h-0 flex flex-col">
