@@ -879,7 +879,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
               <div className="flex h-full w-full max-w-2xl flex-col">
 
                 {/* Navigation Controls */}
-                <div className="flex-shrink-0 space-y-3">
+                <div className="flex-shrink-0 space-y-3 pb-1">
                   <div className="flex items-center justify-between">
                     <Button
                       onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
@@ -904,30 +904,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                       Next
                       <ChevronRight className="w-4 h-4 ml-1" />
                     </Button>
-                  </div>
-
-                  <div className="flex items-center justify-center">
-                    {hasNextPageCapacity ? (
-                      <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-gray-600">
-                        <span>
-                          Next available page: <span className="font-semibold text-gray-700">Page {nextAvailablePageIndex + 1}</span>
-                        </span>
-                        <Button
-                          onClick={() => handlePageChange(nextAvailablePageIndex)}
-                          variant="outline"
-                          size="sm"
-                          disabled={nextAvailablePageIndex === currentPageIndex}
-                        >
-                          {nextAvailablePageIndex === currentPageIndex
-                            ? 'Viewing next page'
-                            : `Go to Page ${nextAvailablePageIndex + 1}`}
-                        </Button>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-gray-500">
-                        All {MAX_RHYMES_PER_GRADE} pages are currently filled.
-                      </span>
-                    )}
                   </div>
                 </div>
 
