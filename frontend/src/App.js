@@ -1035,9 +1035,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                                 }
                                                 handleAddRhyme('top');
                                               }}
-                                              className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                              className="flex items-center gap-2 rounded-full border-2 border-dashed border-orange-200 bg-white/80 px-6 py-4 text-base font-semibold text-orange-500 shadow-sm transition-all duration-300 hover:scale-105 hover:border-orange-300 hover:bg-white hover:text-orange-600"
                                             >
-                                              <Plus className="h-8 w-8" />
+                                              <Plus className="h-5 w-5" aria-hidden="true" />
+                                              <span className="text-sm sm:text-base">Add Rhyme</span>
                                             </Button>
                                           </div>
                                         )}
@@ -1097,9 +1098,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                                   }
                                                   handleAddRhyme('bottom');
                                                 }}
-                                                className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                                className="flex items-center gap-2 rounded-full border-2 border-dashed border-orange-200 bg-white/80 px-6 py-4 text-base font-semibold text-orange-500 shadow-sm transition-all duration-300 hover:scale-105 hover:border-orange-300 hover:bg-white hover:text-orange-600"
                                               >
-                                                <Plus className="h-8 w-8" />
+                                                <Plus className="h-5 w-5" aria-hidden="true" />
+                                                <span className="text-sm sm:text-base">Add Rhyme</span>
                                               </Button>
                                             </div>
                                           )}
