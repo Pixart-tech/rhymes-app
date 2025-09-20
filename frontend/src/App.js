@@ -912,7 +912,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             {/* Dual Container Interface */}
             <div
-              className="min-h-0 flex w-full max-w-4xl flex-col items-center self-start lg:sticky lg:top-24 lg:h-full lg:max-h-[calc(100vh-6rem)]"
+              className="min-h-0 flex w-full max-w-4xl flex-col items-center self-start"
             >
               <div className="flex h-full w-full max-w-2xl flex-col">
 
