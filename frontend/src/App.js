@@ -275,27 +275,32 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
               <CollapsibleContent className="pl-4">
                 <div className="space-y-1 mt-2">
                   {rhymes.map((rhyme) => (
-                    <button
+                    <div
                       key={rhyme.code}
-                      onClick={() => onRhymeSelect(rhyme)}
-                      className="w-full text-left p-3 rounded-lg bg-white/50 hover:bg-white/80 transition-all duration-200 border border-transparent hover:border-orange-200 group"
+                      className="group flex items-center gap-3 rounded-lg border border-transparent bg-white/50 p-3 transition-all duration-200 hover:border-orange-200 hover:bg-white/80"
                     >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <p className="font-medium text-gray-800 group-hover:text-orange-600 transition-colors duration-200">
-                            {rhyme.name}
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            Code: {rhyme.code} • {rhyme.personalized === "Yes" ? "Personalized" : "Standard"}
-                            {rhyme.used_in_grades && (
-                              <span className="ml-2 text-blue-600">
-                                (Used in: {rhyme.used_in_grades.join(', ')})
-                              </span>
-                            )}
-                          </p>
-                        </div>
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-800 transition-colors duration-200 group-hover:text-orange-600">
+                          {rhyme.name}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Code: {rhyme.code} • {rhyme.personalized === "Yes" ? "Personalized" : "Standard"}
+                          {rhyme.used_in_grades && (
+                            <span className="ml-2 text-blue-600">
+                              (Used in: {rhyme.used_in_grades.join(', ')})
+                            </span>
+                          )}
+                        </p>
                       </div>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => onRhymeSelect(rhyme)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-orange-200 bg-white text-sm font-semibold text-orange-600 transition-colors duration-200 hover:bg-orange-50 hover:text-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:ring-offset-1"
+                        aria-label={`Add ${rhyme.name}`}
+                      >
+                        +
+                      </button>
+                    </div>
                   ))}
                 </div>
               </CollapsibleContent>
