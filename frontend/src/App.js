@@ -1182,11 +1182,16 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 </div>
                   {/* Page Indicators */}
                   {displayTotalPages > 1 && (
-                    <div className="mt-6 flex justify-center space-x-2">
+                    <div
+                      className="mt-6 flex justify-center space-x-2"
+                      role="status"
+                      aria-live="polite"
+                      aria-label={`Page ${currentPageIndex + 1} of ${displayTotalPages}`}
+                    >
                       {Array.from({ length: displayTotalPages }, (_, index) => (
-                        <button
+                        <span
                           key={index}
-                          onClick={() => handlePageChange(index)}
+                          aria-hidden="true"
                           className={`h-3 w-3 rounded-full transition-colors duration-200 ${
                             index === currentPageIndex
                               ? 'bg-orange-400'
@@ -1194,6 +1199,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                           }`}
                         />
                       ))}
+                      <span className="sr-only">
+                        Page {currentPageIndex + 1} of {displayTotalPages}
+                      </span>
                     </div>
                   )}
                 </div>
