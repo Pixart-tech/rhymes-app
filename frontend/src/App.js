@@ -793,10 +793,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
+      <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading rhyme data...</p>
+          <p className="text-gray-300">Loading rhyme data...</p>
         </div>
       </div>
     );
@@ -810,19 +810,19 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const showBottomContainer = !isTopFullPage;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50">
+    <div className="min-h-screen bg-black">
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col items-stretch justify-start px-4 pt-2 pb-4 sm:px-6">
         {/* Header */}
         <div className="mb-6 flex flex-shrink-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800 capitalize">{grade} Grade - Rhyme Selection</h1>
-            <p className="text-gray-600">{school.school_name} ({school.school_id})</p>
+            <h1 className="text-2xl font-bold text-white capitalize">{grade} Grade - Rhyme Selection</h1>
+            <p className="text-gray-300">{school.school_name} ({school.school_id})</p>
           </div>
           <div className="flex items-center gap-2">
             <Button
               onClick={onBack}
               variant="outline"
-              className="bg-white/80 hover:bg-white border-gray-200"
+              className="bg-white/80 hover:bg-white border-gray-200 text-gray-900"
             >
               Back to Grades
             </Button>
@@ -881,22 +881,22 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                 {/* Navigation Controls */}
                 <div className="flex-shrink-0 space-y-3 pb-1">
-                  <div className="flex items-center justify-between">
-                    <Button
-                      onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
-                      disabled={currentPageIndex === 0}
-                      variant="outline"
-                      size="sm"
-                    >
-                      <ChevronLeft className="w-4 h-4 mr-1" />
-                      Previous
-                    </Button>
+                <div className="flex items-center justify-between">
+                  <Button
+                    onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
+                    disabled={currentPageIndex === 0}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <ChevronLeft className="w-4 h-4 mr-1" />
+                    Previous
+                  </Button>
 
-                    <div className="text-sm text-gray-600 font-medium">
+                    <div className="text-sm text-gray-300 font-medium">
                       Page {currentPageIndex + 1} of {totalPages}
                     </div>
 
-                    <Button
+                  <Button
                       onClick={() => handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
                       disabled={currentPageIndex >= totalPages - 1}
                       variant="outline"
