@@ -896,23 +896,23 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-300">Loading rhyme data...</p>
+          <p className="text-gray-600">Loading rhyme data...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-gray-50">
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col items-stretch justify-start px-4 pt-2 pb-4 sm:px-6">
         {/* Header */}
         <div className="mb-6 flex flex-shrink-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white capitalize">{grade} Grade - Rhyme Selection</h1>
-            <p className="text-gray-300">{school.school_name} ({school.school_id})</p>
+            <h1 className="text-2xl font-bold text-gray-900 capitalize">{grade} Grade - Rhyme Selection</h1>
+            <p className="text-gray-600">{school.school_name} ({school.school_id})</p>
           </div>
           <div className="flex items-center gap-2">
             <Button
