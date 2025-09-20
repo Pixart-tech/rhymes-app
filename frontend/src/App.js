@@ -792,17 +792,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     return pageRhymes;
   }, [selectedRhymes]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-300">Loading rhyme data...</p>
-        </div>
-      </div>
-    );
-  }
-
   const totalPages = calculateTotalPages();
   const displayTotalPages = Math.max(totalPages, 1);
 
@@ -845,6 +834,17 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       carouselApi.scrollTo(clampedIndex);
     }
   }, [carouselApi, currentPageIndex, totalPages]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-300">Loading rhyme data...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-black">
