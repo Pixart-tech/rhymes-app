@@ -842,13 +842,13 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
         {/* Main Content */}
         <div className="flex-1 overflow-hidden">
-          <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-4">
+          <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
 
             {/* Tree Menu */}
             <div
-              className={`lg:col-span-1 transition-all duration-300 ${showTreeMenu ? 'flex' : 'hidden'} ${showTreeMenu ? 'lg:flex' : 'lg:hidden'} h-full min-h-0 flex-col overflow-hidden`}
+              className={`transition-all duration-300 ${showTreeMenu ? 'flex' : 'hidden'} lg:flex h-full min-h-0 flex-col overflow-hidden`}
             >
-              <div className="mb-4 flex-shrink-0">
+              <div className="mb-4 flex-shrink-0 lg:hidden">
                 <Button
                   onClick={() => { setShowTreeMenu(false); setCurrentPosition(null); }}
                   variant="outline"
@@ -874,7 +874,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             {/* Dual Container Interface */}
             <div
-              className={`${showTreeMenu ? 'lg:col-span-3' : 'lg:col-span-4'} min-h-0 flex flex-col items-center`}
+              className="min-h-0 flex w-full max-w-4xl flex-col items-center self-start"
             >
               <div className="flex h-full w-full max-w-2xl flex-col">
 
