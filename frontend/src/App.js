@@ -313,6 +313,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [selectedRhymes, setSelectedRhymes] = useState([]);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [showTreeMenu, setShowTreeMenu] = useState(false);
+  const treeMenuVisibilityClass = showTreeMenu ? 'flex' : 'hidden';
   const [showReusable, setShowReusable] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -846,7 +847,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             {/* Tree Menu */}
             <div
-              className={`transition-all duration-300 ${showTreeMenu ? 'flex' : 'hidden'} lg:flex h-full min-h-0 flex-col overflow-hidden`}
+              className={`transition-all duration-300 ${treeMenuVisibilityClass} h-full min-h-0 flex-col overflow-hidden`}
             >
               <div className="mb-4 flex-shrink-0 lg:hidden">
                 <Button
