@@ -328,6 +328,46 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
   const MAX_RHYMES_PER_GRADE = 25;
 
+  const getSessionStorageKey = useCallback((gradeId) => `rhymeSelections:${gradeId}`, []);
+
+  const loadSelectionsFromSession = useCallback((gradeId) => {
+    if (typeof window === 'undefined' || !window.sessionStorage) {
+      return null;
+    }
+
+    try {
+      const storedValue = window.sessionStorage.getItem(getSessionStorageKey(gradeId));
+      if (!storedValue) {
+        return null;
+      }
+
+      const parsed = JSON.parse(storedValue);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch (error) {
+      console.error('Failed to load rhyme selections from session storage:', error);
+      return null;
+    }
+  }, [getSessionStorageKey]);
+
+  const saveSelectionsToSession = useCallback((gradeId, selections) => {
+    if (typeof window === 'undefined' || !window.sessionStorage) {
+      return;
+    }
+
+    try {
+      const key = getSessionStorageKey(gradeId);
+
+      if (!Array.isArray(selections) || selections.length === 0) {
+        window.sessionStorage.removeItem(key);
+        return;
+      }
+
+      window.sessionStorage.setItem(key, JSON.stringify(selections));
+    } catch (error) {
+      console.error('Failed to save rhyme selections to session storage:', error);
+    }
+  }, [getSessionStorageKey]);
+
   useEffect(() => {
     fetchAvailableRhymes();
     fetchReusableRhymes();
@@ -415,10 +455,15 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   };
 
   const fetchSelectedRhymes = async () => {
+    const storedSelections = loadSelectionsFromSession(grade);
+    if (storedSelections && storedSelections.length > 0) {
+      setSelectedRhymes(storedSelections);
+    }
+
     try {
       const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
       const gradeSelections = response.data[grade] || [];
-      
+
       const rhymesWithSvg = await Promise.all(
         gradeSelections.map(async (rhyme) => {
           try {
@@ -439,6 +484,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         : (Number.isFinite(nextInfo.index) ? nextInfo.index : 0);
 
       setSelectedRhymes(sortedSelections);
+      saveSelectionsToSession(grade, sortedSelections);
       setCurrentPageIndex(initialIndex);
     } catch (error) {
       console.error('Error fetching selected rhymes:', error);
@@ -574,6 +620,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       });
 
       setSelectedRhymes(nextArray);
+      saveSelectionsToSession(grade, nextArray);
 
       try {
         const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
@@ -582,7 +629,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         setSelectedRhymes(prev => {
           const prevArrayInner = Array.isArray(prev) ? prev : [];
 
-          return prevArrayInner.map(existing => {
+          const updatedSelections = prevArrayInner.map(existing => {
             if (!existing) return existing;
             if (Number(existing.page_index) !== Number(pageIndex)) {
               return existing;
@@ -601,6 +648,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             return existing;
           });
+
+          saveSelectionsToSession(grade, updatedSelections);
+          return updatedSelections;
         });
       } catch (svgError) {
         console.error('Error fetching rhyme SVG:', svgError);
@@ -701,14 +751,20 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       );
       console.log("← Delete response:", res.data);
 
-      setSelectedRhymes(prev => prev.filter(r => {
-        if (Number(r.page_index) !== Number(targetPageIndex)) return true;
-        if (r.code !== rhyme.code) return true;
-        const candidatePosition = resolveRhymePosition(r, {
-          rhymesForContext: prev
+      setSelectedRhymes(prev => {
+        const prevArray = Array.isArray(prev) ? prev : [];
+        const filteredSelections = prevArray.filter(r => {
+          if (Number(r.page_index) !== Number(targetPageIndex)) return true;
+          if (r.code !== rhyme.code) return true;
+          const candidatePosition = resolveRhymePosition(r, {
+            rhymesForContext: prevArray
+          });
+          return candidatePosition !== position;
         });
-        return candidatePosition !== position;
-      }));
+
+        saveSelectionsToSession(grade, filteredSelections);
+        return filteredSelections;
+      });
       setCurrentPageIndex(targetPageIndex);
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
