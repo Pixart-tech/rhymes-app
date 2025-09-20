@@ -968,8 +968,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                               className="flex h-full w-full justify-center pl-0"
                             >
                               <div className="flex w-full items-start justify-center pt-2">
-                                <div className="relative flex w-full max-w-4xl">
-                                  <div className="a4-canvas relative flex w-full flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl lg:h-full lg:w-auto">
+                                <div className="relative flex w-full justify-center">
+                                  <div className="a4-canvas relative flex flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
                                     {showBottomContainer && (
                                       <div className="pointer-events-none absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
                                     )}
@@ -998,7 +998,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                             <div className="flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
                                               <div
                                                 dangerouslySetInnerHTML={{ __html: topRhyme.svgContent || '' }}
-                                                className="flex h-full w-full items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain"
+                                                className="flex h-full w-full items-center justify-center [&>svg]:h-auto [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto"
                                               />
                                             </div>
                                             <div className="mt-4 space-y-1 text-center">
@@ -1065,7 +1065,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                               <div className="flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
                                                 <div
                                                   dangerouslySetInnerHTML={{ __html: bottomRhyme.svgContent || '' }}
-                                                  className="flex h-full w-full items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain"
+                                                  className="flex h-full w-full items-center justify-center [&>svg]:h-auto [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto"
                                                 />
                                               </div>
                                               <div className="mt-4 space-y-1 text-center">
