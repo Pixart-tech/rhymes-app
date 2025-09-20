@@ -810,7 +810,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50">
-      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-6 sm:px-6">
+      <div className="mx-auto flex h-screen max-w-7xl flex-col items-stretch justify-start overflow-hidden px-4 py-4 sm:px-6">
         {/* Header */}
         <div className="mb-6 flex flex-shrink-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -843,10 +843,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         {/* Main Content */}
         <div className="flex-1 overflow-hidden">
           <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-4">
-            
+
             {/* Tree Menu */}
             <div
-              className={`lg:col-span-1 transition-all duration-300 ${showTreeMenu ? 'flex' : 'hidden'} ${showTreeMenu ? 'lg:flex' : 'lg:hidden'} min-h-0 flex-col`}
+              className={`lg:col-span-1 transition-all duration-300 ${showTreeMenu ? 'flex' : 'hidden'} ${showTreeMenu ? 'lg:flex' : 'lg:hidden'} h-full min-h-0 flex-col overflow-hidden`}
             >
               <div className="mb-4 flex-shrink-0">
                 <Button
@@ -858,15 +858,17 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                   Close Menu
                 </Button>
               </div>
-              <div className="flex-1 min-h-0">
-                <TreeMenu
-                  rhymesData={availableRhymes}
-                  reusableRhymes={reusableRhymes}
-                  showReusable={showReusable}
-                  onRhymeSelect={handleRhymeSelect}
-                  onToggleReusable={handleToggleReusable}
-                  hideFullPageRhymes={currentPosition === 'bottom'}
-                />
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <div className="h-full max-h-[calc(100vh-9rem)] overflow-y-auto pr-1">
+                  <TreeMenu
+                    rhymesData={availableRhymes}
+                    reusableRhymes={reusableRhymes}
+                    showReusable={showReusable}
+                    onRhymeSelect={handleRhymeSelect}
+                    onToggleReusable={handleToggleReusable}
+                    hideFullPageRhymes={currentPosition === 'bottom'}
+                  />
+                </div>
               </div>
             </div>
 
@@ -930,8 +932,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 </div>
 
                 <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex-1 min-h-0 py-6">
-                    <div className="flex h-full items-center justify-center">
+                  <div className="flex-1 min-h-0 pb-6">
+                    <div className="flex h-full items-start justify-center pt-2">
                       <div className="relative flex h-full w-full max-w-4xl">
                         <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
                           {showBottomContainer && (
