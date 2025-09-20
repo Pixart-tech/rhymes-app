@@ -1026,7 +1026,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                         }`}
                                       >
                                         {hasTopRhyme ? (
-                                          <div className="relative flex flex-1 min-h-0 flex-col">
+                                          <div
+                                            key={`${topRhyme?.code ?? 'top-empty'}-${topRhyme?.pages ?? '0'}`}
+                                            className="relative flex flex-1 min-h-0 flex-col rhyme-transition"
+                                          >
                                             <div className="pointer-events-none absolute inset-y-0 right-0 w-20 sm:w-24 bg-gradient-to-l from-white via-white/90 to-transparent" />
                                             <Button
                                               onClick={() => {
@@ -1093,7 +1096,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       {showBottomContainer && (
                                         <div className="relative flex-1 min-h-0 p-6 sm:p-8">
                                           {hasBottomRhyme ? (
-                                            <div className="relative flex flex-1 min-h-0 flex-col">
+                                            <div
+                                              key={`${bottomRhyme?.code ?? 'bottom-empty'}-${bottomRhyme?.pages ?? '0'}`}
+                                              className="relative flex flex-1 min-h-0 flex-col rhyme-transition"
+                                            >
                                               <div className="pointer-events-none absolute inset-y-0 right-0 w-20 sm:w-24 bg-gradient-to-l from-white via-white/90 to-transparent" />
                                               <Button
                                                 onClick={() => {
