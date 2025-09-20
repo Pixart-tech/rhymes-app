@@ -325,6 +325,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [isRefreshingRhymes, setIsRefreshingRhymes] = useState(false);
   const navigate = useNavigate();
 
+  const emptySlotButtonClasses =
+    'flex aspect-square w-32 items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/80 text-orange-500 shadow-sm transition-transform duration-300 hover:scale-105 hover:border-orange-400 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
+  const emptySlotIconClasses = 'h-12 w-12';
+
   const MAX_RHYMES_PER_GRADE = 25;
 
   const getSessionStorageKey = useCallback((gradeId) => `rhymeSelections:${gradeId}`, []);
@@ -1108,18 +1112,20 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                           </div>
                                         ) : (
                                           <div className="flex flex-1 items-center justify-center">
-                                            <Button
+                                            <button
+                                              type="button"
                                               onClick={() => {
                                                 if (pageIndex !== currentPageIndex) {
                                                   handlePageChange(pageIndex);
                                                 }
                                                 handleAddRhyme('top');
                                               }}
-                                              className="flex items-center gap-2 rounded-full border-2 border-dashed border-orange-200 bg-white/80 px-6 py-4 text-base font-semibold text-orange-500 shadow-sm transition-all duration-300 hover:scale-105 hover:border-orange-300 hover:bg-white hover:text-orange-600"
+                                              className={emptySlotButtonClasses}
+                                              aria-label="Add rhyme to top slot"
                                             >
-                                              <Plus className="h-5 w-5" aria-hidden="true" />
-                                              <span className="text-sm sm:text-base">Add Rhyme</span>
-                                            </Button>
+                                              <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                              <span className="sr-only">Add rhyme to top slot</span>
+                                            </button>
                                           </div>
                                         )}
                                       </div>
@@ -1174,18 +1180,20 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                             </div>
                                           ) : (
                                             <div className="flex h-full items-center justify-center">
-                                              <Button
+                                              <button
+                                                type="button"
                                                 onClick={() => {
                                                   if (pageIndex !== currentPageIndex) {
                                                     handlePageChange(pageIndex);
                                                   }
                                                   handleAddRhyme('bottom');
                                                 }}
-                                                className="flex items-center gap-2 rounded-full border-2 border-dashed border-orange-200 bg-white/80 px-6 py-4 text-base font-semibold text-orange-500 shadow-sm transition-all duration-300 hover:scale-105 hover:border-orange-300 hover:bg-white hover:text-orange-600"
+                                                className={emptySlotButtonClasses}
+                                                aria-label="Add rhyme to bottom slot"
                                               >
-                                                <Plus className="h-5 w-5" aria-hidden="true" />
-                                                <span className="text-sm sm:text-base">Add Rhyme</span>
-                                              </Button>
+                                                <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                                <span className="sr-only">Add rhyme to bottom slot</span>
+                                              </button>
                                             </div>
                                           )}
                                         </div>
