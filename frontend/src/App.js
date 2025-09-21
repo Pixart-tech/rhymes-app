@@ -1077,6 +1077,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   >
                                     <Replace className="h-5 w-5" aria-hidden="true" />
                                   </button>
+                                </div>
 
                               );
 
