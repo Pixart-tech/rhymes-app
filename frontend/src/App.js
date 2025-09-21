@@ -15,7 +15,9 @@ import { Separator } from './components/ui/separator';
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
 import { Carousel, CarouselContent, CarouselItem } from './components/ui/carousel';
+
 import DocumentPage from './components/DocumentPage.jsx';
+
 
 // Icons
 import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
@@ -1060,13 +1062,22 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                 handleAddRhyme(position);
                               };
 
-                              const renderSvgSlot = (rhyme) => (
-                                <div className="flex h-full w-full min-h-0 min-w-0 items-center justify-center bg-white p-6">
+
+                              const renderSvgSlot = (rhyme, position) => (
+                                <div className="group relative flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden bg-white">
                                   <div
                                     dangerouslySetInnerHTML={{ __html: rhyme?.svgContent || '' }}
-                                    className="h-full w-full [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto"
+                                    className="pointer-events-none h-full w-full p-6 [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto"
                                   />
-                                </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => openSlot(position)}
+                                    className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-orange-500 shadow transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2"
+                                    aria-label={`Replace ${position} rhyme`}
+                                  >
+                                    <Replace className="h-5 w-5" aria-hidden="true" />
+                                  </button>
+
                               );
 
                               return (
@@ -1080,7 +1091,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                         showBottom={showBottomContainer}
                                         topSlot={
                                           hasTopRhyme ? (
-                                            renderSvgSlot(topRhyme)
+
+                                            renderSvgSlot(topRhyme, 'top')
+
                                           ) : (
                                             <button
                                               type="button"
@@ -1097,7 +1110,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                         bottomSlot={
                                           showBottomContainer
                                             ? hasBottomRhyme
-                                              ? renderSvgSlot(bottomRhyme)
+                                              ? renderSvgSlot(bottomRhyme, 'bottom')
+
+                                          
+
                                               : (
                                                 <button
                                                   type="button"
@@ -1113,6 +1129,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                             : null
                                         }
                                       />
+
+
 
                                       <div className="grid w-full gap-3">
                                         {hasTopRhyme && (
@@ -1155,6 +1173,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                           </div>
                                         )}
                                       </div>
+
                                     </div>
                                   </div>
                                 </CarouselItem>
