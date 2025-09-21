@@ -15,7 +15,9 @@ import { Separator } from './components/ui/separator';
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
 import { Carousel, CarouselContent, CarouselItem } from './components/ui/carousel';
-import DocumentPage from './components/DocumentPage';
+
+import DocumentPage from './components/DocumentPage.jsx';
+
 
 // Icons
 import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
@@ -1060,6 +1062,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                 handleAddRhyme(position);
                               };
 
+
                               const renderSvgSlot = (rhyme, position) => (
                                 <div className="group relative flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden bg-white">
                                   <div
@@ -1074,7 +1077,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   >
                                     <Replace className="h-5 w-5" aria-hidden="true" />
                                   </button>
-                                </div>
+
                               );
 
                               return (
@@ -1088,7 +1091,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                         showBottom={showBottomContainer}
                                         topSlot={
                                           hasTopRhyme ? (
+
                                             renderSvgSlot(topRhyme, 'top')
+
                                           ) : (
                                             <button
                                               type="button"
@@ -1106,6 +1111,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                           showBottomContainer
                                             ? hasBottomRhyme
                                               ? renderSvgSlot(bottomRhyme, 'bottom')
+
+                                          
+
                                               : (
                                                 <button
                                                   type="button"
@@ -1121,6 +1129,50 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                             : null
                                         }
                                       />
+
+
+
+                                      <div className="grid w-full gap-3">
+                                        {hasTopRhyme && (
+                                          <div className="flex flex-col items-center justify-between gap-3 rounded-2xl bg-white/80 p-4 text-center shadow-sm backdrop-blur-sm sm:flex-row sm:text-left">
+                                            <div>
+                                              <p className="font-semibold text-gray-800">{topRhyme.name}</p>
+                                              <p className="text-xs text-gray-500">
+                                                Code: {topRhyme.code} • Pages: {topRhyme.pages}
+                                              </p>
+                                            </div>
+                                            <Button
+                                              onClick={() => openSlot('top')}
+                                              variant="outline"
+                                              size="sm"
+                                              className="w-full sm:w-auto"
+                                            >
+                                              <Replace className="mr-2 h-4 w-4" />
+                                              Replace
+                                            </Button>
+                                          </div>
+                                        )}
+
+                                        {showBottomContainer && hasBottomRhyme && (
+                                          <div className="flex flex-col items-center justify-between gap-3 rounded-2xl bg-white/80 p-4 text-center shadow-sm backdrop-blur-sm sm:flex-row sm:text-left">
+                                            <div>
+                                              <p className="font-semibold text-gray-800">{bottomRhyme.name}</p>
+                                              <p className="text-xs text-gray-500">
+                                                Code: {bottomRhyme.code} • Pages: {bottomRhyme.pages}
+                                              </p>
+                                            </div>
+                                            <Button
+                                              onClick={() => openSlot('bottom')}
+                                              variant="outline"
+                                              size="sm"
+                                              className="w-full sm:w-auto"
+                                            >
+                                              <Replace className="mr-2 h-4 w-4" />
+                                              Replace
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </div>
 
                                     </div>
                                   </div>
