@@ -15,7 +15,7 @@ import { Separator } from './components/ui/separator';
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
 import { Carousel, CarouselContent, CarouselItem } from './components/ui/carousel';
-import DocumentPage from './components/DocumentPage';
+import DocumentPage from './components/DocumentPage.jsx';
 
 // Icons
 import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
