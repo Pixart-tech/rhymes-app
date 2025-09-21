@@ -15,6 +15,7 @@ import { Separator } from './components/ui/separator';
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
 import { Carousel, CarouselContent, CarouselItem } from './components/ui/carousel';
+import DocumentPage from './components/DocumentPage';
 
 // Icons
 import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
@@ -331,7 +332,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const navigate = useNavigate();
 
   const emptySlotButtonClasses =
-    'flex aspect-square w-32 items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/80 text-orange-500 shadow-sm transition-transform duration-300 hover:scale-105 hover:border-orange-400 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
+    'group relative flex h-full w-full items-center justify-center rounded-[28px] bg-gradient-to-br from-orange-50 to-amber-50 p-6 text-orange-500 shadow-inner transition-all duration-300 hover:from-orange-100 hover:to-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
   const emptySlotIconClasses = 'h-12 w-12';
 
   const MAX_RHYMES_PER_GRADE = 25;
@@ -1052,125 +1053,107 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                               const isTopFullPage = hasTopRhyme && parsePagesValue(topRhyme.pages) === 1;
                               const showBottomContainer = !isTopFullPage;
 
+                              const openSlot = (position) => {
+                                if (pageIndex !== currentPageIndex) {
+                                  handlePageChange(pageIndex);
+                                }
+                                handleAddRhyme(position);
+                              };
+
+                              const renderSvgSlot = (rhyme) => (
+                                <div className="flex h-full w-full min-h-0 min-w-0 items-center justify-center bg-white p-6">
+                                  <div
+                                    dangerouslySetInnerHTML={{ __html: rhyme?.svgContent || '' }}
+                                    className="h-full w-full [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto"
+                                  />
+                                </div>
+                              );
+
                               return (
                                 <CarouselItem
                                   key={pageIndex}
                                   className="flex h-full w-full justify-center"
                                 >
-                                  <div className="flex w-full items-start justify-center py-4">
-                                    <div className="relative flex w-full justify-center px-2 sm:px-4">
-                                      <div className="relative mx-auto w-full max-w-[480px]">
-                                        <div className="relative aspect-[210/290] w-full">
-                                          <div className="absolute inset-0 flex flex-col overflow-hidden rounded-[32px] border border-gray-200 bg-white shadow-2xl">
-                                            <div className={`grid h-full min-h-0 ${showBottomContainer ? 'grid-rows-2' : 'grid-rows-1'}`}>
-                                              <section className="relative flex flex-col bg-white">
-                                                {hasTopRhyme ? (
-                                                  <div
-                                                    key={`${topRhyme?.code ?? 'top-empty'}-${topRhyme?.pages ?? '0'}`}
-                                                    className="relative flex flex-1 min-h-0 flex-col"
-                                                  >
-                                                    <Button
-                                                      onClick={() => {
-                                                        if (pageIndex !== currentPageIndex) {
-                                                          handlePageChange(pageIndex);
-                                                        }
-                                                        handleAddRhyme('top');
-                                                      }}
-                                                      variant="outline"
-                                                      className="absolute right-4 top-4 z-10 bg-white/90 px-3 py-2 text-sm text-gray-700 shadow-md backdrop-blur hover:bg-white"
-                                                    >
-                                                      <Replace className="mr-2 h-4 w-4" />
-                                                      Replace
-                                                    </Button>
-                                                    <div className="flex flex-1 min-h-0 items-center justify-center bg-white px-6 py-6">
-                                                      <div
-                                                        dangerouslySetInnerHTML={{ __html: topRhyme.svgContent || '' }}
-                                                        className="max-h-full max-w-full [&>svg]:h-auto [&>svg]:w-auto [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain"
-                                                      />
-                                                    </div>
-                                                    <div className="px-6 pb-6 text-center">
-                                                      <p className="font-semibold text-gray-800">{topRhyme.name}</p>
-                                                      <p className="text-sm text-gray-500">
-                                                        Code: {topRhyme.code} • Pages: {topRhyme.pages}
-                                                      </p>
-                                                    </div>
-                                                  </div>
-                                                ) : (
-                                                  <div className="flex flex-1 items-center justify-center px-6 py-6">
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => {
-                                                        if (pageIndex !== currentPageIndex) {
-                                                          handlePageChange(pageIndex);
-                                                        }
-                                                        handleAddRhyme('top');
-                                                      }}
-                                                      className={emptySlotButtonClasses}
-                                                      aria-label="Add rhyme to top slot"
-                                                    >
-                                                      <Plus className={emptySlotIconClasses} aria-hidden="true" />
-                                                      <span className="sr-only">Add rhyme to top slot</span>
-                                                    </button>
-                                                  </div>
-                                                )}
-                                              </section>
+                                  <div className="flex w-full justify-center py-4">
+                                    <div className="flex w-full max-w-[520px] flex-col items-center gap-4 px-2 sm:px-4">
+                                      <DocumentPage
+                                        showBottom={showBottomContainer}
+                                        topSlot={
+                                          hasTopRhyme ? (
+                                            renderSvgSlot(topRhyme)
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => openSlot('top')}
+                                              className={emptySlotButtonClasses}
+                                              aria-label="Add rhyme to top slot"
+                                            >
+                                              <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
+                                                <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                              </span>
+                                            </button>
+                                          )
+                                        }
+                                        bottomSlot={
+                                          showBottomContainer
+                                            ? hasBottomRhyme
+                                              ? renderSvgSlot(bottomRhyme)
+                                              : (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openSlot('bottom')}
+                                                  className={emptySlotButtonClasses}
+                                                  aria-label="Add rhyme to bottom slot"
+                                                >
+                                                  <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
+                                                    <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                                  </span>
+                                                </button>
+                                              )
+                                            : null
+                                        }
+                                      />
 
-                                              {showBottomContainer && (
-                                                <section className="relative flex flex-col bg-white">
-                                                  {hasBottomRhyme ? (
-                                                    <div
-                                                      key={`${bottomRhyme?.code ?? 'bottom-empty'}-${bottomRhyme?.pages ?? '0'}`}
-                                                      className="relative flex flex-1 min-h-0 flex-col"
-                                                    >
-                                                      <Button
-                                                        onClick={() => {
-                                                          if (pageIndex !== currentPageIndex) {
-                                                            handlePageChange(pageIndex);
-                                                          }
-                                                          handleAddRhyme('bottom');
-                                                        }}
-                                                        variant="outline"
-                                                        className="absolute right-4 top-4 z-10 bg-white/90 px-3 py-2 text-sm text-gray-700 shadow-md backdrop-blur hover:bg-white"
-                                                      >
-                                                        <Replace className="mr-2 h-4 w-4" />
-                                                        Replace
-                                                      </Button>
-                                                      <div className="flex flex-1 min-h-0 items-center justify-center bg-white px-6 py-6">
-                                                        <div
-                                                          dangerouslySetInnerHTML={{ __html: bottomRhyme.svgContent || '' }}
-                                                          className="max-h-full max-w-full [&>svg]:h-auto [&>svg]:w-auto [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain"
-                                                        />
-                                                      </div>
-                                                      <div className="px-6 pb-6 text-center">
-                                                        <p className="font-semibold text-gray-800">{bottomRhyme.name}</p>
-                                                        <p className="text-sm text-gray-500">
-                                                          Code: {bottomRhyme.code} • Pages: {bottomRhyme.pages}
-                                                        </p>
-                                                      </div>
-                                                    </div>
-                                                  ) : (
-                                                    <div className="flex flex-1 items-center justify-center px-6 py-6">
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                          if (pageIndex !== currentPageIndex) {
-                                                            handlePageChange(pageIndex);
-                                                          }
-                                                          handleAddRhyme('bottom');
-                                                        }}
-                                                        className={emptySlotButtonClasses}
-                                                        aria-label="Add rhyme to bottom slot"
-                                                      >
-                                                        <Plus className={emptySlotIconClasses} aria-hidden="true" />
-                                                        <span className="sr-only">Add rhyme to bottom slot</span>
-                                                      </button>
-                                                    </div>
-                                                  )}
-                                                </section>
-                                              )}
+                                      <div className="grid w-full gap-3">
+                                        {hasTopRhyme && (
+                                          <div className="flex flex-col items-center justify-between gap-3 rounded-2xl bg-white/80 p-4 text-center shadow-sm backdrop-blur-sm sm:flex-row sm:text-left">
+                                            <div>
+                                              <p className="font-semibold text-gray-800">{topRhyme.name}</p>
+                                              <p className="text-xs text-gray-500">
+                                                Code: {topRhyme.code} • Pages: {topRhyme.pages}
+                                              </p>
                                             </div>
+                                            <Button
+                                              onClick={() => openSlot('top')}
+                                              variant="outline"
+                                              size="sm"
+                                              className="w-full sm:w-auto"
+                                            >
+                                              <Replace className="mr-2 h-4 w-4" />
+                                              Replace
+                                            </Button>
                                           </div>
-                                        </div>
+                                        )}
+
+                                        {showBottomContainer && hasBottomRhyme && (
+                                          <div className="flex flex-col items-center justify-between gap-3 rounded-2xl bg-white/80 p-4 text-center shadow-sm backdrop-blur-sm sm:flex-row sm:text-left">
+                                            <div>
+                                              <p className="font-semibold text-gray-800">{bottomRhyme.name}</p>
+                                              <p className="text-xs text-gray-500">
+                                                Code: {bottomRhyme.code} • Pages: {bottomRhyme.pages}
+                                              </p>
+                                            </div>
+                                            <Button
+                                              onClick={() => openSlot('bottom')}
+                                              variant="outline"
+                                              size="sm"
+                                              className="w-full sm:w-auto"
+                                            >
+                                              <Replace className="mr-2 h-4 w-4" />
+                                              Replace
+                                            </Button>
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                   </div>
