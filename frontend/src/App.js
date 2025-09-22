@@ -1174,7 +1174,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       </div>
     </div>
-    
+    </div>
   );
 };
 
