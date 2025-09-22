@@ -112,7 +112,7 @@ const Carousel = React.forwardRef((
 })
 Carousel.displayName = "Carousel"
 
-const CarouselContent = React.forwardRef(({ className, ...props }, ref) => {
+const CarouselContent = React.forwardRef(({ className, hasSpacing = true, ...props }, ref) => {
   const { carouselRef, orientation } = useCarousel()
 
   return (
@@ -121,7 +121,13 @@ const CarouselContent = React.forwardRef(({ className, ...props }, ref) => {
         ref={ref}
         className={cn(
           "flex",
-          orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col",
+          hasSpacing
+            ? orientation === "horizontal"
+              ? "-ml-4"
+              : "-mt-4 flex-col"
+            : orientation === "vertical"
+              ? "flex-col"
+              : null,
           className
         )}
         {...props} />
@@ -130,7 +136,7 @@ const CarouselContent = React.forwardRef(({ className, ...props }, ref) => {
 })
 CarouselContent.displayName = "CarouselContent"
 
-const CarouselItem = React.forwardRef(({ className, ...props }, ref) => {
+const CarouselItem = React.forwardRef(({ className, hasSpacing = true, ...props }, ref) => {
   const { orientation } = useCarousel()
 
   return (
@@ -140,7 +146,11 @@ const CarouselItem = React.forwardRef(({ className, ...props }, ref) => {
       aria-roledescription="slide"
       className={cn(
         "min-w-0 shrink-0 grow-0 basis-full",
-        orientation === "horizontal" ? "pl-4" : "pt-4",
+        hasSpacing
+          ? orientation === "horizontal"
+            ? "pl-4"
+            : "pt-4"
+          : null,
         className
       )}
       {...props} />
