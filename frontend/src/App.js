@@ -1029,6 +1029,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                   )}
                 </div>
 
+
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 pb-6">
                     <div className="h-full w-full">
@@ -1044,6 +1045,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                           setApi={setCarouselApi}
                         >
                           <CarouselContent className="flex h-full w-full" hasSpacing={false}>
+
                             {Array.from({ length: displayTotalPages }, (_, pageIndex) => {
                               const pageRhymes = getPageRhymes(pageIndex);
                               const topRhyme = pageRhymes.top;
@@ -1138,10 +1140,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                 </CarouselItem>
                               );
                             })}
-                          </CarouselContent>
-                        </Carousel>
-                      </div>
-                    </div>
+                      </CarouselContent>
+                    </Carousel>
                   </div>
                 </div>
                 {/* Page Indicators */}
