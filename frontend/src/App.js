@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
@@ -7,6 +7,7 @@ import AdminDashboard from './AdminDashboard';
 
 // Components
 import { Button } from './components/ui/button';
+import { Input } from './components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Badge } from './components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible';
@@ -18,119 +19,42 @@ import { Carousel, CarouselContent, CarouselItem } from './components/ui/carouse
 import DocumentPage from './components/DocumentPage.jsx';
 
 
-
 // Icons
-import { Plus, ChevronDown, ChevronRight, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react'
-
-
+import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
+  const [schoolId, setSchoolId] = useState('');
+  const [schoolName, setSchoolName] = useState('');
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-
-  const handleGoogleCredential = useCallback(async (response) => {
-    if (!response?.credential) {
-      toast.error('Google authentication was cancelled. Please try again.');
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    if (!schoolId.trim() || !schoolName.trim()) {
+      toast.error('Please fill in both School ID and School Name');
       return;
     }
 
     setLoading(true);
     try {
-      const result = await axios.post(`${API}/auth/google`, {
-        credential: response.credential
+      const response = await axios.post(`${API}/auth/login`, {
+        school_id: schoolId.trim(),
+        school_name: schoolName.trim()
       });
 
-      onAuth(result.data);
-      toast.success('Successfully authenticated with Google!');
+      onAuth(response.data);
+      toast.success('Successfully logged in!');
     } catch (error) {
-      console.error('Google auth error:', error);
-      const detail = error?.response?.data?.detail;
-      toast.error(detail || 'Failed to authenticate with Google. Please try again.');
+      console.error('Auth error:', error);
+      toast.error('Failed to authenticate. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [onAuth]);
-
-  const initializeGoogleSignIn = useCallback(() => {
-    if (!googleClientId || googleButtonRenderedRef.current) {
-      return;
-    }
-
-    const google = window.google;
-    if (!google?.accounts?.id || !googleButtonRef.current) {
-      return;
-    }
-
-    google.accounts.id.initialize({
-      client_id: googleClientId,
-      callback: handleGoogleCredential
-    });
-
-    google.accounts.id.renderButton(googleButtonRef.current, {
-      theme: 'outline',
-      size: 'large',
-      shape: 'pill',
-      text: 'signin_with',
-      width: 280
-    });
-
-    google.accounts.id.prompt();
-    googleButtonRenderedRef.current = true;
-  }, [googleClientId, handleGoogleCredential]);
-
-  useEffect(() => {
-    if (!googleConfigured) {
-      return undefined;
-    }
-
-    const existingScript = document.querySelector('script[data-google-identity]');
-
-    if (window.google?.accounts?.id) {
-      initializeGoogleSignIn();
-      return undefined;
-    }
-
-    let scriptElement = existingScript;
-
-    if (!scriptElement) {
-      scriptElement = document.createElement('script');
-      scriptElement.src = 'https://accounts.google.com/gsi/client';
-      scriptElement.async = true;
-      scriptElement.defer = true;
-      scriptElement.dataset.googleIdentity = 'true';
-      scriptElement.onload = () => {
-        setScriptError(false);
-        initializeGoogleSignIn();
-      };
-      scriptElement.onerror = () => {
-        console.error('Failed to load Google Identity Services script.');
-        setScriptError(true);
-      };
-      document.head.appendChild(scriptElement);
-    } else if (!googleButtonRenderedRef.current) {
-      scriptElement.addEventListener('load', initializeGoogleSignIn);
-    }
-
-    return () => {
-      if (scriptElement) {
-        scriptElement.removeEventListener('load', initializeGoogleSignIn);
-      }
-      if (window.google?.accounts?.id) {
-        window.google.accounts.id.cancel();
-        if (typeof window.google.accounts.id.disableAutoSelect === 'function') {
-          window.google.accounts.id.disableAutoSelect();
-        }
-      }
-      if (googleButtonRef.current) {
-        googleButtonRef.current.innerHTML = '';
-      }
-      googleButtonRenderedRef.current = false;
-    };
-  }, [googleConfigured, initializeGoogleSignIn]);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center p-4">
@@ -140,36 +64,30 @@ const AuthPage = ({ onAuth }) => {
             <School className="w-10 h-10 text-white" />
           </div>
           <CardTitle className="text-2xl font-bold text-gray-800 mb-2">Rhyme Picker</CardTitle>
-          <p className="text-gray-600 text-sm">Sign in with your Google account to access rhyme selections</p>
+          <p className="text-gray-600 text-sm">Select rhymes for your school grades</p>
         </CardHeader>
         <CardContent>
-          <div className="space-y-6">
-            <p className="text-sm text-gray-600 text-center">
-              Use your school&apos;s Google Workspace credentials to continue.
-            </p>
-            <div className="flex flex-col items-center gap-4">
-              {googleConfigured ? (
-                <>
-                  <div ref={googleButtonRef} className="flex min-h-[40px] w-full justify-center" />
-                  {loading && (
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <Loader2 className="h-4 w-4 animate-spin text-orange-500" />
-                      <span>Verifying Google credentials...</span>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="w-full rounded-lg border border-dashed border-orange-200 bg-orange-50/80 p-4 text-center text-sm text-orange-700">
-                  Google authentication is not configured. Set <code>REACT_APP_GOOGLE_CLIENT_ID</code> in the frontend environment.
-                </div>
-              )}
-              {scriptError && googleConfigured && (
-                <div className="w-full rounded-lg border border-red-200 bg-red-50/80 p-3 text-center text-sm text-red-600">
-                  We couldn&apos;t load Google services. Refresh the page or check your network connection.
-                </div>
-              )}
+          <form onSubmit={handleAuth} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">School ID</label>
+              <Input
+                type="text"
+                placeholder="Enter your school ID"
+                value={schoolId}
+                onChange={(e) => setSchoolId(e.target.value)}
+                className="h-12 bg-white/70 border-gray-200 focus:border-orange-400 focus:ring-orange-400"
+              />
             </div>
-
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">School Name</label>
+              <Input
+                type="text"
+                placeholder="Enter your school name"
+                value={schoolName}
+                onChange={(e) => setSchoolName(e.target.value)}
+                className="h-12 bg-white/70 border-gray-200 focus:border-orange-400 focus:ring-orange-400"
+              />
+            </div>
             <Button
               type="submit"
               disabled={loading}
@@ -177,9 +95,15 @@ const AuthPage = ({ onAuth }) => {
             >
               {loading ? 'Authenticating...' : 'Enter School'}
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate('/admin')}
+              className="w-full h-12 border-orange-200 bg-white/70 text-orange-600 hover:bg-white"
+            >
+              Open Admin Dashboard
+            </Button>
           </form>
-          
-          </div>
         </CardContent>
       </Card>
     </div>
@@ -191,7 +115,6 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const encodedSchoolId = useMemo(() => encodeURIComponent(school.school_id), [school.school_id]);
 
   const grades = [
     { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
@@ -200,9 +123,13 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
     { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' }
   ];
 
-  const fetchGradeStatus = useCallback(async () => {
+  useEffect(() => {
+    fetchGradeStatus();
+  }, []);
+
+  const fetchGradeStatus = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/status/${encodedSchoolId}`);
+      const response = await axios.get(`${API}/rhymes/status/${school.school_id}`);
       setGradeStatus(response.data);
     } catch (error) {
       console.error('Error fetching grade status:', error);
@@ -210,11 +137,7 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
     } finally {
       setLoading(false);
     }
-  }, [encodedSchoolId]);
-
-  useEffect(() => {
-    fetchGradeStatus();
-  }, [fetchGradeStatus]);
+  };
 
   const getGradeStatusInfo = (gradeId) => {
     const status = gradeStatus.find(s => s.grade === gradeId);
@@ -404,19 +327,15 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     ? 'translate-x-0 opacity-100 pointer-events-auto'
     : '-translate-x-full opacity-0 pointer-events-none';
   const layoutGridClass = 'lg:grid-cols-[minmax(0,1fr)]';
-  const mainColumnClasses = 'flex w-full flex-col items-center';
   const [showReusable, setShowReusable] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshingRhymes, setIsRefreshingRhymes] = useState(false);
   const navigate = useNavigate();
-  const encodedSchoolId = useMemo(() => encodeURIComponent(school.school_id), [school.school_id]);
 
   const emptySlotButtonClasses =
-    'group relative flex h-full w-full items-center justify-center bg-white p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
-  const filledSlotButtonClasses =
-    'relative flex h-full w-full items-center justify-center overflow-hidden bg-white p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
-  const emptySlotIconClasses = 'h-10 w-10';
+    'group relative flex h-full w-full items-center justify-center rounded-[28px] bg-gradient-to-br from-orange-50 to-amber-50 p-6 text-orange-500 shadow-inner transition-all duration-300 hover:from-orange-100 hover:to-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
+  const emptySlotIconClasses = 'h-12 w-12';
 
   const MAX_RHYMES_PER_GRADE = 25;
 
@@ -464,7 +383,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     fetchAvailableRhymes();
     fetchReusableRhymes();
     fetchSelectedRhymes();
-  }, [grade, encodedSchoolId]);
+  }, []);
 
   const computePageUsage = (rhymesList = selectedRhymes) => {
     const usageMap = new Map();
@@ -530,7 +449,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
   const fetchAvailableRhymes = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/available/${encodedSchoolId}/${grade}`);
+      const response = await axios.get(`${API}/rhymes/available/${school.school_id}/${grade}`);
       setAvailableRhymes(response.data);
     } catch (error) {
       console.error('Error fetching available rhymes:', error);
@@ -539,7 +458,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
   const fetchReusableRhymes = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/selected/other-grades/${encodedSchoolId}/${grade}`);
+      const response = await axios.get(`${API}/rhymes/selected/other-grades/${school.school_id}/${grade}`);
       setReusableRhymes(response.data);
     } catch (error) {
       console.error('Error fetching reusable rhymes:', error);
@@ -553,7 +472,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     }
 
     try {
-      const response = await axios.get(`${API}/rhymes/selected/${encodedSchoolId}`);
+      const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
       const gradeSelections = response.data[grade] || [];
 
       const rhymesWithSvg = await Promise.all(
@@ -832,7 +751,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
     try {
       const res = await axios.delete(
-        `/api/rhymes/remove/${encodedSchoolId}/${grade}/${targetPageIndex}/${position}`
+        `/api/rhymes/remove/${school.school_id}/${grade}/${targetPageIndex}/${position}`
       );
       console.log("← Delete response:", res.data);
 
@@ -1064,12 +983,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             {/* Dual Container Interface */}
             <div
-              className="min-h-0 flex w-full flex-col items-center"
+              className="min-h-0 mx-auto flex w-full max-w-4xl flex-col items-center"
             >
-                <div className={mainColumnClasses}>
+              <div className="flex h-full w-full max-w-2xl flex-col">
 
                 {/* Navigation Controls */}
-                <div className="w-[210mm] flex-shrink-0 space-y-3 pb-1">
+                <div className="flex-shrink-0 space-y-3 pb-1">
                   <div className="flex items-center justify-between">
                     <Button
                       onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
@@ -1112,15 +1031,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 pb-6">
-
-                
-
-                    <div
-                      className={`flex h-full w-full justify-center transition-[padding] duration-300 ${showTreeMenu ? 'lg:pl-80 xl:pl-[22rem]' : ''}`}
-                    >
-                      <div className="relative flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white py-4 shadow-xl sm:py-6">
+                    <div className="flex h-full w-full justify-center">
+                      <div className="relative mx-auto flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white p-4 shadow-xl sm:p-6">
                         <Carousel
-                          className="flex h-full w-full"
+                          className="flex h-full w-full justify-center"
                           opts={{
                             align: 'center',
                             containScroll: 'trimSnaps',
@@ -1129,7 +1043,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                           }}
                           setApi={setCarouselApi}
                         >
-                          <CarouselContent className="flex h-full w-full">
+                          <CarouselContent className="ml-0 flex h-full w-full">
                             {Array.from({ length: displayTotalPages }, (_, pageIndex) => {
                               const pageRhymes = getPageRhymes(pageIndex);
                               const topRhyme = pageRhymes.top;
@@ -1166,57 +1080,66 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                 );
                               };
 
+                              return (
+                                <CarouselItem
+                                  key={pageIndex}
+                                  className="flex h-full w-full justify-center"
+                                >
+                                  <div className="flex w-full justify-center py-4">
+                                    <div className="flex w-full max-w-[520px] flex-col items-center gap-4">
+                                      <DocumentPage
+                                        showBottom={showBottomContainer}
+                                        topSlot={
+                                          hasTopRhyme ? (
+
+                                            renderSvgSlot(topRhyme, 'top')
+
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => openSlot('top')}
+                                              className={emptySlotButtonClasses}
+                                              aria-label="Add rhyme to top slot"
+                                            >
+                                              <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
+                                                <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                              </span>
+                                            </button>
+                                          )
+                                        }
+                                        bottomSlot={
+                                          showBottomContainer
+                                            ? hasBottomRhyme
+                                              ? renderSvgSlot(bottomRhyme, 'bottom')
+
+                                          
+
+                                              : (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openSlot('bottom')}
+                                                  className={emptySlotButtonClasses}
+                                                  aria-label="Add rhyme to bottom slot"
+                                                >
+                                                  <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
+                                                    <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                                  </span>
+                                                </button>
+                                              )
+                                            : null
+                                        }
+                                      />
 
 
-                            return (
-                              <CarouselItem
-                                key={pageIndex}
-                                hasSpacing={false}
-                                className="flex justify-center"
-                              >
-                                <DocumentPage
-                                  className="flex-none"
-                                  showBottom={showBottomContainer}
-                                  topSlot={
-                                    hasTopRhyme ? (
-                                      renderSvgSlot(topRhyme, 'top')
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => openSlot('top')}
-                                        className={emptySlotButtonClasses}
-                                        aria-label="Add rhyme to top slot"
-                                      >
-                                        <span className="flex h-full w-full items-center justify-center border border-dashed border-orange-300 text-orange-500 transition-colors duration-300 group-hover:border-orange-400 group-hover:text-orange-600">
-                                          <Plus className={emptySlotIconClasses} aria-hidden="true" />
-                                        </span>
-                                      </button>
-                                    )
-                                  }
-                                  bottomSlot={
-                                    showBottomContainer
-                                      ? hasBottomRhyme
-                                        ? renderSvgSlot(bottomRhyme, 'bottom')
-                                        : (
-                                          <button
-                                            type="button"
-                                            onClick={() => openSlot('bottom')}
-                                            className={emptySlotButtonClasses}
-                                            aria-label="Add rhyme to bottom slot"
-                                          >
-                                            <span className="flex h-full w-full items-center justify-center border border-dashed border-orange-300 text-orange-500 transition-colors duration-300 group-hover:border-orange-400 group-hover:text-orange-600">
-                                              <Plus className={emptySlotIconClasses} aria-hidden="true" />
-                                            </span>
-                                          </button>
-                                        )
-                                      : null
-                                  }
-                                />
-                              </CarouselItem>
-                            );
-                          })}
-                        </CarouselContent>
-                      </Carousel>
+
+                                    </div>
+                                  </div>
+                                </CarouselItem>
+                              );
+                            })}
+                          </CarouselContent>
+                        </Carousel>
+                      </div>
                     </div>
                   </div>
                 </div>
