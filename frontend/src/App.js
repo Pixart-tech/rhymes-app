@@ -334,7 +334,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const navigate = useNavigate();
 
   const emptySlotButtonClasses =
-    'group relative flex h-full w-full items-center justify-center rounded-[28px] bg-gradient-to-br from-orange-50 to-amber-50 p-6 text-orange-500 shadow-inner transition-all duration-300 hover:from-orange-100 hover:to-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
+    'group relative flex h-full w-full items-center justify-center bg-transparent text-orange-500 transition-colors duration-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-400';
   const emptySlotIconClasses = 'h-12 w-12';
 
   const MAX_RHYMES_PER_GRADE = 25;
@@ -1063,15 +1063,15 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                               const renderSvgSlot = (rhyme, position) => {
                                 return (
-                                  <div className="group relative flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden bg-white">
+                                  <div className="group relative flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden">
                                     <div
                                       dangerouslySetInnerHTML={{ __html: rhyme?.svgContent || '' }}
-                                      className="pointer-events-none h-full w-full p-6 [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto"
+                                      className="pointer-events-none h-full w-full [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:object-contain"
                                     />
                                     <button
                                       type="button"
                                       onClick={() => openSlot(position)}
-                                      className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-orange-500 shadow transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2"
+                                      className="absolute right-0 top-0 z-10 flex h-10 w-10 items-center justify-center bg-white text-orange-500 transition hover:text-orange-600 focus:outline-none"
                                       aria-label={`Replace ${position} rhyme`}
                                     >
                                       <Replace className="h-5 w-5" aria-hidden="true" />
@@ -1085,8 +1085,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   key={pageIndex}
                                   className="flex h-full w-full justify-center"
                                 >
-                                  <div className="flex w-full justify-center py-4">
-                                    <div className="flex w-full max-w-[520px] flex-col items-center gap-4">
+                                  <div className="flex w-full justify-center">
+                                    <div className="flex w-full max-w-[520px] flex-col items-center">
                                       <DocumentPage
                                         showBottom={showBottomContainer}
                                         topSlot={
@@ -1101,7 +1101,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                               className={emptySlotButtonClasses}
                                               aria-label="Add rhyme to top slot"
                                             >
-                                              <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
+                                              <span className="flex h-full w-full items-center justify-center text-orange-500 transition-colors duration-300 group-hover:text-orange-600">
                                                 <Plus className={emptySlotIconClasses} aria-hidden="true" />
                                               </span>
                                             </button>
@@ -1121,7 +1121,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                                   className={emptySlotButtonClasses}
                                                   aria-label="Add rhyme to bottom slot"
                                                 >
-                                                  <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
+                                                  <span className="flex h-full w-full items-center justify-center text-orange-500 transition-colors duration-300 group-hover:text-orange-600">
                                                     <Plus className={emptySlotIconClasses} aria-hidden="true" />
                                                   </span>
                                                 </button>
