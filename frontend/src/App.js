@@ -1032,7 +1032,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 pb-6">
                     <div className="h-full w-full">
-                      <div className="relative mx-auto flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white p-4 shadow-xl sm:p-6">
+                      <div className="relative mx-auto h-full w-full max-w-5xl rounded-[36px] bg-white p-4 shadow-xl sm:p-6">
                         <Carousel
                           className="relative h-full w-full"
                           opts={{
@@ -1083,7 +1083,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                               return (
                                 <CarouselItem
                                   key={pageIndex}
-                                  className="flex h-full w-full justify-center"
+                                  className="h-full w-full"
                                   hasSpacing={false}
                                 >
                                   <div className="flex w-full justify-center py-4">
