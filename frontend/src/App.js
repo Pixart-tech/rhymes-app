@@ -20,7 +20,7 @@ import DocumentPage from './components/DocumentPage.jsx';
 
 
 // Icons
-import { Plus, ChevronDown, ChevronRight, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -30,6 +30,7 @@ const AuthPage = ({ onAuth }) => {
   const [schoolId, setSchoolId] = useState('');
   const [schoolName, setSchoolName] = useState('');
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -93,6 +94,14 @@ const AuthPage = ({ onAuth }) => {
               className="w-full h-12 bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white font-semibold rounded-xl transition-all duration-300 transform hover:scale-105"
             >
               {loading ? 'Authenticating...' : 'Enter School'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate('/admin')}
+              className="w-full h-12 border-orange-200 bg-white/70 text-orange-600 hover:bg-white"
+            >
+              Open Admin Dashboard
             </Button>
           </form>
         </CardContent>
@@ -318,7 +327,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     ? 'translate-x-0 opacity-100 pointer-events-auto'
     : '-translate-x-full opacity-0 pointer-events-none';
   const layoutGridClass = 'lg:grid-cols-[minmax(0,1fr)]';
-  const mainColumnClasses = 'flex w-full flex-col items-center';
   const [showReusable, setShowReusable] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -326,10 +334,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const navigate = useNavigate();
 
   const emptySlotButtonClasses =
-    'group relative flex h-full w-full items-center justify-center bg-white p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
-  const filledSlotButtonClasses =
-    'relative flex h-full w-full items-center justify-center overflow-hidden bg-white p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
-  const emptySlotIconClasses = 'h-10 w-10';
+    'group relative flex h-full w-full items-center justify-center rounded-[28px] bg-gradient-to-br from-orange-50 to-amber-50 p-6 text-orange-500 shadow-inner transition-all duration-300 hover:from-orange-100 hover:to-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
+  const emptySlotIconClasses = 'h-12 w-12';
 
   const MAX_RHYMES_PER_GRADE = 25;
 
@@ -977,16 +983,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             {/* Dual Container Interface */}
             <div
-
-              
-
               className="min-h-0 mx-auto flex w-full max-w-4xl flex-col items-center"
-
             >
-                <div className={mainColumnClasses}>
+              <div className="flex h-full w-full max-w-2xl flex-col">
 
                 {/* Navigation Controls */}
-                <div className="w-[210mm] flex-shrink-0">
+                <div className="flex-shrink-0 space-y-3 pb-1">
                   <div className="flex items-center justify-between">
                     <Button
                       onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
@@ -1027,7 +1029,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                   )}
                 </div>
 
-               
+                <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 pb-6">
                     <div className="flex h-full w-full justify-center">
                       <div className="relative mx-auto flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white p-4 shadow-xl sm:p-6">
@@ -1078,7 +1080,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                 );
                               };
 
-
+                              return (
+                                <CarouselItem
+                                  key={pageIndex}
+                                  className="flex h-full w-full justify-center"
+                                >
                                   <div className="flex w-full justify-center py-4">
                                     <div className="flex w-full max-w-[520px] flex-col items-center gap-4">
                                       <DocumentPage
@@ -1129,59 +1135,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     </div>
                                   </div>
                                 </CarouselItem>
-
                               );
-                            };
-
-                            return (
-                              <CarouselItem
-                                key={pageIndex}
-                                hasSpacing={false}
-                                className="flex justify-center"
-                              >
-                                <DocumentPage
-                                  className="flex-none"
-                                  showBottom={showBottomContainer}
-                                  topSlot={
-                                    hasTopRhyme ? (
-                                      renderSvgSlot(topRhyme, 'top')
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => openSlot('top')}
-                                        className={emptySlotButtonClasses}
-                                        aria-label="Add rhyme to top slot"
-                                      >
-                                        <span className="flex h-full w-full items-center justify-center border border-dashed border-orange-300 text-orange-500 transition-colors duration-300 group-hover:border-orange-400 group-hover:text-orange-600">
-                                          <Plus className={emptySlotIconClasses} aria-hidden="true" />
-                                        </span>
-                                      </button>
-                                    )
-                                  }
-                                  bottomSlot={
-                                    showBottomContainer
-                                      ? hasBottomRhyme
-                                        ? renderSvgSlot(bottomRhyme, 'bottom')
-                                        : (
-                                          <button
-                                            type="button"
-                                            onClick={() => openSlot('bottom')}
-                                            className={emptySlotButtonClasses}
-                                            aria-label="Add rhyme to bottom slot"
-                                          >
-                                            <span className="flex h-full w-full items-center justify-center border border-dashed border-orange-300 text-orange-500 transition-colors duration-300 group-hover:border-orange-400 group-hover:text-orange-600">
-                                              <Plus className={emptySlotIconClasses} aria-hidden="true" />
-                                            </span>
-                                          </button>
-                                        )
-                                      : null
-                                  }
-                                />
-                              </CarouselItem>
-                            );
-                          })}
-                        </CarouselContent>
-                      </Carousel>
+                            })}
+                          </CarouselContent>
+                        </Carousel>
+                      </div>
                     </div>
                   </div>
                 </div>
