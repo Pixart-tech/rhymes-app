@@ -333,8 +333,14 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [isRefreshingRhymes, setIsRefreshingRhymes] = useState(false);
   const navigate = useNavigate();
 
+  const slotContainerClasses =
+    'group relative flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-[28px] bg-white shadow-sm';
+  const slotContentClasses =
+    'pointer-events-none h-full w-full p-2 sm:p-3 [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto';
   const emptySlotButtonClasses =
-    'group relative flex h-full w-full items-center justify-center rounded-[28px] bg-gradient-to-br from-orange-50 to-amber-50 p-6 text-orange-500 shadow-inner transition-all duration-300 hover:from-orange-100 hover:to-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
+    'flex h-full w-full items-center justify-center rounded-[24px] bg-gradient-to-br from-orange-50 to-amber-50 p-2 sm:p-3 text-orange-500 transition-all duration-300 hover:from-orange-100 hover:to-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
+  const emptySlotInnerClasses =
+    'flex h-full w-full items-center justify-center rounded-[20px] border-2 border-dashed border-orange-300 bg-white/80 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600';
   const emptySlotIconClasses = 'h-12 w-12';
 
   const MAX_RHYMES_PER_GRADE = 25;
@@ -1063,18 +1069,35 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                               const renderSvgSlot = (rhyme, position) => {
                                 return (
-                                  <div className="group relative flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden bg-white">
+                                  <div className={slotContainerClasses}>
                                     <div
                                       dangerouslySetInnerHTML={{ __html: rhyme?.svgContent || '' }}
-                                      className="pointer-events-none h-full w-full p-6 [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto"
+                                      className={slotContentClasses}
                                     />
                                     <button
                                       type="button"
                                       onClick={() => openSlot(position)}
-                                      className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-orange-500 shadow transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2"
+                                      className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-orange-500 shadow transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2"
                                       aria-label={`Replace ${position} rhyme`}
                                     >
                                       <Replace className="h-5 w-5" aria-hidden="true" />
+                                    </button>
+                                  </div>
+                                );
+                              };
+
+                              const renderEmptySlot = (position) => {
+                                return (
+                                  <div className={slotContainerClasses}>
+                                    <button
+                                      type="button"
+                                      onClick={() => openSlot(position)}
+                                      className={emptySlotButtonClasses}
+                                      aria-label={`Add rhyme to ${position} slot`}
+                                    >
+                                      <span className={emptySlotInnerClasses}>
+                                        <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                      </span>
                                     </button>
                                   </div>
                                 );
@@ -1091,42 +1114,15 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       <DocumentPage
                                         showBottom={showBottomContainer}
                                         topSlot={
-                                          hasTopRhyme ? (
-
-                                            renderSvgSlot(topRhyme, 'top')
-
-                                          ) : (
-                                            <button
-                                              type="button"
-                                              onClick={() => openSlot('top')}
-                                              className={emptySlotButtonClasses}
-                                              aria-label="Add rhyme to top slot"
-                                            >
-                                              <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
-                                                <Plus className={emptySlotIconClasses} aria-hidden="true" />
-                                              </span>
-                                            </button>
-                                          )
+                                          hasTopRhyme
+                                            ? renderSvgSlot(topRhyme, 'top')
+                                            : renderEmptySlot('top')
                                         }
                                         bottomSlot={
                                           showBottomContainer
                                             ? hasBottomRhyme
                                               ? renderSvgSlot(bottomRhyme, 'bottom')
-
-                                          
-
-                                              : (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => openSlot('bottom')}
-                                                  className={emptySlotButtonClasses}
-                                                  aria-label="Add rhyme to bottom slot"
-                                                >
-                                                  <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
-                                                    <Plus className={emptySlotIconClasses} aria-hidden="true" />
-                                                  </span>
-                                                </button>
-                                              )
+                                              : renderEmptySlot('bottom')
                                             : null
                                         }
                                       />
