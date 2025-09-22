@@ -983,7 +983,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             {/* Dual Container Interface */}
             <div
-              className="min-h-0 mx-auto flex w-full max-w-4xl flex-col items-center"
+              className="min-h-0 flex w-full max-w-4xl flex-col items-center self-start"
             >
               <div className="flex h-full w-full max-w-2xl flex-col">
 
@@ -1031,7 +1031,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 pb-6">
-                    <div className="flex h-full w-full justify-center">
+                    <div
+                      className={`flex h-full w-full justify-center transition-[padding] duration-300 ${showTreeMenu ? 'lg:pl-80 xl:pl-[22rem]' : ''}`}
+                    >
                       <div className="relative mx-auto flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white p-4 shadow-xl sm:p-6">
                         <Carousel
                           className="flex h-full w-full justify-center"
@@ -1086,7 +1088,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   className="flex h-full w-full justify-center"
                                 >
                                   <div className="flex w-full justify-center py-4">
-                                    <div className="flex w-full max-w-[520px] flex-col items-center gap-4">
+                                    <div className="flex w-full max-w-[520px] flex-col items-center gap-4 px-2 sm:px-4">
                                       <DocumentPage
                                         showBottom={showBottomContainer}
                                         topSlot={
@@ -1131,6 +1133,48 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       />
 
 
+
+                                      <div className="grid w-full gap-3">
+                                        {hasTopRhyme && (
+                                          <div className="flex flex-col items-center justify-between gap-3 rounded-2xl bg-white/80 p-4 text-center shadow-sm backdrop-blur-sm sm:flex-row sm:text-left">
+                                            <div>
+                                              <p className="font-semibold text-gray-800">{topRhyme.name}</p>
+                                              <p className="text-xs text-gray-500">
+                                                Code: {topRhyme.code} • Pages: {topRhyme.pages}
+                                              </p>
+                                            </div>
+                                            <Button
+                                              onClick={() => openSlot('top')}
+                                              variant="outline"
+                                              size="sm"
+                                              className="w-full sm:w-auto"
+                                            >
+                                              <Replace className="mr-2 h-4 w-4" />
+                                              Replace
+                                            </Button>
+                                          </div>
+                                        )}
+
+                                        {showBottomContainer && hasBottomRhyme && (
+                                          <div className="flex flex-col items-center justify-between gap-3 rounded-2xl bg-white/80 p-4 text-center shadow-sm backdrop-blur-sm sm:flex-row sm:text-left">
+                                            <div>
+                                              <p className="font-semibold text-gray-800">{bottomRhyme.name}</p>
+                                              <p className="text-xs text-gray-500">
+                                                Code: {bottomRhyme.code} • Pages: {bottomRhyme.pages}
+                                              </p>
+                                            </div>
+                                            <Button
+                                              onClick={() => openSlot('bottom')}
+                                              variant="outline"
+                                              size="sm"
+                                              className="w-full sm:w-auto"
+                                            >
+                                              <Replace className="mr-2 h-4 w-4" />
+                                              Replace
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </div>
 
                                     </div>
                                   </div>
