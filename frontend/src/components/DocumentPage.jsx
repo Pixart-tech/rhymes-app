@@ -2,6 +2,11 @@ import React from 'react';
 import { cn } from '../lib/utils';
 
 const DocumentPage = ({ topSlot, bottomSlot, showBottom = true, className }) => {
+
+
+
+ 
+
   const isFullPage = !showBottom;
 
   return (
@@ -21,6 +26,9 @@ const DocumentPage = ({ topSlot, bottomSlot, showBottom = true, className }) => 
             </div>
           </>
         )}
+
+
+
       </div>
     </div>
   );

@@ -977,7 +977,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
             {/* Dual Container Interface */}
             <div
-              className="min-h-0 flex w-full flex-col items-center"
+
+              
+
+              className="min-h-0 mx-auto flex w-full max-w-4xl flex-col items-center"
+
             >
                 <div className={mainColumnClasses}>
 
@@ -1023,49 +1027,109 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                   )}
                 </div>
 
-                <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex-1 min-h-0">
+               
+                  <div className="flex-1 min-h-0 pb-6">
                     <div className="flex h-full w-full justify-center">
-                      <Carousel
-                        className="mx-auto w-[210mm]"
-                        opts={{
-                          align: 'center',
-                          containScroll: 'trimSnaps',
-                          draggable: false,
-                          dragFree: false,
-                        }}
-                        setApi={setCarouselApi}
-                      >
-                        <CarouselContent hasSpacing={false} className="flex h-full w-full">
-                          {Array.from({ length: displayTotalPages }, (_, pageIndex) => {
-                            const pageRhymes = getPageRhymes(pageIndex);
-                            const topRhyme = pageRhymes.top;
-                            const bottomRhyme = pageRhymes.bottom;
-                            const hasTopRhyme = topRhyme !== null;
-                            const hasBottomRhyme = bottomRhyme !== null;
-                            const isTopFullPage = hasTopRhyme && parsePagesValue(topRhyme.pages) === 1;
-                            const showBottomContainer = !isTopFullPage;
+                      <div className="relative mx-auto flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white p-4 shadow-xl sm:p-6">
+                        <Carousel
+                          className="flex h-full w-full justify-center"
+                          opts={{
+                            align: 'center',
+                            containScroll: 'trimSnaps',
+                            draggable: false,
+                            dragFree: false,
+                          }}
+                          setApi={setCarouselApi}
+                        >
+                          <CarouselContent className="ml-0 flex h-full w-full">
+                            {Array.from({ length: displayTotalPages }, (_, pageIndex) => {
+                              const pageRhymes = getPageRhymes(pageIndex);
+                              const topRhyme = pageRhymes.top;
+                              const bottomRhyme = pageRhymes.bottom;
+                              const hasTopRhyme = topRhyme !== null;
+                              const hasBottomRhyme = bottomRhyme !== null;
+                              const isTopFullPage = hasTopRhyme && parsePagesValue(topRhyme.pages) === 1;
+                              const showBottomContainer = !isTopFullPage;
 
-                            const openSlot = (position) => {
-                              if (pageIndex !== currentPageIndex) {
-                                handlePageChange(pageIndex);
-                              }
-                              handleAddRhyme(position);
-                            };
+                              const openSlot = (position) => {
+                                if (pageIndex !== currentPageIndex) {
+                                  handlePageChange(pageIndex);
+                                }
+                                handleAddRhyme(position);
+                              };
 
-                            const renderSvgSlot = (rhyme, position) => {
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => openSlot(position)}
-                                  className={filledSlotButtonClasses}
-                                  aria-label={`Change ${position} rhyme`}
-                                >
-                                  <div
-                                    dangerouslySetInnerHTML={{ __html: rhyme?.svgContent || '' }}
-                                    className="pointer-events-none flex h-full w-full items-center justify-center [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain"
-                                  />
-                                </button>
+
+                              const renderSvgSlot = (rhyme, position) => {
+                                return (
+                                  <div className="group relative flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden bg-white">
+                                    <div
+                                      dangerouslySetInnerHTML={{ __html: rhyme?.svgContent || '' }}
+                                      className="pointer-events-none h-full w-full p-6 [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => openSlot(position)}
+                                      className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-orange-500 shadow transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2"
+                                      aria-label={`Replace ${position} rhyme`}
+                                    >
+                                      <Replace className="h-5 w-5" aria-hidden="true" />
+                                    </button>
+                                  </div>
+                                );
+                              };
+
+
+                                  <div className="flex w-full justify-center py-4">
+                                    <div className="flex w-full max-w-[520px] flex-col items-center gap-4">
+                                      <DocumentPage
+                                        showBottom={showBottomContainer}
+                                        topSlot={
+                                          hasTopRhyme ? (
+
+                                            renderSvgSlot(topRhyme, 'top')
+
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => openSlot('top')}
+                                              className={emptySlotButtonClasses}
+                                              aria-label="Add rhyme to top slot"
+                                            >
+                                              <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
+                                                <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                              </span>
+                                            </button>
+                                          )
+                                        }
+                                        bottomSlot={
+                                          showBottomContainer
+                                            ? hasBottomRhyme
+                                              ? renderSvgSlot(bottomRhyme, 'bottom')
+
+                                          
+
+                                              : (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openSlot('bottom')}
+                                                  className={emptySlotButtonClasses}
+                                                  aria-label="Add rhyme to bottom slot"
+                                                >
+                                                  <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
+                                                    <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                                  </span>
+                                                </button>
+                                              )
+                                            : null
+                                        }
+                                      />
+
+
+
+                                    </div>
+                                  </div>
+                                </CarouselItem>
+
                               );
                             };
 
