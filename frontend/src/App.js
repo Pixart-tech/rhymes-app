@@ -1031,10 +1031,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 pb-6">
-                    <div className="flex h-full w-full justify-center">
+                    <div className="h-full w-full">
                       <div className="relative mx-auto flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white p-4 shadow-xl sm:p-6">
                         <Carousel
-                          className="flex h-full w-full justify-center"
+                          className="relative h-full w-full"
                           opts={{
                             align: 'center',
                             containScroll: 'trimSnaps',
