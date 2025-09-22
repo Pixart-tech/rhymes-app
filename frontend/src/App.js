@@ -1034,9 +1034,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                     <div
                       className={`flex h-full w-full justify-center transition-[padding] duration-300 ${showTreeMenu ? 'lg:pl-80 xl:pl-[22rem]' : ''}`}
                     >
-                      <div className="relative mx-auto flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white p-4 shadow-xl sm:p-6">
+                      <div className="relative flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white py-4 shadow-xl sm:py-6">
                         <Carousel
-                          className="flex h-full w-full justify-center"
+                          className="flex h-full w-full"
                           opts={{
                             align: 'center',
                             containScroll: 'trimSnaps',
