@@ -19,8 +19,9 @@ import DocumentPage from './components/DocumentPage.jsx';
 
 
 
-import { Plus, ChevronDown, ChevronRight, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
-=======
+// Icons
+import { Plus, ChevronDown, ChevronRight, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react'
+
 
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -29,12 +30,7 @@ const API = `${BACKEND_URL}/api`;
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
   const [loading, setLoading] = useState(false);
-  const [scriptError, setScriptError] = useState(false);
-  const googleButtonRef = useRef(null);
-  const googleButtonRenderedRef = useRef(false);
-  const navigate = useNavigate();
-  const googleClientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
-  const googleConfigured = Boolean(googleClientId);
+
 
   const handleGoogleCredential = useCallback(async (response) => {
     if (!response?.credential) {
@@ -173,15 +169,16 @@ const AuthPage = ({ onAuth }) => {
                 </div>
               )}
             </div>
-            <Separator className="bg-orange-200/70" />
+
             <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigate('/admin')}
-              className="w-full h-12 border-orange-200 bg-white/70 text-orange-600 hover:bg-white"
+              type="submit"
+              disabled={loading}
+              className="w-full h-12 bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white font-semibold rounded-xl transition-all duration-300 transform hover:scale-105"
             >
-              Open Admin Dashboard
+              {loading ? 'Authenticating...' : 'Enter School'}
             </Button>
+          </form>
+          
           </div>
         </CardContent>
       </Card>
@@ -1168,6 +1165,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   </div>
                                 );
                               };
+
 
 
                             return (

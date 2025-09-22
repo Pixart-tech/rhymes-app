@@ -130,7 +130,6 @@ const CarouselContent = React.forwardRef(({ className, hasSpacing = true, ...pro
               ? "flex-col"
               : null,
 
-         
           className
         )}
         {...props} />
@@ -155,7 +154,6 @@ const CarouselItem = React.forwardRef(({ className, hasSpacing = true, ...props 
             ? "pl-4"
             : "pt-4"
           : null,
-
 
         className
       )}
