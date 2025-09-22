@@ -7,10 +7,12 @@ import os
 import logging
 import json
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Optional, Any
 import uuid
 from datetime import datetime
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_requests
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -19,6 +21,11 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+# Google authentication configuration
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
+
+logger = logging.getLogger(__name__)
 
 # Load rhymes data
 with open(ROOT_DIR / 'rhymes.json', 'r') as f:
@@ -32,14 +39,23 @@ api_router = APIRouter(prefix="/api")
 
 # Models
 class School(BaseModel):
+    model_config = ConfigDict(extra='ignore')
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     school_id: str
     school_name: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    auth_provider: str = "manual"
+    email: Optional[str] = None
+    google_sub: Optional[str] = None
+    picture_url: Optional[str] = None
 
 class SchoolCreate(BaseModel):
     school_id: str
     school_name: str
+
+
+class GoogleAuthRequest(BaseModel):
+    credential: str
 
 class RhymeSelection(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -85,14 +101,73 @@ class SchoolWithSelections(School):
 async def login_school(input: SchoolCreate):
     # Check if school already exists
     existing_school = await db.schools.find_one({"school_id": input.school_id})
-    
+
     if existing_school:
-        return School(**existing_school)
-    
+        return School.model_validate(existing_school)
+
     # Create new school entry
-    school_dict = input.dict()
+    school_dict = {
+        "school_id": input.school_id.strip(),
+        "school_name": input.school_name.strip(),
+        "auth_provider": "manual",
+    }
     school_obj = School(**school_dict)
-    await db.schools.insert_one(school_obj.dict())
+    await db.schools.insert_one(school_obj.model_dump())
+    return school_obj
+
+
+@api_router.post("/auth/google", response_model=School)
+async def login_with_google(payload: GoogleAuthRequest):
+    """Authenticate a school using a Google ID token."""
+
+    if not GOOGLE_CLIENT_ID:
+        logger.error("Google authentication attempted without GOOGLE_CLIENT_ID configured")
+        raise HTTPException(status_code=500, detail="Google authentication is not configured.")
+
+    try:
+        id_info = google_id_token.verify_oauth2_token(
+            payload.credential,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID,
+        )
+    except ValueError as exc:  # pragma: no cover - depends on external service responses
+        logger.error("Failed to verify Google credential: %s", exc)
+        raise HTTPException(status_code=401, detail="Invalid Google credential.") from exc
+
+    google_sub = id_info.get("sub")
+    email = id_info.get("email")
+    if not google_sub:
+        logger.error("Google credential missing subject identifier")
+        raise HTTPException(status_code=400, detail="Google credential is incomplete.")
+
+    existing_school = await db.schools.find_one({"google_sub": google_sub})
+
+    if not existing_school and email:
+        existing_school = await db.schools.find_one({"email": email})
+
+    if existing_school:
+        # Ensure google_sub is stored for existing records
+        update_fields = {}
+        if not existing_school.get("google_sub"):
+            update_fields["google_sub"] = google_sub
+        if existing_school.get("auth_provider") != "google":
+            update_fields["auth_provider"] = "google"
+        if update_fields:
+            await db.schools.update_one({"_id": existing_school["_id"]}, {"$set": update_fields})
+            existing_school.update(update_fields)
+
+        return School.model_validate(existing_school)
+
+    school_dict = {
+        "school_id": email or google_sub,
+        "school_name": id_info.get("name") or email or "Google User",
+        "email": email,
+        "google_sub": google_sub,
+        "auth_provider": "google",
+        "picture_url": id_info.get("picture"),
+    }
+    school_obj = School(**school_dict)
+    await db.schools.insert_one(school_obj.model_dump())
     return school_obj
 
 # Rhymes data endpoints
@@ -252,7 +327,7 @@ async def select_rhyme(input: RhymeSelectionCreate):
             await db.rhyme_selections.delete_one({"_id": existing["_id"]})
 
     # Create new selection
-    selection_dict = input.dict()
+    selection_dict = input.model_dump()
     selection_dict.update({
         "rhyme_name": rhyme_data[0],
         "pages": pages,
@@ -260,7 +335,7 @@ async def select_rhyme(input: RhymeSelectionCreate):
     })
     
     selection_obj = RhymeSelection(**selection_dict)
-    await db.rhyme_selections.insert_one(selection_obj.dict())
+    await db.rhyme_selections.insert_one(selection_obj.model_dump())
     
     return selection_obj
 
