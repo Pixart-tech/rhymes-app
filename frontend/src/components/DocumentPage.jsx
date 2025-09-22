@@ -3,6 +3,8 @@ import { cn } from '../lib/utils';
 
 const DocumentPage = ({ topSlot, bottomSlot, showBottom = true, className }) => {
 
+
+
  
 
   const isFullPage = !showBottom;
@@ -24,6 +26,7 @@ const DocumentPage = ({ topSlot, bottomSlot, showBottom = true, className }) => 
             </div>
           </>
         )}
+
 
 
       </div>
