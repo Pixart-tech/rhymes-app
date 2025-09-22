@@ -1029,21 +1029,19 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                   )}
                 </div>
 
-                <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex-1 min-h-0 pb-6">
-                    <div className="h-full w-full">
-                      <div className="relative mx-auto flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white p-4 shadow-xl sm:p-6">
-                        <Carousel
-                          className="relative h-full w-full"
-                          opts={{
-                            align: 'center',
-                            containScroll: 'trimSnaps',
-                            draggable: false,
-                            dragFree: false,
-                          }}
-                          setApi={setCarouselApi}
-                        >
-                          <CarouselContent className="flex h-full w-full" hasSpacing={false}>
+                <div className="flex-1 min-h-0 pb-6">
+                  <div className="h-full w-full">
+                    <Carousel
+                      className="h-full w-full"
+                      opts={{
+                        align: 'center',
+                        containScroll: 'trimSnaps',
+                        draggable: false,
+                        dragFree: false,
+                      }}
+                      setApi={setCarouselApi}
+                    >
+                      <CarouselContent className="flex h-full w-full" hasSpacing={false}>
                             {Array.from({ length: displayTotalPages }, (_, pageIndex) => {
                               const pageRhymes = getPageRhymes(pageIndex);
                               const topRhyme = pageRhymes.top;
@@ -1083,7 +1081,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                               return (
                                 <CarouselItem
                                   key={pageIndex}
-                                  className="flex h-full w-full justify-center"
+                                  className="h-full w-full"
                                   hasSpacing={false}
                                 >
                                   <div className="flex w-full justify-center py-4">
@@ -1138,10 +1136,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                 </CarouselItem>
                               );
                             })}
-                          </CarouselContent>
-                        </Carousel>
-                      </div>
-                    </div>
+                      </CarouselContent>
+                    </Carousel>
                   </div>
                 </div>
                 {/* Page Indicators */}
