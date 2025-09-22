@@ -1034,7 +1034,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                     <div
                       className={`flex h-full w-full justify-center transition-[padding] duration-300 ${showTreeMenu ? 'lg:pl-80 xl:pl-[22rem]' : ''}`}
                     >
-                      <div className="relative mx-auto flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white p-4 shadow-xl sm:p-6">
+                      <div className="relative flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white py-4 shadow-xl sm:py-6">
                         <Carousel
                           className="flex h-full w-full justify-center"
                           opts={{
@@ -1045,7 +1045,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                           }}
                           setApi={setCarouselApi}
                         >
-                          <CarouselContent className="ml-0 flex h-full w-full">
+                          <CarouselContent className="flex h-full w-full">
                             {Array.from({ length: displayTotalPages }, (_, pageIndex) => {
                               const pageRhymes = getPageRhymes(pageIndex);
                               const topRhyme = pageRhymes.top;
@@ -1088,7 +1088,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   className="flex h-full w-full justify-center"
                                 >
                                   <div className="flex w-full justify-center py-4">
-                                    <div className="flex w-full max-w-[520px] flex-col items-center gap-4 px-2 sm:px-4">
+                                    <div className="flex w-full max-w-[520px] flex-col items-center gap-4">
                                       <DocumentPage
                                         showBottom={showBottomContainer}
                                         topSlot={
