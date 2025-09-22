@@ -121,6 +121,7 @@ const CarouselContent = React.forwardRef(({ className, hasSpacing = true, ...pro
         ref={ref}
         className={cn(
           "flex",
+
           hasSpacing
             ? orientation === "horizontal"
               ? "-ml-4"
@@ -128,6 +129,8 @@ const CarouselContent = React.forwardRef(({ className, hasSpacing = true, ...pro
             : orientation === "vertical"
               ? "flex-col"
               : null,
+
+         
           className
         )}
         {...props} />
@@ -146,11 +149,14 @@ const CarouselItem = React.forwardRef(({ className, hasSpacing = true, ...props 
       aria-roledescription="slide"
       className={cn(
         "min-w-0 shrink-0 grow-0 basis-full",
+
         hasSpacing
           ? orientation === "horizontal"
             ? "pl-4"
             : "pt-4"
           : null,
+
+
         className
       )}
       {...props} />

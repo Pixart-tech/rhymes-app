@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
@@ -7,7 +7,6 @@ import AdminDashboard from './AdminDashboard';
 
 // Components
 import { Button } from './components/ui/button';
-import { Input } from './components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Badge } from './components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible';
@@ -19,42 +18,123 @@ import { Carousel, CarouselContent, CarouselItem } from './components/ui/carouse
 import DocumentPage from './components/DocumentPage.jsx';
 
 
-// Icons
+
 import { Plus, ChevronDown, ChevronRight, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
+=======
+
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
-  const [schoolId, setSchoolId] = useState('');
-  const [schoolName, setSchoolName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [scriptError, setScriptError] = useState(false);
+  const googleButtonRef = useRef(null);
+  const googleButtonRenderedRef = useRef(false);
   const navigate = useNavigate();
+  const googleClientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
+  const googleConfigured = Boolean(googleClientId);
 
-  const handleAuth = async (e) => {
-    e.preventDefault();
-    if (!schoolId.trim() || !schoolName.trim()) {
-      toast.error('Please fill in both School ID and School Name');
+  const handleGoogleCredential = useCallback(async (response) => {
+    if (!response?.credential) {
+      toast.error('Google authentication was cancelled. Please try again.');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await axios.post(`${API}/auth/login`, {
-        school_id: schoolId.trim(),
-        school_name: schoolName.trim()
+      const result = await axios.post(`${API}/auth/google`, {
+        credential: response.credential
       });
 
-      onAuth(response.data);
-      toast.success('Successfully logged in!');
+      onAuth(result.data);
+      toast.success('Successfully authenticated with Google!');
     } catch (error) {
-      console.error('Auth error:', error);
-      toast.error('Failed to authenticate. Please try again.');
+      console.error('Google auth error:', error);
+      const detail = error?.response?.data?.detail;
+      toast.error(detail || 'Failed to authenticate with Google. Please try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [onAuth]);
+
+  const initializeGoogleSignIn = useCallback(() => {
+    if (!googleClientId || googleButtonRenderedRef.current) {
+      return;
+    }
+
+    const google = window.google;
+    if (!google?.accounts?.id || !googleButtonRef.current) {
+      return;
+    }
+
+    google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: handleGoogleCredential
+    });
+
+    google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: 'outline',
+      size: 'large',
+      shape: 'pill',
+      text: 'signin_with',
+      width: 280
+    });
+
+    google.accounts.id.prompt();
+    googleButtonRenderedRef.current = true;
+  }, [googleClientId, handleGoogleCredential]);
+
+  useEffect(() => {
+    if (!googleConfigured) {
+      return undefined;
+    }
+
+    const existingScript = document.querySelector('script[data-google-identity]');
+
+    if (window.google?.accounts?.id) {
+      initializeGoogleSignIn();
+      return undefined;
+    }
+
+    let scriptElement = existingScript;
+
+    if (!scriptElement) {
+      scriptElement = document.createElement('script');
+      scriptElement.src = 'https://accounts.google.com/gsi/client';
+      scriptElement.async = true;
+      scriptElement.defer = true;
+      scriptElement.dataset.googleIdentity = 'true';
+      scriptElement.onload = () => {
+        setScriptError(false);
+        initializeGoogleSignIn();
+      };
+      scriptElement.onerror = () => {
+        console.error('Failed to load Google Identity Services script.');
+        setScriptError(true);
+      };
+      document.head.appendChild(scriptElement);
+    } else if (!googleButtonRenderedRef.current) {
+      scriptElement.addEventListener('load', initializeGoogleSignIn);
+    }
+
+    return () => {
+      if (scriptElement) {
+        scriptElement.removeEventListener('load', initializeGoogleSignIn);
+      }
+      if (window.google?.accounts?.id) {
+        window.google.accounts.id.cancel();
+        if (typeof window.google.accounts.id.disableAutoSelect === 'function') {
+          window.google.accounts.id.disableAutoSelect();
+        }
+      }
+      if (googleButtonRef.current) {
+        googleButtonRef.current.innerHTML = '';
+      }
+      googleButtonRenderedRef.current = false;
+    };
+  }, [googleConfigured, initializeGoogleSignIn]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center p-4">
@@ -64,37 +144,36 @@ const AuthPage = ({ onAuth }) => {
             <School className="w-10 h-10 text-white" />
           </div>
           <CardTitle className="text-2xl font-bold text-gray-800 mb-2">Rhyme Picker</CardTitle>
-          <p className="text-gray-600 text-sm">Select rhymes for your school grades</p>
+          <p className="text-gray-600 text-sm">Sign in with your Google account to access rhyme selections</p>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleAuth} className="space-y-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">School ID</label>
-              <Input
-                type="text"
-                placeholder="Enter your school ID"
-                value={schoolId}
-                onChange={(e) => setSchoolId(e.target.value)}
-                className="h-12 bg-white/70 border-gray-200 focus:border-orange-400 focus:ring-orange-400"
-              />
+          <div className="space-y-6">
+            <p className="text-sm text-gray-600 text-center">
+              Use your school&apos;s Google Workspace credentials to continue.
+            </p>
+            <div className="flex flex-col items-center gap-4">
+              {googleConfigured ? (
+                <>
+                  <div ref={googleButtonRef} className="flex min-h-[40px] w-full justify-center" />
+                  {loading && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <Loader2 className="h-4 w-4 animate-spin text-orange-500" />
+                      <span>Verifying Google credentials...</span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="w-full rounded-lg border border-dashed border-orange-200 bg-orange-50/80 p-4 text-center text-sm text-orange-700">
+                  Google authentication is not configured. Set <code>REACT_APP_GOOGLE_CLIENT_ID</code> in the frontend environment.
+                </div>
+              )}
+              {scriptError && googleConfigured && (
+                <div className="w-full rounded-lg border border-red-200 bg-red-50/80 p-3 text-center text-sm text-red-600">
+                  We couldn&apos;t load Google services. Refresh the page or check your network connection.
+                </div>
+              )}
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">School Name</label>
-              <Input
-                type="text"
-                placeholder="Enter your school name"
-                value={schoolName}
-                onChange={(e) => setSchoolName(e.target.value)}
-                className="h-12 bg-white/70 border-gray-200 focus:border-orange-400 focus:ring-orange-400"
-              />
-            </div>
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full h-12 bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white font-semibold rounded-xl transition-all duration-300 transform hover:scale-105"
-            >
-              {loading ? 'Authenticating...' : 'Enter School'}
-            </Button>
+            <Separator className="bg-orange-200/70" />
             <Button
               type="button"
               variant="outline"
@@ -103,7 +182,7 @@ const AuthPage = ({ onAuth }) => {
             >
               Open Admin Dashboard
             </Button>
-          </form>
+          </div>
         </CardContent>
       </Card>
     </div>
@@ -115,6 +194,7 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const encodedSchoolId = useMemo(() => encodeURIComponent(school.school_id), [school.school_id]);
 
   const grades = [
     { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
@@ -123,13 +203,9 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
     { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' }
   ];
 
-  useEffect(() => {
-    fetchGradeStatus();
-  }, []);
-
-  const fetchGradeStatus = async () => {
+  const fetchGradeStatus = useCallback(async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/status/${school.school_id}`);
+      const response = await axios.get(`${API}/rhymes/status/${encodedSchoolId}`);
       setGradeStatus(response.data);
     } catch (error) {
       console.error('Error fetching grade status:', error);
@@ -137,7 +213,11 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [encodedSchoolId]);
+
+  useEffect(() => {
+    fetchGradeStatus();
+  }, [fetchGradeStatus]);
 
   const getGradeStatusInfo = (gradeId) => {
     const status = gradeStatus.find(s => s.grade === gradeId);
@@ -333,6 +413,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [isRefreshingRhymes, setIsRefreshingRhymes] = useState(false);
   const navigate = useNavigate();
+  const encodedSchoolId = useMemo(() => encodeURIComponent(school.school_id), [school.school_id]);
 
   const emptySlotButtonClasses =
     'group relative flex h-full w-full items-center justify-center bg-white p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
@@ -386,7 +467,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     fetchAvailableRhymes();
     fetchReusableRhymes();
     fetchSelectedRhymes();
-  }, []);
+  }, [grade, encodedSchoolId]);
 
   const computePageUsage = (rhymesList = selectedRhymes) => {
     const usageMap = new Map();
@@ -452,7 +533,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
   const fetchAvailableRhymes = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/available/${school.school_id}/${grade}`);
+      const response = await axios.get(`${API}/rhymes/available/${encodedSchoolId}/${grade}`);
       setAvailableRhymes(response.data);
     } catch (error) {
       console.error('Error fetching available rhymes:', error);
@@ -461,7 +542,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
   const fetchReusableRhymes = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/selected/other-grades/${school.school_id}/${grade}`);
+      const response = await axios.get(`${API}/rhymes/selected/other-grades/${encodedSchoolId}/${grade}`);
       setReusableRhymes(response.data);
     } catch (error) {
       console.error('Error fetching reusable rhymes:', error);
@@ -475,7 +556,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     }
 
     try {
-      const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
+      const response = await axios.get(`${API}/rhymes/selected/${encodedSchoolId}`);
       const gradeSelections = response.data[grade] || [];
 
       const rhymesWithSvg = await Promise.all(
@@ -754,7 +835,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
     try {
       const res = await axios.delete(
-        `/api/rhymes/remove/${school.school_id}/${grade}/${targetPageIndex}/${position}`
+        `/api/rhymes/remove/${encodedSchoolId}/${grade}/${targetPageIndex}/${position}`
       );
       console.log("← Delete response:", res.data);
 
@@ -1034,35 +1115,61 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 pb-6">
-                    <div className="flex h-full w-full justify-center">
-                      <Carousel
-                        className="mx-auto w-[210mm]"
-                        opts={{
-                          align: 'center',
-                          containScroll: 'trimSnaps',
-                          draggable: false,
-                          dragFree: false,
-                        }}
-                        setApi={setCarouselApi}
-                      >
-                        <CarouselContent hasSpacing={false} className="flex h-full w-full">
-                          {Array.from({ length: displayTotalPages }, (_, pageIndex) => {
-                            const pageRhymes = getPageRhymes(pageIndex);
-                            const topRhyme = pageRhymes.top;
-                            const bottomRhyme = pageRhymes.bottom;
-                            const hasTopRhyme = topRhyme !== null;
-                            const hasBottomRhyme = bottomRhyme !== null;
-                            const isTopFullPage = hasTopRhyme && parsePagesValue(topRhyme.pages) === 1;
-                            const showBottomContainer = !isTopFullPage;
 
-                            const openSlot = (position) => {
-                              if (pageIndex !== currentPageIndex) {
-                                handlePageChange(pageIndex);
-                              }
-                              handleAddRhyme(position);
-                            };
+                
 
-                            const renderSvgSlot = (rhyme, position) => {
+                    <div
+                      className={`flex h-full w-full justify-center transition-[padding] duration-300 ${showTreeMenu ? 'lg:pl-80 xl:pl-[22rem]' : ''}`}
+                    >
+                      <div className="relative flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white py-4 shadow-xl sm:py-6">
+                        <Carousel
+                          className="flex h-full w-full"
+                          opts={{
+                            align: 'center',
+                            containScroll: 'trimSnaps',
+                            draggable: false,
+                            dragFree: false,
+                          }}
+                          setApi={setCarouselApi}
+                        >
+                          <CarouselContent className="flex h-full w-full">
+                            {Array.from({ length: displayTotalPages }, (_, pageIndex) => {
+                              const pageRhymes = getPageRhymes(pageIndex);
+                              const topRhyme = pageRhymes.top;
+                              const bottomRhyme = pageRhymes.bottom;
+                              const hasTopRhyme = topRhyme !== null;
+                              const hasBottomRhyme = bottomRhyme !== null;
+                              const isTopFullPage = hasTopRhyme && parsePagesValue(topRhyme.pages) === 1;
+                              const showBottomContainer = !isTopFullPage;
+
+                              const openSlot = (position) => {
+                                if (pageIndex !== currentPageIndex) {
+                                  handlePageChange(pageIndex);
+                                }
+                                handleAddRhyme(position);
+                              };
+
+
+                              const renderSvgSlot = (rhyme, position) => {
+                                return (
+                                  <div className="group relative flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden bg-white">
+                                    <div
+                                      dangerouslySetInnerHTML={{ __html: rhyme?.svgContent || '' }}
+                                      className="pointer-events-none h-full w-full p-6 [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => openSlot(position)}
+                                      className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-orange-500 shadow transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2"
+                                      aria-label={`Replace ${position} rhyme`}
+                                    >
+                                      <Replace className="h-5 w-5" aria-hidden="true" />
+                                    </button>
+                                  </div>
+                                );
+                              };
+
+
                               return (
                                 <button
                                   type="button"
@@ -1070,11 +1177,106 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   className={filledSlotButtonClasses}
                                   aria-label={`Change ${position} rhyme`}
                                 >
+
                                   <div
                                     dangerouslySetInnerHTML={{ __html: rhyme?.svgContent || '' }}
                                     className="pointer-events-none flex h-full w-full items-center justify-center [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain"
                                   />
                                 </button>
+
+                                  <div className="flex w-full justify-center py-4">
+                                    <div className="flex w-full max-w-[520px] flex-col items-center gap-4">
+                                      <DocumentPage
+                                        showBottom={showBottomContainer}
+                                        topSlot={
+                                          hasTopRhyme ? (
+
+                                            renderSvgSlot(topRhyme, 'top')
+
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => openSlot('top')}
+                                              className={emptySlotButtonClasses}
+                                              aria-label="Add rhyme to top slot"
+                                            >
+                                              <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
+                                                <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                              </span>
+                                            </button>
+                                          )
+                                        }
+                                        bottomSlot={
+                                          showBottomContainer
+                                            ? hasBottomRhyme
+                                              ? renderSvgSlot(bottomRhyme, 'bottom')
+
+                                          
+
+                                              : (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openSlot('bottom')}
+                                                  className={emptySlotButtonClasses}
+                                                  aria-label="Add rhyme to bottom slot"
+                                                >
+                                                  <span className="flex h-full w-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-300 bg-white/70 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600">
+                                                    <Plus className={emptySlotIconClasses} aria-hidden="true" />
+                                                  </span>
+                                                </button>
+                                              )
+                                            : null
+                                        }
+                                      />
+
+
+
+                                      <div className="grid w-full gap-3">
+                                        {hasTopRhyme && (
+                                          <div className="flex flex-col items-center justify-between gap-3 rounded-2xl bg-white/80 p-4 text-center shadow-sm backdrop-blur-sm sm:flex-row sm:text-left">
+                                            <div>
+                                              <p className="font-semibold text-gray-800">{topRhyme.name}</p>
+                                              <p className="text-xs text-gray-500">
+                                                Code: {topRhyme.code} • Pages: {topRhyme.pages}
+                                              </p>
+                                            </div>
+                                            <Button
+                                              onClick={() => openSlot('top')}
+                                              variant="outline"
+                                              size="sm"
+                                              className="w-full sm:w-auto"
+                                            >
+                                              <Replace className="mr-2 h-4 w-4" />
+                                              Replace
+                                            </Button>
+                                          </div>
+                                        )}
+
+                                        {showBottomContainer && hasBottomRhyme && (
+                                          <div className="flex flex-col items-center justify-between gap-3 rounded-2xl bg-white/80 p-4 text-center shadow-sm backdrop-blur-sm sm:flex-row sm:text-left">
+                                            <div>
+                                              <p className="font-semibold text-gray-800">{bottomRhyme.name}</p>
+                                              <p className="text-xs text-gray-500">
+                                                Code: {bottomRhyme.code} • Pages: {bottomRhyme.pages}
+                                              </p>
+                                            </div>
+                                            <Button
+                                              onClick={() => openSlot('bottom')}
+                                              variant="outline"
+                                              size="sm"
+                                              className="w-full sm:w-auto"
+                                            >
+                                              <Replace className="mr-2 h-4 w-4" />
+                                              Replace
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                    </div>
+                                  </div>
+                                </CarouselItem>
+
                               );
                             };
 
