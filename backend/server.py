@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -7,12 +7,27 @@ import os
 import logging
 import json
 from pathlib import Path
+from io import BytesIO
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Optional, Any
 import uuid
 from datetime import datetime
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
+
+try:  # pragma: no cover - optional dependency resolution is environment-specific
+    import cairosvg
+except ImportError:  # pragma: no cover - handled gracefully at runtime
+    cairosvg = None
+
+try:  # pragma: no cover - optional dependency resolution is environment-specific
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.utils import ImageReader
+except ImportError:  # pragma: no cover - handled gracefully at runtime
+    canvas = None
+    A4 = None
+    ImageReader = None
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -95,6 +110,12 @@ class SchoolWithSelections(School):
     total_selections: int = 0
     last_updated: Optional[datetime] = None
     grades: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
+
+
+class PdfExportRequest(BaseModel):
+    school_id: str
+    grade: str
+    svgs: List[str]
 
 # Authentication endpoints
 @api_router.post("/auth/login", response_model=School)
@@ -554,6 +575,74 @@ async def delete_school(school_id: str):
         "removed_school": school_result.deleted_count,
         "removed_selections": selection_result.deleted_count,
     }
+
+
+@api_router.post("/rhymes/export/pdf")
+async def export_rhymes_pdf(payload: PdfExportRequest):
+    """Generate a PDF containing the provided SVG content stacked as pages."""
+
+    if cairosvg is None or canvas is None or ImageReader is None or A4 is None:
+        logger.error("PDF generation attempted without required dependencies installed.")
+        raise HTTPException(status_code=500, detail="PDF generation dependencies are not available on the server.")
+
+    if not payload.svgs:
+        raise HTTPException(status_code=400, detail="No SVG content provided.")
+
+    pdf_buffer = BytesIO()
+    pdf_canvas = canvas.Canvas(pdf_buffer, pagesize=A4)
+    page_width, page_height = A4
+    rendered_pages = 0
+
+    for index, svg_content in enumerate(payload.svgs):
+        if not svg_content or not svg_content.strip():
+            continue
+
+        try:
+            png_bytes = cairosvg.svg2png(bytestring=svg_content.encode("utf-8"))
+        except Exception as exc:  # pragma: no cover - conversion errors depend on SVG input
+            logger.error("Failed to convert SVG at index %s: %s", index, exc)
+            raise HTTPException(status_code=400, detail=f"Invalid SVG content at index {index}.") from exc
+
+        image_stream = BytesIO(png_bytes)
+        image_reader = ImageReader(image_stream)
+        img_width, img_height = image_reader.getSize()
+
+        if img_width <= 0 or img_height <= 0:
+            continue
+
+        scale = min(page_width / img_width, page_height / img_height)
+        display_width = img_width * scale
+        display_height = img_height * scale
+        position_x = (page_width - display_width) / 2
+        position_y = (page_height - display_height) / 2
+
+        pdf_canvas.drawImage(
+            image_reader,
+            position_x,
+            position_y,
+            width=display_width,
+            height=display_height,
+            preserveAspectRatio=True,
+            mask='auto',
+        )
+        pdf_canvas.showPage()
+        rendered_pages += 1
+
+    if rendered_pages == 0:
+        raise HTTPException(status_code=400, detail="Unable to render any SVG content into PDF.")
+
+    pdf_canvas.save()
+    pdf_buffer.seek(0)
+
+    sanitized_grade = payload.grade.replace(" ", "_")
+    sanitized_school_id = payload.school_id.replace(" ", "_")
+    filename = f"{sanitized_school_id}_{sanitized_grade}_rhymes.pdf"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    }
+
+    return StreamingResponse(pdf_buffer, media_type="application/pdf", headers=headers)
 
 @api_router.get("/rhymes/svg/{rhyme_code}")
 async def get_rhyme_svg(rhyme_code: str):
