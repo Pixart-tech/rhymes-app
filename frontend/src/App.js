@@ -22,8 +22,7 @@ import DocumentPage from './components/DocumentPage.jsx';
 // Icons
 import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye, Download } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import { API_BASE_URL as API } from './config';
 
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
