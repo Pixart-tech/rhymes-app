@@ -1037,8 +1037,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 pb-6">
-                    <div className="flex h-full w-full justify-center">
-                      <div className="relative mx-auto flex h-full w-full max-w-5xl justify-center rounded-[36px] bg-white py-4 shadow-xl sm:py-6">
+                    <div className="flex h-full w-full">
+                      <div className="relative flex h-full w-full justify-center rounded-[36px] bg-white py-4 shadow-xl sm:py-6">
                         <Carousel
                           className="flex h-full w-full justify-center"
                           opts={{
