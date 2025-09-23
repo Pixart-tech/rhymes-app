@@ -20,7 +20,7 @@ import DocumentPage from './components/DocumentPage.jsx';
 
 
 // Icons
-import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye, Download } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -331,6 +331,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshingRhymes, setIsRefreshingRhymes] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const navigate = useNavigate();
 
   const slotContainerClasses =
@@ -800,6 +801,69 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const nextAvailablePageIndex = nextPageInfo.index;
   const hasNextPageCapacity = nextPageInfo.hasCapacity;
   const highestFilledIndex = nextPageInfo.highestIndex;
+  const totalSelectedRhymes = Array.isArray(selectedRhymes) ? selectedRhymes.length : 0;
+  const allRhymesHaveSvg = Array.isArray(selectedRhymes)
+    && selectedRhymes.every((selection) => typeof selection?.svgContent === 'string' && selection.svgContent.trim() !== '');
+  const canDownloadPdf = totalSelectedRhymes === MAX_RHYMES_PER_GRADE && allRhymesHaveSvg;
+
+  const handleDownloadPdf = async () => {
+    if (!canDownloadPdf) {
+      toast.error('Please complete all rhyme selections before downloading.');
+      return;
+    }
+
+    const sortedSelections = sortSelections(selectedRhymes);
+    const svgPayload = sortedSelections
+      .map((selection) => selection?.svgContent)
+      .filter((svg) => typeof svg === 'string' && svg.trim() !== '');
+
+    if (svgPayload.length !== sortedSelections.length) {
+      toast.error('Some rhymes are missing artwork. Please refresh and try again.');
+      return;
+    }
+
+    setDownloadingPdf(true);
+
+    try {
+      const response = await axios.post(
+        `${API}/rhymes/export/pdf`,
+        {
+          school_id: school.school_id,
+          grade,
+          svgs: svgPayload,
+        },
+        { responseType: 'blob' }
+      );
+
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+
+      const filename = (() => {
+        const disposition = response.headers?.['content-disposition'];
+        if (typeof disposition === 'string') {
+          const match = disposition.match(/filename="?([^";]+)"?/i);
+          if (match && match[1]) {
+            return match[1];
+          }
+        }
+        return `${school.school_id}_${grade}_rhymes.pdf`;
+      })();
+
+      link.href = downloadUrl;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success('PDF download started');
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      toast.error('Failed to download PDF. Please try again.');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
 
   // Calculate total pages
   const calculateTotalPages = () => {
@@ -932,7 +996,23 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
             <h1 className="text-2xl font-bold text-gray-900 capitalize">{grade} Grade - Rhyme Selection</h1>
             <p className="text-gray-600">{school.school_name} ({school.school_id})</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {canDownloadPdf && (
+              <Button
+                onClick={handleDownloadPdf}
+                disabled={downloadingPdf}
+                className="flex items-center bg-gradient-to-r from-orange-400 to-red-400 text-white hover:from-orange-500 hover:to-red-500"
+              >
+                {downloadingPdf ? (
+                  'Preparing PDF…'
+                ) : (
+                  <>
+                    <Download className="mr-2 h-4 w-4" />
+                    Download PDF
+                  </>
+                )}
+              </Button>
+            )}
             <Button
               onClick={onBack}
               variant="outline"
