@@ -50,8 +50,11 @@ mongo_options: Dict[str, Any] = {
 
 client = AsyncIOMotorClient(mongo_url, **mongo_options)
 db_name = os.getenv("DB_NAME", "rhymes")
+
 mongo_db = client[db_name]
 db = ResilientDatabase(mongo_db)
+=======
+
 
 # Google authentication configuration
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
@@ -427,7 +430,17 @@ async def login_school(input: SchoolCreate):
     normalized_school_id = input.school_id.strip()
     normalized_school_name = input.school_name.strip()
 
-    existing_school = await db.schools.find_one({"school_id": normalized_school_id})
+
+=======
+    try:
+        existing_school = await db.schools.find_one({"school_id": normalized_school_id})
+    except PyMongoError as exc:  # pragma: no cover - depends on database availability
+        logger.exception("Database error while retrieving school %s", normalized_school_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication service is temporarily unavailable. Please try again shortly.",
+        ) from exc
+
 
     if existing_school:
         school_model = School.model_validate(existing_school)
@@ -441,9 +454,18 @@ async def login_school(input: SchoolCreate):
     }
     school_obj = School(**school_dict)
 
-    await db.schools.insert_one(school_obj.model_dump(exclude={"storage_mode"}))
 
-    school_obj.storage_mode = "memory" if db.was_fallback_used() else "mongo"
+
+    try:
+        await db.schools.insert_one(school_obj.model_dump())
+    except PyMongoError as exc:  # pragma: no cover - depends on database availability
+        logger.exception("Database error while creating school %s", normalized_school_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to save school information right now. Please try again shortly.",
+        ) from exc
+
+
     return school_obj
 
 
