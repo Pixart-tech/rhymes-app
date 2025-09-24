@@ -22,6 +22,34 @@ import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Musi
 
 import { API_BASE_URL as API } from './lib/utils';
 
+const MAX_RHYMES_PER_GRADE = 25;
+
+const extractFilenameFromHeaders = (headers, fallbackFilename) => {
+  if (headers && typeof headers['content-disposition'] === 'string') {
+    const match = headers['content-disposition'].match(/filename="?([^";]+)"?/i);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+
+  return fallbackFilename;
+};
+
+const triggerPdfDownload = (response, fallbackFilename) => {
+  const blob = new Blob([response.data], { type: 'application/pdf' });
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+
+  const filename = extractFilenameFromHeaders(response.headers, fallbackFilename);
+
+  link.href = downloadUrl;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(downloadUrl);
+};
+
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
   const [schoolId, setSchoolId] = useState('');
@@ -106,6 +134,7 @@ const AuthPage = ({ onAuth }) => {
 const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [downloadingGrade, setDownloadingGrade] = useState(null);
   const navigate = useNavigate();
 
   const storageMode = (school?.storage_mode || '').toLowerCase();
@@ -137,6 +166,84 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
   const getGradeStatusInfo = (gradeId) => {
     const status = gradeStatus.find(s => s.grade === gradeId);
     return status ? `${status.selected_count} of 25` : '0 of 25';
+  };
+
+  const isGradeComplete = (gradeId) => {
+    const status = gradeStatus.find(s => s.grade === gradeId);
+    return status ? status.selected_count >= MAX_RHYMES_PER_GRADE : false;
+  };
+
+  const normalizeSlot = (value, fallback = 'top') => {
+    if (value === null || value === undefined) return fallback;
+    const normalized = value.toString().trim().toLowerCase();
+    return normalized === 'bottom' ? 'bottom' : 'top';
+  };
+
+  const sortSelectionsForDownload = (selections) => {
+    if (!Array.isArray(selections)) {
+      return [];
+    }
+
+    const getPositionWeight = (selection) => normalizeSlot(selection?.position) === 'bottom' ? 1 : 0;
+
+    return [...selections].sort((a, b) => {
+      const indexA = Number(a?.page_index ?? 0);
+      const indexB = Number(b?.page_index ?? 0);
+
+      if (indexA !== indexB) {
+        return indexA - indexB;
+      }
+
+      return getPositionWeight(a) - getPositionWeight(b);
+    });
+  };
+
+  const handleDownloadGradePdf = async (gradeId) => {
+    setDownloadingGrade(gradeId);
+
+    try {
+      const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
+      const gradeSelections = Array.isArray(response.data?.[gradeId]) ? response.data[gradeId] : [];
+
+      if (gradeSelections.length !== MAX_RHYMES_PER_GRADE) {
+        toast.error('This grade does not have 25 rhymes yet.');
+        return;
+      }
+
+      const sortedSelections = sortSelectionsForDownload(gradeSelections);
+
+      const svgResponses = await Promise.all(sortedSelections.map(selection => (
+        axios.get(`${API}/rhymes/svg/${selection.code}`)
+      )));
+
+      const svgPayload = svgResponses
+        .map(res => res?.data)
+        .filter(svg => typeof svg === 'string' && svg.trim() !== '');
+
+      if (svgPayload.length !== sortedSelections.length) {
+        toast.error('Some rhymes are missing artwork. Please refresh and try again.');
+        return;
+      }
+
+      const pdfResponse = await axios.post(
+        `${API}/rhymes/export/pdf`,
+        {
+          school_id: school.school_id,
+          grade: gradeId,
+          svgs: svgPayload,
+        },
+        { responseType: 'blob' }
+      );
+
+      const fallbackFilename = `${school.school_id}_${gradeId}_rhymes.pdf`;
+      triggerPdfDownload(pdfResponse, fallbackFilename);
+      toast.success('PDF download started');
+    } catch (error) {
+      console.error('Error downloading grade PDF:', error);
+      toast.error('Failed to download PDF. Please try again.');
+    } finally {
+      setDownloadingGrade(null);
+    }
   };
 
   if (loading) {
@@ -187,21 +294,46 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
               className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
               onClick={() => onGradeSelect(grade.id)}
             >
-              <CardContent className="p-6 text-center">
-                <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                  <span className="text-2xl">{grade.icon}</span>
-                </div>
-                <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
-                <Badge variant="secondary" className="mb-4">
-                  {getGradeStatusInfo(grade.id)} Rhymes Selected
-                </Badge>
-                <Button
-                  className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
-                >
-                  Select Rhymes
-                </Button>
-              </CardContent>
-            </Card>
+                <CardContent className="p-6 text-center">
+                  <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
+                    <span className="text-2xl">{grade.icon}</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
+                  <Badge variant="secondary" className="mb-4">
+                    {getGradeStatusInfo(grade.id)} Rhymes Selected
+                  </Badge>
+                  <div className="flex flex-col gap-2">
+                    {isGradeComplete(grade.id) && (
+                      <Button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleDownloadGradePdf(grade.id);
+                        }}
+                        disabled={downloadingGrade === grade.id}
+                        className="w-full bg-gradient-to-r from-orange-400 to-red-400 text-white hover:from-orange-500 hover:to-red-500"
+                      >
+                        {downloadingGrade === grade.id ? (
+                          'Preparing PDF…'
+                        ) : (
+                          <>
+                            <Download className="mr-2 h-4 w-4" />
+                            Download PDF
+                          </>
+                        )}
+                      </Button>
+                    )}
+                    <Button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onGradeSelect(grade.id);
+                      }}
+                      className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
+                    >
+                      Select Rhymes
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
           ))}
         </div>
       </div>
@@ -347,8 +479,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const emptySlotInnerClasses =
     'flex h-full w-full items-center justify-center rounded-[20px] border-2 border-dashed border-orange-300 bg-white/80 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600';
   const emptySlotIconClasses = 'h-12 w-12';
-
-  const MAX_RHYMES_PER_GRADE = 25;
 
   const getSessionStorageKey = useCallback((gradeId) => `rhymeSelections:${gradeId}`, []);
 
@@ -839,27 +969,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         { responseType: 'blob' }
       );
 
-      const blob = new Blob([response.data], { type: 'application/pdf' });
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-
-      const filename = (() => {
-        const disposition = response.headers?.['content-disposition'];
-        if (typeof disposition === 'string') {
-          const match = disposition.match(/filename="?([^";]+)"?/i);
-          if (match && match[1]) {
-            return match[1];
-          }
-        }
-        return `${school.school_id}_${grade}_rhymes.pdf`;
-      })();
-
-      link.href = downloadUrl;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(downloadUrl);
+      const fallbackFilename = `${school.school_id}_${grade}_rhymes.pdf`;
+      triggerPdfDownload(response, fallbackFilename);
       toast.success('PDF download started');
     } catch (error) {
       console.error('Error generating PDF:', error);
