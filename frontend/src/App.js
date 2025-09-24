@@ -3,8 +3,6 @@ import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
 
-import AdminDashboard from './AdminDashboard';
-
 // Components
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
@@ -22,15 +20,13 @@ import DocumentPage from './components/DocumentPage.jsx';
 // Icons
 import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye, Download } from 'lucide-react';
 
-import { API_BASE_URL as API } from './config';
+import { API_BASE_URL as API } from './lib/utils';
 
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
   const [schoolId, setSchoolId] = useState('');
   const [schoolName, setSchoolName] = useState('');
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-
   const handleAuth = async (e) => {
     e.preventDefault();
     if (!schoolId.trim() || !schoolName.trim()) {
@@ -93,14 +89,6 @@ const AuthPage = ({ onAuth }) => {
               className="w-full h-12 bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white font-semibold rounded-xl transition-all duration-300 transform hover:scale-105"
             >
               {loading ? 'Authenticating...' : 'Enter School'}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigate('/admin')}
-              className="w-full h-12 border-orange-200 bg-white/70 text-orange-600 hover:bg-white"
-            >
-              Open Admin Dashboard
             </Button>
           </form>
         </CardContent>
@@ -757,7 +745,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
     try {
       const res = await axios.delete(
-        `/api/rhymes/remove/${school.school_id}/${grade}/${targetPageIndex}/${position}`
+        `${API}/rhymes/remove/${school.school_id}/${grade}/${targetPageIndex}/${position}`
       );
       console.log("← Delete response:", res.data);
 
@@ -1280,7 +1268,6 @@ function App() {
       <Toaster position="top-right" />
       <BrowserRouter>
         <Routes>
-          <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/" element={
             !school ? (
               <AuthPage onAuth={handleAuth} />
