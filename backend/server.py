@@ -3,6 +3,7 @@ from fastapi.responses import Response, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import PyMongoError
 import os
 import logging
 import json
@@ -33,9 +34,14 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+mongo_options: Dict[str, Any] = {
+    "serverSelectionTimeoutMS": int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "2000")),
+}
+
+client = AsyncIOMotorClient(mongo_url, **mongo_options)
+db_name = os.getenv("DB_NAME", "rhymes")
+db = client[db_name]
 
 # Google authentication configuration
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
@@ -120,20 +126,37 @@ class PdfExportRequest(BaseModel):
 # Authentication endpoints
 @api_router.post("/auth/login", response_model=School)
 async def login_school(input: SchoolCreate):
-    # Check if school already exists
-    existing_school = await db.schools.find_one({"school_id": input.school_id})
+    normalized_school_id = input.school_id.strip()
+    normalized_school_name = input.school_name.strip()
+
+    try:
+        existing_school = await db.schools.find_one({"school_id": normalized_school_id})
+    except PyMongoError as exc:  # pragma: no cover - depends on database availability
+        logger.exception("Database error while retrieving school %s", normalized_school_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication service is temporarily unavailable. Please try again shortly.",
+        ) from exc
 
     if existing_school:
         return School.model_validate(existing_school)
 
-    # Create new school entry
     school_dict = {
-        "school_id": input.school_id.strip(),
-        "school_name": input.school_name.strip(),
+        "school_id": normalized_school_id,
+        "school_name": normalized_school_name,
         "auth_provider": "manual",
     }
     school_obj = School(**school_dict)
-    await db.schools.insert_one(school_obj.model_dump())
+
+    try:
+        await db.schools.insert_one(school_obj.model_dump())
+    except PyMongoError as exc:  # pragma: no cover - depends on database availability
+        logger.exception("Database error while creating school %s", normalized_school_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to save school information right now. Please try again shortly.",
+        ) from exc
+
     return school_obj
 
 
