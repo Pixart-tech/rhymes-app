@@ -9,13 +9,10 @@ import logging
 import json
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from io import BytesIO
+from functools import lru_cache
 
-from cairosvg import svg2png
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfgen import canvas
 import uuid
 from datetime import datetime
 
@@ -67,6 +64,41 @@ def generate_rhyme_svg(rhyme_code: str) -> str:
 
 
 app = FastAPI()
+
+
+class PDFDependencyUnavailableError(RuntimeError):
+    """Raised when CairoSVG/ReportLab cannot be imported at runtime."""
+
+
+@lru_cache(maxsize=1)
+def _load_pdf_dependencies() -> Tuple[Any, Any, Tuple[float, float], Any]:
+    """Dynamically import heavy PDF dependencies when needed.
+
+    Importing CairoSVG/ReportLab at module import time can crash the entire
+    application when optional system libraries (for example ``libcairo``) are
+    missing. By delaying the import until the binder endpoint is actually
+    requested we prevent authentication and other unrelated endpoints from
+    failing with a 502 Bad Gateway.
+
+    Returns a tuple containing the ``svg2png`` callable, the ReportLab ``Canvas``
+    class, the default ``letter`` page size and the ``ImageReader`` helper.
+    """
+
+    try:
+        from cairosvg import svg2png  # type: ignore
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.utils import ImageReader
+        from reportlab.pdfgen import canvas as pdf_canvas
+    except (ImportError, OSError) as exc:
+        logging.getLogger(__name__).error(
+            "PDF generation dependencies could not be loaded: %s", exc
+        )
+        raise PDFDependencyUnavailableError(
+            "PDF generation is temporarily unavailable. Please contact the "
+            "administrator to install the required CairoSVG and ReportLab dependencies."
+        ) from exc
+
+    return svg2png, pdf_canvas.Canvas, letter, ImageReader
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -557,6 +589,11 @@ async def get_rhyme_svg(rhyme_code: str):
 async def download_rhyme_binder(school_id: str, grade: str):
     """Generate a PDF binder containing all rhymes for the specified grade."""
 
+    try:
+        svg2png, Canvas, letter, ImageReader = _load_pdf_dependencies()
+    except PDFDependencyUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     selections = await db.rhyme_selections.find(
         {
             "school_id": school_id,
@@ -574,7 +611,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
         pages_map.setdefault(page_index, []).append(selection)
 
     buffer = BytesIO()
-    pdf_canvas = canvas.Canvas(buffer, pagesize=letter)
+    pdf_canvas = Canvas(buffer, pagesize=letter)
     page_width, page_height = letter
 
     for page_index in sorted(pages_map.keys()):
