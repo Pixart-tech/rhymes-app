@@ -40,6 +40,7 @@ except ImportError:  # pragma: no cover - handled gracefully at runtime
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+
 logger = logging.getLogger(__name__)
 
 class SimpleResult:
