@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
+
 
 // Components
 import { Button } from './components/ui/button';
@@ -12,49 +13,21 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './component
 import { Separator } from './components/ui/separator';
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
-import { Carousel, CarouselContent, CarouselItem } from './components/ui/carousel';
-
-import DocumentPage from './components/DocumentPage.jsx';
 
 
 // Icons
-import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye, Download } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
 
-import { API_BASE_URL as API } from './lib/utils';
-
-const MAX_RHYMES_PER_GRADE = 25;
-
-const extractFilenameFromHeaders = (headers, fallbackFilename) => {
-  if (headers && typeof headers['content-disposition'] === 'string') {
-    const match = headers['content-disposition'].match(/filename="?([^";]+)"?/i);
-    if (match && match[1]) {
-      return match[1];
-    }
-  }
-
-  return fallbackFilename;
-};
-
-const triggerPdfDownload = (response, fallbackFilename) => {
-  const blob = new Blob([response.data], { type: 'application/pdf' });
-  const downloadUrl = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-
-  const filename = extractFilenameFromHeaders(response.headers, fallbackFilename);
-
-  link.href = downloadUrl;
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(downloadUrl);
-};
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
 
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
   const [schoolId, setSchoolId] = useState('');
   const [schoolName, setSchoolName] = useState('');
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+
   const handleAuth = async (e) => {
     e.preventDefault();
     if (!schoolId.trim() || !schoolName.trim()) {
@@ -68,13 +41,8 @@ const AuthPage = ({ onAuth }) => {
         school_id: schoolId.trim(),
         school_name: schoolName.trim()
       });
-
-      const storageMode = (response.headers?.['x-storage-mode'] || 'mongo').toLowerCase();
-      if (storageMode === 'memory') {
-        toast.warning('Connected in offline mode. Changes will only persist for this session.');
-      }
-
-      onAuth({ ...response.data, storage_mode: storageMode });
+      
+      onAuth(response.data);
       toast.success('Successfully logged in!');
     } catch (error) {
       console.error('Auth error:', error);
@@ -123,6 +91,7 @@ const AuthPage = ({ onAuth }) => {
             >
               {loading ? 'Authenticating...' : 'Enter School'}
             </Button>
+            
           </form>
         </CardContent>
       </Card>
@@ -134,11 +103,7 @@ const AuthPage = ({ onAuth }) => {
 const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [downloadingGrade, setDownloadingGrade] = useState(null);
   const navigate = useNavigate();
-
-  const storageMode = (school?.storage_mode || '').toLowerCase();
-  const isOfflineMode = storageMode === 'memory';
 
   const grades = [
     { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
@@ -168,84 +133,6 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
     return status ? `${status.selected_count} of 25` : '0 of 25';
   };
 
-  const isGradeComplete = (gradeId) => {
-    const status = gradeStatus.find(s => s.grade === gradeId);
-    return status ? status.selected_count >= MAX_RHYMES_PER_GRADE : false;
-  };
-
-  const normalizeSlot = (value, fallback = 'top') => {
-    if (value === null || value === undefined) return fallback;
-    const normalized = value.toString().trim().toLowerCase();
-    return normalized === 'bottom' ? 'bottom' : 'top';
-  };
-
-  const sortSelectionsForDownload = (selections) => {
-    if (!Array.isArray(selections)) {
-      return [];
-    }
-
-    const getPositionWeight = (selection) => normalizeSlot(selection?.position) === 'bottom' ? 1 : 0;
-
-    return [...selections].sort((a, b) => {
-      const indexA = Number(a?.page_index ?? 0);
-      const indexB = Number(b?.page_index ?? 0);
-
-      if (indexA !== indexB) {
-        return indexA - indexB;
-      }
-
-      return getPositionWeight(a) - getPositionWeight(b);
-    });
-  };
-
-  const handleDownloadGradePdf = async (gradeId) => {
-    setDownloadingGrade(gradeId);
-
-    try {
-      const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
-      const gradeSelections = Array.isArray(response.data?.[gradeId]) ? response.data[gradeId] : [];
-
-      if (gradeSelections.length !== MAX_RHYMES_PER_GRADE) {
-        toast.error('This grade does not have 25 rhymes yet.');
-        return;
-      }
-
-      const sortedSelections = sortSelectionsForDownload(gradeSelections);
-
-      const svgResponses = await Promise.all(sortedSelections.map(selection => (
-        axios.get(`${API}/rhymes/svg/${selection.code}`)
-      )));
-
-      const svgPayload = svgResponses
-        .map(res => res?.data)
-        .filter(svg => typeof svg === 'string' && svg.trim() !== '');
-
-      if (svgPayload.length !== sortedSelections.length) {
-        toast.error('Some rhymes are missing artwork. Please refresh and try again.');
-        return;
-      }
-
-      const pdfResponse = await axios.post(
-        `${API}/rhymes/export/pdf`,
-        {
-          school_id: school.school_id,
-          grade: gradeId,
-          svgs: svgPayload,
-        },
-        { responseType: 'blob' }
-      );
-
-      const fallbackFilename = `${school.school_id}_${gradeId}_rhymes.pdf`;
-      triggerPdfDownload(pdfResponse, fallbackFilename);
-      toast.success('PDF download started');
-    } catch (error) {
-      console.error('Error downloading grade PDF:', error);
-      toast.error('Failed to download PDF. Please try again.');
-    } finally {
-      setDownloadingGrade(null);
-    }
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
@@ -267,12 +154,6 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
       <div className="max-w-4xl mx-auto">
-        {isOfflineMode && (
-          <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-700 shadow-sm">
-            <p className="font-semibold">Offline mode</p>
-            <p>Your changes are stored temporarily and will sync once the database connection is restored.</p>
-          </div>
-        )}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8 text-center md:text-left">
           <div>
             <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
@@ -289,51 +170,26 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {grades.map((grade) => (
-            <Card
+            <Card 
               key={grade.id}
               className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
               onClick={() => onGradeSelect(grade.id)}
             >
-                <CardContent className="p-6 text-center">
-                  <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                    <span className="text-2xl">{grade.icon}</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
-                  <Badge variant="secondary" className="mb-4">
-                    {getGradeStatusInfo(grade.id)} Rhymes Selected
-                  </Badge>
-                  <div className="flex flex-col gap-2">
-                    {isGradeComplete(grade.id) && (
-                      <Button
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleDownloadGradePdf(grade.id);
-                        }}
-                        disabled={downloadingGrade === grade.id}
-                        className="w-full bg-gradient-to-r from-orange-400 to-red-400 text-white hover:from-orange-500 hover:to-red-500"
-                      >
-                        {downloadingGrade === grade.id ? (
-                          'Preparing PDF…'
-                        ) : (
-                          <>
-                            <Download className="mr-2 h-4 w-4" />
-                            Download PDF
-                          </>
-                        )}
-                      </Button>
-                    )}
-                    <Button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onGradeSelect(grade.id);
-                      }}
-                      className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
-                    >
-                      Select Rhymes
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <CardContent className="p-6 text-center">
+                <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
+                  <span className="text-2xl">{grade.icon}</span>
+                </div>
+                <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
+                <Badge variant="secondary" className="mb-4">
+                  {getGradeStatusInfo(grade.id)} Rhymes Selected
+                </Badge>
+                <Button 
+                  className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
+                >
+                  Select Rhymes
+                </Button>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </div>
@@ -355,10 +211,10 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
   const currentRhymes = showReusable ? reusableRhymes : rhymesData;
 
   // Filter out 1.0 page rhymes if hideFullPageRhymes is true
-  const filteredRhymes = hideFullPageRhymes
+  const filteredRhymes = hideFullPageRhymes 
     ? Object.fromEntries(
-      Object.entries(currentRhymes).filter(([pageKey]) => parseFloat(pageKey) !== 1.0)
-    )
+        Object.entries(currentRhymes).filter(([pageKey]) => parseFloat(pageKey) !== 1.0)
+      )
     : currentRhymes;
 
   if (!filteredRhymes || Object.keys(filteredRhymes).length === 0) {
@@ -389,7 +245,7 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
           </Button>
         </div>
       </div>
-
+      
       <div className="p-2">
         {Object.entries(filteredRhymes).map(([pageKey, rhymes]) => {
           if (!rhymes || rhymes.length === 0) return null;
@@ -403,40 +259,35 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
                   </div>
                   {pageKey} Page{parseFloat(pageKey) !== 1 ? 's' : ''} ({rhymes.length})
                 </span>
-                {expandedGroups[pageKey] ?
-                  <ChevronDown className="w-4 h-4 text-gray-500" /> :
+                {expandedGroups[pageKey] ? 
+                  <ChevronDown className="w-4 h-4 text-gray-500" /> : 
                   <ChevronRight className="w-4 h-4 text-gray-500" />
                 }
               </CollapsibleTrigger>
               <CollapsibleContent className="pl-4">
                 <div className="space-y-1 mt-2">
                   {rhymes.map((rhyme) => (
-                    <div
+                    <button
                       key={rhyme.code}
-                      className="group flex items-center gap-3 rounded-lg border border-transparent bg-white/50 p-3 transition-all duration-200 hover:border-orange-200 hover:bg-white/80"
+                      onClick={() => onRhymeSelect(rhyme)}
+                      className="w-full text-left p-3 rounded-lg bg-white/50 hover:bg-white/80 transition-all duration-200 border border-transparent hover:border-orange-200 group"
                     >
-                      <div className="flex-1">
-                        <p className="font-medium text-gray-800 transition-colors duration-200 group-hover:text-orange-600">
-                          {rhyme.name}
-                        </p>
-                        <p className="mt-1 text-xs text-gray-500">
-                          Code: {rhyme.code} • {rhyme.personalized === "Yes" ? "Personalized" : "Standard"}
-                          {rhyme.used_in_grades && (
-                            <span className="ml-2 text-blue-600">
-                              (Used in: {rhyme.used_in_grades.join(', ')})
-                            </span>
-                          )}
-                        </p>
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="font-medium text-gray-800 group-hover:text-orange-600 transition-colors duration-200">
+                            {rhyme.name}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Code: {rhyme.code} • {rhyme.personalized === "Yes" ? "Personalized" : "Standard"}
+                            {rhyme.used_in_grades && (
+                              <span className="ml-2 text-blue-600">
+                                (Used in: {rhyme.used_in_grades.join(', ')})
+                              </span>
+                            )}
+                          </p>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => onRhymeSelect(rhyme)}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-orange-200 bg-white text-sm font-semibold text-orange-600 transition-colors duration-200 hover:bg-orange-50 hover:text-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:ring-offset-1"
-                        aria-label={`Add ${rhyme.name}`}
-                      >
-                        +
-                      </button>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </CollapsibleContent>
@@ -454,71 +305,13 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [reusableRhymes, setReusableRhymes] = useState({});
   const [selectedRhymes, setSelectedRhymes] = useState([]);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  const [carouselApi, setCarouselApi] = useState(null);
   const [showTreeMenu, setShowTreeMenu] = useState(false);
-  const treeMenuVisibilityClass = showTreeMenu
-    ? 'translate-x-0 opacity-100 pointer-events-auto'
-    : '-translate-x-full opacity-0 pointer-events-none';
-  const layoutGridClass = 'lg:grid-cols-[minmax(0,1fr)]';
   const [showReusable, setShowReusable] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isRefreshingRhymes, setIsRefreshingRhymes] = useState(false);
-  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const navigate = useNavigate();
 
-  const storageMode = (school?.storage_mode || '').toLowerCase();
-  const isOfflineMode = storageMode === 'memory';
-
-  const slotContainerClasses =
-    'group relative flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-[28px] bg-white shadow-sm';
-  const slotContentClasses =
-    'pointer-events-none h-full w-full p-2 sm:p-3 [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-h-full [&>svg]:max-w-full [&>svg]:object-contain [&>svg]:mx-auto';
-  const emptySlotButtonClasses =
-    'flex h-full w-full items-center justify-center rounded-[24px] bg-gradient-to-br from-orange-50 to-amber-50 p-2 sm:p-3 text-orange-500 transition-all duration-300 hover:from-orange-100 hover:to-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400';
-  const emptySlotInnerClasses =
-    'flex h-full w-full items-center justify-center rounded-[20px] border-2 border-dashed border-orange-300 bg-white/80 text-orange-500 shadow-inner transition-all duration-300 group-hover:border-orange-400 group-hover:bg-white group-hover:text-orange-600';
-  const emptySlotIconClasses = 'h-12 w-12';
-
-  const getSessionStorageKey = useCallback((gradeId) => `rhymeSelections:${gradeId}`, []);
-
-  const loadSelectionsFromSession = useCallback((gradeId) => {
-    if (typeof window === 'undefined' || !window.sessionStorage) {
-      return null;
-    }
-
-    try {
-      const storedValue = window.sessionStorage.getItem(getSessionStorageKey(gradeId));
-      if (!storedValue) {
-        return null;
-      }
-
-      const parsed = JSON.parse(storedValue);
-      return Array.isArray(parsed) ? parsed : null;
-    } catch (error) {
-      console.error('Failed to load rhyme selections from session storage:', error);
-      return null;
-    }
-  }, [getSessionStorageKey]);
-
-  const saveSelectionsToSession = useCallback((gradeId, selections) => {
-    if (typeof window === 'undefined' || !window.sessionStorage) {
-      return;
-    }
-
-    try {
-      const key = getSessionStorageKey(gradeId);
-
-      if (!Array.isArray(selections) || selections.length === 0) {
-        window.sessionStorage.removeItem(key);
-        return;
-      }
-
-      window.sessionStorage.setItem(key, JSON.stringify(selections));
-    } catch (error) {
-      console.error('Failed to save rhyme selections to session storage:', error);
-    }
-  }, [getSessionStorageKey]);
+  const MAX_RHYMES_PER_GRADE = 25;
 
   useEffect(() => {
     fetchAvailableRhymes();
@@ -526,67 +319,67 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     fetchSelectedRhymes();
   }, []);
 
-  const computePageUsage = (rhymesList = selectedRhymes) => {
-    const usageMap = new Map();
-    let highestIndex = -1;
-    let lowestIndex = Number.POSITIVE_INFINITY;
+    const computePageUsage = (rhymesList = selectedRhymes) => {
+      const usageMap = new Map();
+      let highestIndex = -1;
+      let lowestIndex = Number.POSITIVE_INFINITY;
 
-    if (Array.isArray(rhymesList)) {
-      rhymesList.forEach((selection) => {
-        if (!selection) return;
-        const numericIndex = Number(selection?.page_index);
-        if (!Number.isFinite(numericIndex) || numericIndex < 0) {
-          return;
-        }
+      if (Array.isArray(rhymesList)) {
+        rhymesList.forEach((selection) => {
+          if (!selection) return;
+          const numericIndex = Number(selection?.page_index);
+          if (!Number.isFinite(numericIndex) || numericIndex < 0) {
+            return;
+          }
 
-        const pageIndex = numericIndex;
-        const pagesValue = parsePagesValue(selection?.pages);
-        const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
+          const pageIndex = numericIndex;
+          const pagesValue = parsePagesValue(selection?.pages);
+          const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
 
-        if (pagesValue === 0.5) {
-          const slot = normalizeSlot(selection?.position, 'top') || 'top';
-          entry[slot] = true;
-        } else {
-          entry.top = true;
-          entry.bottom = true;
-        }
+          if (pagesValue === 0.5) {
+            const slot = normalizeSlot(selection?.position, 'top') || 'top';
+            entry[slot] = true;
+          } else {
+            entry.top = true;
+            entry.bottom = true;
+          }
 
-        usageMap.set(pageIndex, entry);
-        highestIndex = Math.max(highestIndex, pageIndex);
-        lowestIndex = Math.min(lowestIndex, pageIndex);
-      });
-    }
-
-    return {
-      usageMap,
-      highestIndex,
-      lowestIndex: lowestIndex === Number.POSITIVE_INFINITY ? -1 : lowestIndex
-    };
-  };
-
-  const computeNextAvailablePageInfoFromUsage = ({ usageMap, highestIndex }) => {
-    for (let index = 0; index < MAX_RHYMES_PER_GRADE; index += 1) {
-      const entry = usageMap.get(index);
-      if (!entry) {
-        return { index, hasCapacity: true, highestIndex };
+          usageMap.set(pageIndex, entry);
+          highestIndex = Math.max(highestIndex, pageIndex);
+          lowestIndex = Math.min(lowestIndex, pageIndex);
+        });
       }
-      if (!entry.top || !entry.bottom) {
-        return { index, hasCapacity: true, highestIndex };
-      }
-    }
 
-    const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_RHYMES_PER_GRADE - 1);
-    return { index: fallbackIndex, hasCapacity: false, highestIndex };
-  };
-
-  const computeNextAvailablePageInfo = (rhymesList = selectedRhymes) => {
-    const usage = computePageUsage(rhymesList);
-    const info = computeNextAvailablePageInfoFromUsage(usage);
-    return {
-      ...info,
-      lowestIndex: usage.lowestIndex
+      return {
+        usageMap,
+        highestIndex,
+        lowestIndex: lowestIndex === Number.POSITIVE_INFINITY ? -1 : lowestIndex
+      };
     };
-  };
+
+    const computeNextAvailablePageInfoFromUsage = ({ usageMap, highestIndex }) => {
+      for (let index = 0; index < MAX_RHYMES_PER_GRADE; index += 1) {
+        const entry = usageMap.get(index);
+        if (!entry) {
+          return { index, hasCapacity: true, highestIndex };
+        }
+        if (!entry.top || !entry.bottom) {
+          return { index, hasCapacity: true, highestIndex };
+        }
+      }
+
+      const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_RHYMES_PER_GRADE - 1);
+      return { index: fallbackIndex, hasCapacity: false, highestIndex };
+    };
+
+    const computeNextAvailablePageInfo = (rhymesList = selectedRhymes) => {
+      const usage = computePageUsage(rhymesList);
+      const info = computeNextAvailablePageInfoFromUsage(usage);
+      return {
+        ...info,
+        lowestIndex: usage.lowestIndex
+      };
+    };
 
   const fetchAvailableRhymes = async () => {
     try {
@@ -607,15 +400,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   };
 
   const fetchSelectedRhymes = async () => {
-    const storedSelections = loadSelectionsFromSession(grade);
-    if (storedSelections && storedSelections.length > 0) {
-      setSelectedRhymes(storedSelections);
-    }
-
     try {
       const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
       const gradeSelections = response.data[grade] || [];
-
+      
       const rhymesWithSvg = await Promise.all(
         gradeSelections.map(async (rhyme) => {
           try {
@@ -636,7 +424,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         : (Number.isFinite(nextInfo.index) ? nextInfo.index : 0);
 
       setSelectedRhymes(sortedSelections);
-      saveSelectionsToSession(grade, sortedSelections);
       setCurrentPageIndex(initialIndex);
     } catch (error) {
       console.error('Error fetching selected rhymes:', error);
@@ -726,23 +513,22 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   };
 
   const handleRhymeSelect = async (rhyme) => {
-    const previousSelections = Array.isArray(selectedRhymes) ? [...selectedRhymes] : [];
-
     try {
       const pageIndex = currentPageIndex;
+      const prevArray = Array.isArray(selectedRhymes) ? selectedRhymes : [];
       const pagesValue = parsePagesValue(rhyme?.pages) ?? 1;
       const normalizedPosition = pagesValue === 0.5
         ? normalizeSlot(currentPosition, 'top') || 'top'
         : 'top';
 
       const removals = computeRemovalsForSelection({
-        selections: previousSelections,
+        selections: prevArray,
         pageIndex,
         normalizedPosition,
         newPages: pagesValue
       });
 
-      const filtered = previousSelections.filter(existing => !removals.includes(existing));
+      const filtered = prevArray.filter(existing => !removals.includes(existing));
 
       const baseRhyme = {
         page_index: pageIndex,
@@ -753,8 +539,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         position: normalizedPosition
       };
 
-      const previewSelections = sortSelections([...filtered, baseRhyme]);
-      const totalSelected = previewSelections.length;
+      const nextArray = sortSelections([...filtered, baseRhyme]);
+      const totalSelected = nextArray.length;
       const isReplacement = removals.length > 0;
 
       if (!isReplacement && totalSelected > MAX_RHYMES_PER_GRADE) {
@@ -764,7 +550,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         return;
       }
 
-      const selectionPromise = axios.post(`${API}/rhymes/select`, {
+      await axios.post(`${API}/rhymes/select`, {
         school_id: school.school_id,
         grade: grade,
         page_index: pageIndex,
@@ -772,21 +558,38 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         position: normalizedPosition
       });
 
-      const svgPromise = axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-
-      const [, svgResponse] = await Promise.all([selectionPromise, svgPromise]);
-      const svgContent = svgResponse.data;
-
-      const nextArray = sortSelections([
-        ...filtered,
-        {
-          ...baseRhyme,
-          svgContent
-        }
-      ]);
-
       setSelectedRhymes(nextArray);
-      saveSelectionsToSession(grade, nextArray);
+
+      try {
+        const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
+        const svgContent = svgResponse.data;
+
+        setSelectedRhymes(prev => {
+          const prevArrayInner = Array.isArray(prev) ? prev : [];
+
+          return prevArrayInner.map(existing => {
+            if (!existing) return existing;
+            if (Number(existing.page_index) !== Number(pageIndex)) {
+              return existing;
+            }
+
+            const candidatePosition = resolveRhymePosition(existing, {
+              rhymesForContext: prevArrayInner
+            });
+
+            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+              return {
+                ...existing,
+                svgContent
+              };
+            }
+
+            return existing;
+          });
+        });
+      } catch (svgError) {
+        console.error('Error fetching rhyme SVG:', svgError);
+      }
 
       const nextInfo = computeNextAvailablePageInfo(nextArray);
 
@@ -798,25 +601,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         }, 400);
       }
 
+      await fetchAvailableRhymes();
+      await fetchReusableRhymes();
       setShowTreeMenu(false);
       setCurrentPosition(null);
-
-      setIsRefreshingRhymes(true);
-      try {
-        await Promise.all([
-          fetchAvailableRhymes(),
-          fetchReusableRhymes()
-        ]);
-      } finally {
-        setIsRefreshingRhymes(false);
-      }
     } catch (error) {
       console.error('Error selecting rhyme:', error);
-      setSelectedRhymes(previousSelections);
-      saveSelectionsToSession(grade, previousSelections);
-      setShowTreeMenu(false);
-      setCurrentPosition(null);
-      setIsRefreshingRhymes(false);
     }
   };
 
@@ -871,59 +661,45 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     return 'top';
   };
 
-  const handleRemoveRhyme = async (rhyme, explicitPosition, pageIndexOverride) => {
+  const handleRemoveRhyme = async (rhyme, explicitPosition) => {
     if (!rhyme || !rhyme.code) {
       console.error("handleRemoveRhyme: missing rhyme or code", rhyme);
       return;
     }
 
-    const normalizedOverride = Number(pageIndexOverride);
-    const targetPageIndex = Number.isFinite(normalizedOverride)
-      ? normalizedOverride
-      : currentPageIndex;
     const position = resolveRhymePosition(rhyme, { explicitPosition });
 
     console.log("→ Deleting rhyme (request):", {
       code: rhyme.code,
       position,
-      pageIndex: targetPageIndex,
+      currentPageIndex,
       grade
     });
 
     try {
       const res = await axios.delete(
-        `${API}/rhymes/remove/${school.school_id}/${grade}/${targetPageIndex}/${position}`
+        `/api/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`
       );
       console.log("← Delete response:", res.data);
 
-      setSelectedRhymes(prev => {
-        const prevArray = Array.isArray(prev) ? prev : [];
-        const filteredSelections = prevArray.filter(r => {
-          if (Number(r.page_index) !== Number(targetPageIndex)) return true;
-          if (r.code !== rhyme.code) return true;
-          const candidatePosition = resolveRhymePosition(r, {
-            rhymesForContext: prevArray
-          });
-          return candidatePosition !== position;
+      setSelectedRhymes(prev => prev.filter(r => {
+        if (Number(r.page_index) !== Number(currentPageIndex)) return true;
+        if (r.code !== rhyme.code) return true;
+        const candidatePosition = resolveRhymePosition(r, {
+          rhymesForContext: prev
         });
-
-        saveSelectionsToSession(grade, filteredSelections);
-        return filteredSelections;
-      });
-      setCurrentPageIndex(targetPageIndex);
-      setIsRefreshingRhymes(true);
-      try {
-        await Promise.all([
-          fetchAvailableRhymes(),
-          fetchReusableRhymes()
-        ]);
-      } finally {
-        setIsRefreshingRhymes(false);
-      }
+        return candidatePosition !== position;
+      }));
+      await fetchAvailableRhymes();
+      await fetchReusableRhymes();
     } catch (err) {
       console.error("Delete failed:", err.response?.data || err.message);
-      setIsRefreshingRhymes(false);
     }
+  };
+
+  const handlePageChange = (newPageIndex) => {
+    const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_RHYMES_PER_GRADE - 1));
+    setCurrentPageIndex(clampedIndex);
   };
 
   const handleToggleReusable = () => {
@@ -935,50 +711,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const nextAvailablePageIndex = nextPageInfo.index;
   const hasNextPageCapacity = nextPageInfo.hasCapacity;
   const highestFilledIndex = nextPageInfo.highestIndex;
-  const totalSelectedRhymes = Array.isArray(selectedRhymes) ? selectedRhymes.length : 0;
-  const allRhymesHaveSvg = Array.isArray(selectedRhymes)
-    && selectedRhymes.every((selection) => typeof selection?.svgContent === 'string' && selection.svgContent.trim() !== '');
-  const canDownloadPdf = totalSelectedRhymes === MAX_RHYMES_PER_GRADE && allRhymesHaveSvg;
-
-  const handleDownloadPdf = async () => {
-    if (!canDownloadPdf) {
-      toast.error('Please complete all rhyme selections before downloading.');
-      return;
-    }
-
-    const sortedSelections = sortSelections(selectedRhymes);
-    const svgPayload = sortedSelections
-      .map((selection) => selection?.svgContent)
-      .filter((svg) => typeof svg === 'string' && svg.trim() !== '');
-
-    if (svgPayload.length !== sortedSelections.length) {
-      toast.error('Some rhymes are missing artwork. Please refresh and try again.');
-      return;
-    }
-
-    setDownloadingPdf(true);
-
-    try {
-      const response = await axios.post(
-        `${API}/rhymes/export/pdf`,
-        {
-          school_id: school.school_id,
-          grade,
-          svgs: svgPayload,
-        },
-        { responseType: 'blob' }
-      );
-
-      const fallbackFilename = `${school.school_id}_${grade}_rhymes.pdf`;
-      triggerPdfDownload(response, fallbackFilename);
-      toast.success('PDF download started');
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      toast.error('Failed to download PDF. Please try again.');
-    } finally {
-      setDownloadingPdf(false);
-    }
-  };
 
   // Calculate total pages
   const calculateTotalPages = () => {
@@ -1018,14 +750,16 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     }
   }, [highestFilledIndex, nextAvailablePageIndex, currentPageIndex]);
 
-  const getPageRhymes = useCallback((pageIndex) => {
+  // Get rhymes for current page
+  const getCurrentPageRhymes = () => {
     const pageRhymes = { top: null, bottom: null };
 
     if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) return pageRhymes;
 
+    // Prefer full-page rhyme
     for (const r of selectedRhymes) {
       if (!r) continue;
-      if (Number(r.page_index) !== Number(pageIndex)) continue;
+      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
       const pages = parsePagesValue(r.pages);
       if (pages === 1) {
         pageRhymes.top = r;
@@ -1034,9 +768,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       }
     }
 
+    // Place half-page rhymes by explicit position (do not infer)
     for (const r of selectedRhymes) {
       if (!r) continue;
-      if (Number(r.page_index) !== Number(pageIndex)) continue;
+      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
       const pages = parsePagesValue(r.pages);
       if (pages === 0.5) {
         const pos = normalizeSlot(r.position, 'top') || 'top';
@@ -1046,54 +781,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     }
 
     return pageRhymes;
-  }, [selectedRhymes]);
-
-  const totalPages = calculateTotalPages();
-  const displayTotalPages = Math.max(totalPages, 1);
-
-  const handlePageChange = useCallback((newPageIndex) => {
-    const maxIndex = Math.max(0, totalPages - 1);
-    const clampedIndex = Math.max(0, Math.min(newPageIndex, maxIndex));
-
-    if (carouselApi) {
-      carouselApi.scrollTo(clampedIndex);
-    } else {
-      setCurrentPageIndex(clampedIndex);
-    }
-  }, [carouselApi, totalPages]);
-
-  useEffect(() => {
-    if (!carouselApi) return;
-
-    const handleSelect = () => {
-      const newIndex = carouselApi.selectedScrollSnap();
-      setCurrentPageIndex(prevIndex => (prevIndex !== newIndex ? newIndex : prevIndex));
-    };
-
-    carouselApi.on('select', handleSelect);
-    carouselApi.on('reInit', handleSelect);
-
-    return () => {
-      carouselApi.off('select', handleSelect);
-      carouselApi.off('reInit', handleSelect);
-    };
-  }, [carouselApi]);
-
-  useEffect(() => {
-    if (!carouselApi) return;
-
-    const maxIndex = Math.max(0, totalPages - 1);
-    const clampedIndex = Math.max(0, Math.min(currentPageIndex, maxIndex));
-    const selectedSnap = carouselApi.selectedScrollSnap();
-
-    if (selectedSnap !== clampedIndex) {
-      carouselApi.scrollTo(clampedIndex);
-    }
-  }, [carouselApi, currentPageIndex, totalPages]);
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-600">Loading rhyme data...</p>
@@ -1102,42 +794,27 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     );
   }
 
+  const totalPages = calculateTotalPages();
+  const currentPageRhymes = getCurrentPageRhymes();
+  const hasTopRhyme = currentPageRhymes.top !== null;
+  const hasBottomRhyme = currentPageRhymes.bottom !== null;
+  const isTopFullPage = hasTopRhyme && parsePagesValue(currentPageRhymes.top.pages) === 1;
+  const showBottomContainer = !isTopFullPage;
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto flex min-h-screen max-w-7xl flex-col items-stretch justify-start px-4 pt-2 pb-4 sm:px-6">
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50">
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-6 sm:px-6">
         {/* Header */}
-        {isOfflineMode && (
-          <div className="mb-4 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-700 shadow-sm">
-            <p className="font-semibold">Offline mode</p>
-            <p>Selections are stored locally and will sync when the database connection returns.</p>
-          </div>
-        )}
         <div className="mb-6 flex flex-shrink-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 capitalize">{grade} Grade - Rhyme Selection</h1>
+            <h1 className="text-2xl font-bold text-gray-800 capitalize">{grade} Grade - Rhyme Selection</h1>
             <p className="text-gray-600">{school.school_name} ({school.school_id})</p>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {canDownloadPdf && (
-              <Button
-                onClick={handleDownloadPdf}
-                disabled={downloadingPdf}
-                className="flex items-center bg-gradient-to-r from-orange-400 to-red-400 text-white hover:from-orange-500 hover:to-red-500"
-              >
-                {downloadingPdf ? (
-                  'Preparing PDF…'
-                ) : (
-                  <>
-                    <Download className="mr-2 h-4 w-4" />
-                    Download PDF
-                  </>
-                )}
-              </Button>
-            )}
+          <div className="flex items-center gap-2">
             <Button
               onClick={onBack}
               variant="outline"
-              className="bg-white/80 hover:bg-white border-gray-200 text-gray-900"
+              className="bg-white/80 hover:bg-white border-gray-200"
             >
               Back to Grades
             </Button>
@@ -1158,13 +835,13 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
         {/* Main Content */}
         <div className="flex-1 overflow-hidden">
-          <div className={`relative grid h-full grid-cols-1 gap-6 ${layoutGridClass}`}>
-
+          <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-4">
+            
             {/* Tree Menu */}
             <div
-              className={`absolute inset-y-0 left-0 z-30 flex h-full min-h-0 w-72 max-w-full transform flex-col overflow-hidden bg-white shadow-xl transition-transform transition-opacity duration-300 ease-in-out ${treeMenuVisibilityClass} lg:w-80`}
+              className={`lg:col-span-1 transition-all duration-300 ${showTreeMenu ? 'flex' : 'hidden'} ${showTreeMenu ? 'lg:flex' : 'lg:hidden'} min-h-0 flex-col`}
             >
-              <div className="mb-4 flex-shrink-0 lg:hidden">
+              <div className="mb-4 flex-shrink-0">
                 <Button
                   onClick={() => { setShowTreeMenu(false); setCurrentPosition(null); }}
                   variant="outline"
@@ -1174,28 +851,26 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                   Close Menu
                 </Button>
               </div>
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <div className="h-full max-h-[calc(100vh-9rem)] overflow-y-auto pr-1">
-                  <TreeMenu
-                    rhymesData={availableRhymes}
-                    reusableRhymes={reusableRhymes}
-                    showReusable={showReusable}
-                    onRhymeSelect={handleRhymeSelect}
-                    onToggleReusable={handleToggleReusable}
-                    hideFullPageRhymes={currentPosition === 'bottom'}
-                  />
-                </div>
+              <div className="flex-1 min-h-0">
+                <TreeMenu
+                  rhymesData={availableRhymes}
+                  reusableRhymes={reusableRhymes}
+                  showReusable={showReusable}
+                  onRhymeSelect={handleRhymeSelect}
+                  onToggleReusable={handleToggleReusable}
+                  hideFullPageRhymes={currentPosition === 'bottom'}
+                />
               </div>
             </div>
 
             {/* Dual Container Interface */}
             <div
-              className="min-h-0 mx-auto flex w-full max-w-4xl flex-col items-center"
+              className={`${showTreeMenu ? 'lg:col-span-3' : 'lg:col-span-4'} min-h-0 flex flex-col items-center`}
             >
               <div className="flex h-full w-full max-w-2xl flex-col">
 
                 {/* Navigation Controls */}
-                <div className="flex-shrink-0 space-y-3 pb-1">
+                <div className="flex-shrink-0 space-y-6">
                   <div className="flex items-center justify-between">
                     <Button
                       onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
@@ -1207,13 +882,13 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                       Previous
                     </Button>
 
-                    <div className="text-sm text-gray-300 font-medium">
-                      Page {currentPageIndex + 1} of {displayTotalPages}
+                    <div className="text-sm text-gray-600 font-medium">
+                      Page {currentPageIndex + 1} of {totalPages}
                     </div>
 
                     <Button
-                      onClick={() => handlePageChange(Math.min(displayTotalPages - 1, currentPageIndex + 1))}
-                      disabled={currentPageIndex >= displayTotalPages - 1}
+                      onClick={() => handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
+                      disabled={currentPageIndex >= totalPages - 1}
                       variant="outline"
                       size="sm"
                     >
@@ -1221,157 +896,172 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                       <ChevronRight className="w-4 h-4 ml-1" />
                     </Button>
                   </div>
-                  {isRefreshingRhymes && (
-                    <div
-                      className="flex items-center justify-center gap-2 text-xs font-medium text-orange-500"
-                      role="status"
-                      aria-live="polite"
-                    >
-                      <span
-                        className="h-3 w-3 rounded-full border-2 border-orange-400 border-t-transparent animate-spin"
-                        aria-hidden="true"
-                      />
-                      <span>Refreshing rhyme lists…</span>
-                    </div>
-                  )}
+
+                  <div className="flex items-center justify-center">
+                    {hasNextPageCapacity ? (
+                      <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-gray-600">
+                        <span>
+                          Next available page: <span className="font-semibold text-gray-700">Page {nextAvailablePageIndex + 1}</span>
+                        </span>
+                        <Button
+                          onClick={() => handlePageChange(nextAvailablePageIndex)}
+                          variant="outline"
+                          size="sm"
+                          disabled={nextAvailablePageIndex === currentPageIndex}
+                        >
+                          {nextAvailablePageIndex === currentPageIndex
+                            ? 'Viewing next page'
+                            : `Go to Page ${nextAvailablePageIndex + 1}`}
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-500">
+                        All {MAX_RHYMES_PER_GRADE} pages are currently filled.
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex-1 min-h-0 pb-6">
-                    <div className="flex h-full w-full">
-                      <div className="relative flex h-full w-full justify-center rounded-[36px] bg-white py-4 shadow-xl sm:py-6">
-                        <Carousel
-                          className="flex h-full w-full justify-center"
-                          opts={{
-                            align: 'center',
-                            containScroll: 'trimSnaps',
-                            draggable: false,
-                            dragFree: false,
-                          }}
-                          setApi={setCarouselApi}
-                        >
-                          <CarouselContent className="flex h-full w-full" hasSpacing={false}>
-                            {Array.from({ length: displayTotalPages }, (_, pageIndex) => {
-                              const pageRhymes = getPageRhymes(pageIndex);
-                              const topRhyme = pageRhymes.top;
-                              const bottomRhyme = pageRhymes.bottom;
-                              const hasTopRhyme = topRhyme !== null;
-                              const hasBottomRhyme = bottomRhyme !== null;
-                              const isTopFullPage = hasTopRhyme && parsePagesValue(topRhyme.pages) === 1;
-                              const showBottomContainer = !isTopFullPage;
-
-                              const openSlot = (position) => {
-                                if (pageIndex !== currentPageIndex) {
-                                  handlePageChange(pageIndex);
-                                }
-                                handleAddRhyme(position);
-                              };
-
-
-                              const renderSvgSlot = (rhyme, position) => {
-                                return (
-                                  <div className={slotContainerClasses}>
+                  <div className="flex-1 min-h-0 py-6">
+                    <div className="flex h-full items-center justify-center">
+                      <div className="relative flex h-full w-full max-w-4xl">
+                        <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
+                          {showBottomContainer && (
+                            <div className="pointer-events-none absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
+                          )}
+                          <div className="flex h-full flex-col">
+                            <div
+                              className={`relative flex flex-1 min-h-0 flex-col p-6 sm:p-8 ${
+                                showBottomContainer ? 'border-b border-gray-200' : ''
+                              }`}
+                            >
+                              {hasTopRhyme ? (
+                                <div className="relative flex flex-1 min-h-0 flex-col pr-24 sm:pr-32">
+                                  <Button
+                                    onClick={() => handleAddRhyme('top')}
+                                    variant="outline"
+                                    className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
+                                  >
+                                    <Replace className="w-4 h-4 mr-2" />
+                                    Replace
+                                  </Button>
+                                  <div className="flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
                                     <div
-                                      dangerouslySetInnerHTML={{ __html: rhyme?.svgContent || '' }}
-                                      className={slotContentClasses}
+                                      dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
+                                      className="flex h-full w-full items-center justify-center"
                                     />
-                                    <button
-                                      type="button"
-                                      onClick={() => openSlot(position)}
-                                      className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-orange-500 shadow transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2"
-                                      aria-label={`Replace ${position} rhyme`}
-                                    >
-                                      <Replace className="h-5 w-5" aria-hidden="true" />
-                                    </button>
                                   </div>
-                                );
-                              };
-
-                              const renderEmptySlot = (position) => {
-                                return (
-                                  <div className={slotContainerClasses}>
-                                    <button
-                                      type="button"
-                                      onClick={() => openSlot(position)}
-                                      className={emptySlotButtonClasses}
-                                      aria-label={`Add rhyme to ${position} slot`}
-                                    >
-                                      <span className={emptySlotInnerClasses}>
-                                        <Plus className={emptySlotIconClasses} aria-hidden="true" />
-                                      </span>
-                                    </button>
+                                  <div className="mt-4 space-y-1 text-center">
+                                    <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
+                                    <p className="text-sm text-gray-500">
+                                      Code: {currentPageRhymes.top.code} • Pages: {currentPageRhymes.top.pages}
+                                    </p>
                                   </div>
-                                );
-                              };
+                                  <div className="mt-4 flex justify-center sm:justify-end">
+                                    <Button
+                                      onClick={() => {
+                                        if (currentPageRhymes.top) {
+                                          handleRemoveRhyme(currentPageRhymes.top, 'top');
+                                        } else {
+                                          console.warn('No top rhyme to remove');
+                                        }
+                                      }}
+                                      variant="outline"
+                                      className="bg-white/70 hover:bg-white text-red-600 hover:text-red-700"
+                                    >
+                                      Remove
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex flex-1 items-center justify-center">
+                                  <Button
+                                    onClick={() => handleAddRhyme('top')}
+                                    className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                  >
+                                    <Plus className="h-8 w-8" />
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
 
-                              return (
-                                <CarouselItem
-                                  key={pageIndex}
-                                  className="flex h-full w-full justify-center"
-                                  hasSpacing={false}
-                                >
-                                  <div className="flex w-full justify-center py-4">
-                                    <div className="flex w-full max-w-[520px] flex-col items-center gap-4">
-                                      <DocumentPage
-                                        showBottom={showBottomContainer}
-                                        topSlot={
-                                          hasTopRhyme
-                                            ? renderSvgSlot(topRhyme, 'top')
-                                            : renderEmptySlot('top')
-                                        }
-                                        bottomSlot={
-                                          showBottomContainer
-                                            ? hasBottomRhyme
-                                              ? renderSvgSlot(bottomRhyme, 'bottom')
-                                              : renderEmptySlot('bottom')
-                                            : null
-                                        }
+                            {showBottomContainer && (
+                              <div className="relative flex-1 min-h-0 p-6 sm:p-8">
+                                {hasBottomRhyme ? (
+                                  <div className="relative flex flex-1 min-h-0 flex-col pr-24 sm:pr-32">
+                                    <Button
+                                      onClick={() => handleAddRhyme('bottom')}
+                                      variant="outline"
+                                      className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
+                                    >
+                                      <Replace className="w-4 h-4 mr-2" />
+                                      Replace
+                                    </Button>
+                                    <div className="flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
+                                      <div
+                                        dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
+                                        className="flex h-full w-full items-center justify-center"
                                       />
-
-
-
+                                    </div>
+                                    <div className="mt-4 space-y-1 text-center">
+                                      <p className="font-semibold text-gray-800">{currentPageRhymes.bottom.name}</p>
+                                      <p className="text-sm text-gray-500">
+                                        Code: {currentPageRhymes.bottom.code} • Pages: {currentPageRhymes.bottom.pages}
+                                      </p>
+                                    </div>
+                                    <div className="mt-4 flex justify-center sm:justify-end">
+                                      <Button
+                                        onClick={() => handleRemoveRhyme(currentPageRhymes.bottom, 'bottom')}
+                                        variant="outline"
+                                        className="bg-white/70 hover:bg-white text-red-600 hover:text-red-700"
+                                      >
+                                        Remove
+                                      </Button>
                                     </div>
                                   </div>
-                                </CarouselItem>
-                              );
-                            })}
-                          </CarouselContent>
-                        </Carousel>
+                                ) : (
+                                  <div className="flex flex-1 items-center justify-center">
+                                    <Button
+                                      onClick={() => handleAddRhyme('bottom')}
+                                      className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                    >
+                                      <Plus className="h-8 w-8" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-                {/* Page Indicators */}
-                {displayTotalPages > 1 && (
-                  <div
-                    className="mt-6 flex justify-center space-x-2"
-                    role="status"
-                    aria-live="polite"
-                    aria-label={`Page ${currentPageIndex + 1} of ${displayTotalPages}`}
-                  >
-                    {Array.from({ length: displayTotalPages }, (_, index) => (
-                      <span
-                        key={index}
-                        aria-hidden="true"
-                        className={`h-3 w-3 rounded-full transition-colors duration-200 ${index === currentPageIndex
-                            ? 'bg-orange-400'
-                            : 'bg-gray-300'
+
+                  {/* Page Indicators */}
+                  {totalPages > 1 && (
+                    <div className="mt-6 flex justify-center space-x-2">
+                      {Array.from({ length: totalPages }, (_, index) => (
+                        <button
+                          key={index}
+                          onClick={() => handlePageChange(index)}
+                          className={`h-3 w-3 rounded-full transition-colors duration-200 ${
+                            index === currentPageIndex
+                              ? 'bg-orange-400'
+                              : 'bg-gray-300'
                           }`}
-                      />
-                    ))}
-                    <span className="sr-only">
-                      Page {currentPageIndex + 1} of {displayTotalPages}
-                    </span>
-                  </div>
-                )}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
+        </div>
       </div>
     </div>
-    
   );
 };
 
@@ -1402,6 +1092,7 @@ function App() {
       <Toaster position="top-right" />
       <BrowserRouter>
         <Routes>
+          
           <Route path="/" element={
             !school ? (
               <AuthPage onAuth={handleAuth} />
@@ -1427,3 +1118,4 @@ function App() {
 }
 
 export default App;
+
