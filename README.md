@@ -14,7 +14,6 @@ The FastAPI service is defined in [`backend/server.py`](backend/server.py) and e
    - `MONGO_URL` – connection string to your MongoDB deployment.
    - `DB_NAME` – database name used by the application.
    - `CORS_ORIGINS` – optional comma-separated list of allowed origins for cross-origin requests.
-   - `GOOGLE_CLIENT_ID` – OAuth 2.0 client ID used to verify Google Sign-In tokens.
 2. **Create and activate a virtual environment** (recommended):
    ```bash
    python -m venv backend/.venv
@@ -38,7 +37,6 @@ The React client reads its backend URL from `frontend/src/App.js`. Configure and
 1. Create `frontend/.env` with the lines:
    ```env
    REACT_APP_BACKEND_URL=http://localhost:8000
-   REACT_APP_GOOGLE_CLIENT_ID=<your-google-oauth-client-id>
    ```
 2. Install frontend dependencies with `yarn install` inside the `frontend/` directory.
 3. Launch the development server with `yarn start`, which serves the UI on port 3000 as defined in `frontend/package.json`.
