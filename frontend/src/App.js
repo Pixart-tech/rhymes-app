@@ -41,7 +41,12 @@ const AuthPage = ({ onAuth }) => {
         school_name: schoolName.trim()
       });
 
-      onAuth(response.data);
+      const storageMode = (response.headers?.['x-storage-mode'] || 'mongo').toLowerCase();
+      if (storageMode === 'memory') {
+        toast.warning('Connected in offline mode. Changes will only persist for this session.');
+      }
+
+      onAuth({ ...response.data, storage_mode: storageMode });
       toast.success('Successfully logged in!');
     } catch (error) {
       console.error('Auth error:', error);
@@ -103,6 +108,9 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  const storageMode = (school?.storage_mode || '').toLowerCase();
+  const isOfflineMode = storageMode === 'memory';
+
   const grades = [
     { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
     { id: 'lkg', name: 'LKG', color: 'from-blue-400 to-cyan-400', icon: '🎈' },
@@ -152,6 +160,12 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
       <div className="max-w-4xl mx-auto">
+        {isOfflineMode && (
+          <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-700 shadow-sm">
+            <p className="font-semibold">Offline mode</p>
+            <p>Your changes are stored temporarily and will sync once the database connection is restored.</p>
+          </div>
+        )}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8 text-center md:text-left">
           <div>
             <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
@@ -320,6 +334,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [isRefreshingRhymes, setIsRefreshingRhymes] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const navigate = useNavigate();
+
+  const storageMode = (school?.storage_mode || '').toLowerCase();
+  const isOfflineMode = storageMode === 'memory';
 
   const slotContainerClasses =
     'group relative flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-[28px] bg-white shadow-sm';
@@ -978,6 +995,12 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col items-stretch justify-start px-4 pt-2 pb-4 sm:px-6">
         {/* Header */}
+        {isOfflineMode && (
+          <div className="mb-4 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-700 shadow-sm">
+            <p className="font-semibold">Offline mode</p>
+            <p>Selections are stored locally and will sync when the database connection returns.</p>
+          </div>
+        )}
         <div className="mb-6 flex flex-shrink-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 capitalize">{grade} Grade - Rhyme Selection</h1>

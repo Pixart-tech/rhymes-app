@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -10,11 +10,20 @@ import json
 from pathlib import Path
 from io import BytesIO
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 import uuid
+import asyncio
+from collections import defaultdict
+from copy import deepcopy
+from contextvars import ContextVar
 from datetime import datetime
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
+
+try:
+    from bson import ObjectId
+except ImportError:  # pragma: no cover - optional dependency resolution
+    ObjectId = None
 
 try:  # pragma: no cover - optional dependency resolution is environment-specific
     import cairosvg
@@ -41,12 +50,289 @@ mongo_options: Dict[str, Any] = {
 
 client = AsyncIOMotorClient(mongo_url, **mongo_options)
 db_name = os.getenv("DB_NAME", "rhymes")
-db = client[db_name]
+
+mongo_db = client[db_name]
+db = ResilientDatabase(mongo_db)
+=======
+
 
 # Google authentication configuration
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
 
 logger = logging.getLogger(__name__)
+
+class SimpleResult:
+    """Lightweight result object mimicking Motor outcomes for fallback operations."""
+
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+class ResilientCursor:
+    """Cursor wrapper that reuses collection logic for Mongo or in-memory data."""
+
+    def __init__(self, collection: "ResilientCollection", query: Dict[str, Any]):
+        self._collection = collection
+        self._query = query or {}
+        self._sort: Optional[Tuple[str, int]] = None
+
+    def sort(self, field: str, direction: int) -> "ResilientCursor":
+        self._sort = (field, direction)
+        return self
+
+    async def to_list(self, length: Optional[int]):
+        return await self._collection._execute_find(self._query, self._sort, length)
+
+
+class ResilientCollection:
+    """Collection wrapper that falls back to in-memory storage when MongoDB is unavailable."""
+
+    def __init__(self, motor_collection, memory_store: Dict[str, Dict[str, Any]], lock: asyncio.Lock, database: "ResilientDatabase"):
+        self._collection = motor_collection
+        self._memory = memory_store
+        self._lock = lock
+        self._database = database
+
+    async def find_one(self, query: Dict[str, Any]):
+        try:
+            document = await self._collection.find_one(query)
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            return await self._memory_find_one(query)
+        else:
+            self._database._set_online()
+            return await self._store_document(document)
+
+    async def insert_one(self, document: Dict[str, Any]):
+        try:
+            result = await self._collection.insert_one(document)
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            return await self._memory_insert_one(document)
+        else:
+            self._database._set_online()
+            stored_document = deepcopy(document)
+            stored_document["_id"] = result.inserted_id
+            await self._memory_insert_one(stored_document)
+            return result
+
+    async def update_one(self, query: Dict[str, Any], update: Dict[str, Any]):
+        try:
+            result = await self._collection.update_one(query, update)
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            modified = await self._memory_update_one(query, update)
+            return SimpleResult(modified_count=modified)
+        else:
+            self._database._set_online()
+            if result.modified_count:
+                await self._memory_update_one(query, update)
+            return result
+
+    def find(self, query: Optional[Dict[str, Any]] = None) -> ResilientCursor:
+        return ResilientCursor(self, query or {})
+
+    async def delete_one(self, query: Dict[str, Any]):
+        try:
+            result = await self._collection.delete_one(query)
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            deleted = await self._memory_delete(query, single=True)
+            return SimpleResult(deleted_count=deleted)
+        else:
+            self._database._set_online()
+            if result.deleted_count:
+                await self._memory_delete(query, single=True)
+            return result
+
+    async def delete_many(self, query: Dict[str, Any]):
+        try:
+            result = await self._collection.delete_many(query)
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            deleted = await self._memory_delete(query, single=False)
+            return SimpleResult(deleted_count=deleted)
+        else:
+            self._database._set_online()
+            if result.deleted_count:
+                await self._memory_delete(query, single=False)
+            return result
+
+    async def _execute_find(self, query: Dict[str, Any], sort: Optional[Tuple[str, int]], length: Optional[int]):
+        try:
+            cursor = self._collection.find(query)
+            if sort is not None:
+                field, direction = sort
+                cursor = cursor.sort(field, direction)
+            documents = []
+            limit = length if length and length > 0 else None
+            async for document in cursor:
+                documents.append(document)
+                if limit is not None and len(documents) >= limit:
+                    break
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            return await self._memory_find(query, sort, length)
+        else:
+            self._database._set_online()
+            results = []
+            for document in documents:
+                stored = await self._store_document(document)
+                if stored is not None:
+                    results.append(stored)
+            return results
+
+    async def _store_document(self, document: Optional[Dict[str, Any]]):
+        if not document:
+            return None
+        prepared = self._prepare_document(document)
+        async with self._lock:
+            self._memory[prepared["_id"]] = prepared
+        return deepcopy(prepared)
+
+    async def _memory_find_one(self, query: Dict[str, Any]):
+        async with self._lock:
+            for document in self._memory.values():
+                if self._matches_filter(document, query):
+                    return deepcopy(document)
+        return None
+
+    async def _memory_find(self, query: Dict[str, Any], sort: Optional[Tuple[str, int]], length: Optional[int]):
+        async with self._lock:
+            documents = [deepcopy(doc) for doc in self._memory.values() if self._matches_filter(doc, query)]
+        documents = self._apply_sort(documents, sort)
+        if length is not None and length > 0:
+            documents = documents[:length]
+        return documents
+
+    async def _memory_insert_one(self, document: Dict[str, Any]):
+        prepared = self._prepare_document(document)
+        async with self._lock:
+            self._memory[prepared["_id"]] = prepared
+        return SimpleResult(inserted_id=prepared["_id"])
+
+    async def _memory_update_one(self, query: Dict[str, Any], update: Dict[str, Any]):
+        async with self._lock:
+            for key, document in self._memory.items():
+                if self._matches_filter(document, query):
+                    updated = self._apply_update(document, update)
+                    self._memory[key] = updated
+                    return 1
+        return 0
+
+    async def _memory_delete(self, query: Dict[str, Any], single: bool):
+        async with self._lock:
+            keys_to_remove = []
+            for key, document in self._memory.items():
+                if self._matches_filter(document, query):
+                    keys_to_remove.append(key)
+                    if single:
+                        break
+            for key in keys_to_remove:
+                self._memory.pop(key, None)
+        return len(keys_to_remove)
+
+    def _prepare_document(self, document: Dict[str, Any]):
+        prepared = deepcopy(document)
+        identifier = prepared.get("_id")
+        if identifier is None:
+            identifier = str(uuid.uuid4())
+        identifier = self._stringify_identifier(identifier)
+        prepared["_id"] = identifier
+        return prepared
+
+    def _stringify_identifier(self, value):
+        if value is None:
+            return str(uuid.uuid4())
+        if ObjectId is not None and isinstance(value, ObjectId):
+            return str(value)
+        if isinstance(value, uuid.UUID):
+            return str(value)
+        return value
+
+    def _apply_update(self, document: Dict[str, Any], update: Dict[str, Any]):
+        updated = deepcopy(document)
+        for operator, fields in update.items():
+            if operator == "$set":
+                for field, value in fields.items():
+                    updated[field] = value
+        return updated
+
+    def _matches_filter(self, document: Dict[str, Any], query: Dict[str, Any]):
+        if not query:
+            return True
+        for field, expected in query.items():
+            value = document.get(field)
+            if isinstance(expected, dict):
+                for operator, operand in expected.items():
+                    if operator == "$in":
+                        operand_values = [self._normalize_filter_value(field, item) for item in operand]
+                        if self._normalize_filter_value(field, value) not in operand_values:
+                            return False
+                    elif operator == "$ne":
+                        if self._normalize_filter_value(field, value) == self._normalize_filter_value(field, operand):
+                            return False
+                    else:
+                        return False
+            else:
+                if self._normalize_filter_value(field, value) != self._normalize_filter_value(field, expected):
+                    return False
+        return True
+
+    def _normalize_filter_value(self, field: str, value):
+        if field == "_id":
+            return self._stringify_identifier(value)
+        return value
+
+    def _apply_sort(self, documents: List[Dict[str, Any]], sort: Optional[Tuple[str, int]]):
+        if not sort:
+            return documents
+        field, direction = sort
+        reverse = direction < 0
+        return sorted(documents, key=lambda item: item.get(field), reverse=reverse)
+
+
+class ResilientDatabase:
+    """Database wrapper that exposes collections with transparent fallbacks."""
+
+    def __init__(self, motor_db):
+        self._db = motor_db
+        self._memory: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._locks: Dict[str, asyncio.Lock] = {}
+        self._online = True
+        self._fallback_flag: ContextVar[bool] = ContextVar("resilient_db_fallback", default=False)
+
+    def __getattr__(self, item: str) -> ResilientCollection:
+        if item.startswith("_"):
+            raise AttributeError(item)
+        if item not in self._memory:
+            self._memory[item] = {}
+            self._locks[item] = asyncio.Lock()
+        return ResilientCollection(self._db[item], self._memory[item], self._locks[item], self)
+
+    def reset_operation_state(self):
+        return self._fallback_flag.set(False)
+
+    def was_fallback_used(self) -> bool:
+        return self._fallback_flag.get()
+
+    def restore_operation_state(self, token):
+        self._fallback_flag.reset(token)
+
+    def mark_fallback(self):
+        self._fallback_flag.set(True)
+
+    def _set_online(self):
+        if not self._online:
+            logger.info("MongoDB connection restored. Returning to primary storage.")
+        self._online = True
+
+    def _set_offline(self, exc: Exception):
+        if self._online:
+            logger.warning("MongoDB unavailable. Falling back to in-memory storage.", exc_info=exc)
+        self._online = False
+        self.mark_fallback()
 
 # Load rhymes data
 with open(ROOT_DIR / 'rhymes.json', 'r') as f:
@@ -54,6 +340,20 @@ with open(ROOT_DIR / 'rhymes.json', 'r') as f:
 
 # Create the main app without a prefix
 app = FastAPI()
+
+# Track whether the request relied on in-memory fallback and expose it for clients.
+@app.middleware("http")
+async def apply_storage_mode_header(request: Request, call_next):
+    token = db.reset_operation_state()
+    response = None
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        storage_mode = "memory" if db.was_fallback_used() else "mongo"
+        db.restore_operation_state(token)
+        if response is not None:
+            response.headers["X-Storage-Mode"] = storage_mode
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -69,6 +369,7 @@ class School(BaseModel):
     email: Optional[str] = None
     google_sub: Optional[str] = None
     picture_url: Optional[str] = None
+    storage_mode: str = "mongo"
 
 class SchoolCreate(BaseModel):
     school_id: str
@@ -129,6 +430,8 @@ async def login_school(input: SchoolCreate):
     normalized_school_id = input.school_id.strip()
     normalized_school_name = input.school_name.strip()
 
+
+=======
     try:
         existing_school = await db.schools.find_one({"school_id": normalized_school_id})
     except PyMongoError as exc:  # pragma: no cover - depends on database availability
@@ -138,8 +441,11 @@ async def login_school(input: SchoolCreate):
             detail="Authentication service is temporarily unavailable. Please try again shortly.",
         ) from exc
 
+
     if existing_school:
-        return School.model_validate(existing_school)
+        school_model = School.model_validate(existing_school)
+        school_model.storage_mode = "memory" if db.was_fallback_used() else "mongo"
+        return school_model
 
     school_dict = {
         "school_id": normalized_school_id,
@@ -147,6 +453,8 @@ async def login_school(input: SchoolCreate):
         "auth_provider": "manual",
     }
     school_obj = School(**school_dict)
+
+
 
     try:
         await db.schools.insert_one(school_obj.model_dump())
@@ -156,6 +464,7 @@ async def login_school(input: SchoolCreate):
             status_code=503,
             detail="Unable to save school information right now. Please try again shortly.",
         ) from exc
+
 
     return school_obj
 
@@ -200,7 +509,9 @@ async def login_with_google(payload: GoogleAuthRequest):
             await db.schools.update_one({"_id": existing_school["_id"]}, {"$set": update_fields})
             existing_school.update(update_fields)
 
-        return School.model_validate(existing_school)
+        school_model = School.model_validate(existing_school)
+        school_model.storage_mode = "memory" if db.was_fallback_used() else "mongo"
+        return school_model
 
     school_dict = {
         "school_id": email or google_sub,
@@ -211,7 +522,8 @@ async def login_with_google(payload: GoogleAuthRequest):
         "picture_url": id_info.get("picture"),
     }
     school_obj = School(**school_dict)
-    await db.schools.insert_one(school_obj.model_dump())
+    await db.schools.insert_one(school_obj.model_dump(exclude={"storage_mode"}))
+    school_obj.storage_mode = "memory" if db.was_fallback_used() else "mongo"
     return school_obj
 
 # Rhymes data endpoints
@@ -716,6 +1028,279 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+class SimpleResult:
+    """Lightweight result object mimicking Motor outcomes for fallback operations."""
+
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+class ResilientCursor:
+    """Cursor wrapper that reuses collection logic for Mongo or in-memory data."""
+
+    def __init__(self, collection: "ResilientCollection", query: Dict[str, Any]):
+        self._collection = collection
+        self._query = query or {}
+        self._sort: Optional[Tuple[str, int]] = None
+
+    def sort(self, field: str, direction: int) -> "ResilientCursor":
+        self._sort = (field, direction)
+        return self
+
+    async def to_list(self, length: Optional[int]):
+        return await self._collection._execute_find(self._query, self._sort, length)
+
+
+class ResilientCollection:
+    """Collection wrapper that falls back to in-memory storage when MongoDB is unavailable."""
+
+    def __init__(self, motor_collection, memory_store: Dict[str, Dict[str, Any]], lock: asyncio.Lock, database: "ResilientDatabase"):
+        self._collection = motor_collection
+        self._memory = memory_store
+        self._lock = lock
+        self._database = database
+
+    async def find_one(self, query: Dict[str, Any]):
+        try:
+            document = await self._collection.find_one(query)
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            return await self._memory_find_one(query)
+        else:
+            self._database._set_online()
+            return await self._store_document(document)
+
+    async def insert_one(self, document: Dict[str, Any]):
+        try:
+            result = await self._collection.insert_one(document)
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            return await self._memory_insert_one(document)
+        else:
+            self._database._set_online()
+            stored_document = deepcopy(document)
+            stored_document["_id"] = result.inserted_id
+            await self._memory_insert_one(stored_document)
+            return result
+
+    async def update_one(self, query: Dict[str, Any], update: Dict[str, Any]):
+        try:
+            result = await self._collection.update_one(query, update)
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            modified = await self._memory_update_one(query, update)
+            return SimpleResult(modified_count=modified)
+        else:
+            self._database._set_online()
+            if result.modified_count:
+                await self._memory_update_one(query, update)
+            return result
+
+    def find(self, query: Optional[Dict[str, Any]] = None) -> ResilientCursor:
+        return ResilientCursor(self, query or {})
+
+    async def delete_one(self, query: Dict[str, Any]):
+        try:
+            result = await self._collection.delete_one(query)
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            deleted = await self._memory_delete(query, single=True)
+            return SimpleResult(deleted_count=deleted)
+        else:
+            self._database._set_online()
+            if result.deleted_count:
+                await self._memory_delete(query, single=True)
+            return result
+
+    async def delete_many(self, query: Dict[str, Any]):
+        try:
+            result = await self._collection.delete_many(query)
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            deleted = await self._memory_delete(query, single=False)
+            return SimpleResult(deleted_count=deleted)
+        else:
+            self._database._set_online()
+            if result.deleted_count:
+                await self._memory_delete(query, single=False)
+            return result
+
+    async def _execute_find(self, query: Dict[str, Any], sort: Optional[Tuple[str, int]], length: Optional[int]):
+        try:
+            cursor = self._collection.find(query)
+            if sort is not None:
+                field, direction = sort
+                cursor = cursor.sort(field, direction)
+            documents = []
+            limit = length if length and length > 0 else None
+            async for document in cursor:
+                documents.append(document)
+                if limit is not None and len(documents) >= limit:
+                    break
+        except PyMongoError as exc:  # pragma: no cover - depends on database availability
+            self._database._set_offline(exc)
+            return await self._memory_find(query, sort, length)
+        else:
+            self._database._set_online()
+            results = []
+            for document in documents:
+                stored = await self._store_document(document)
+                if stored is not None:
+                    results.append(stored)
+            return results
+
+    async def _store_document(self, document: Optional[Dict[str, Any]]):
+        if not document:
+            return None
+        prepared = self._prepare_document(document)
+        async with self._lock:
+            self._memory[prepared["_id"]] = prepared
+        return deepcopy(prepared)
+
+    async def _memory_find_one(self, query: Dict[str, Any]):
+        async with self._lock:
+            for document in self._memory.values():
+                if self._matches_filter(document, query):
+                    return deepcopy(document)
+        return None
+
+    async def _memory_find(self, query: Dict[str, Any], sort: Optional[Tuple[str, int]], length: Optional[int]):
+        async with self._lock:
+            documents = [deepcopy(doc) for doc in self._memory.values() if self._matches_filter(doc, query)]
+        documents = self._apply_sort(documents, sort)
+        if length is not None and length > 0:
+            documents = documents[:length]
+        return documents
+
+    async def _memory_insert_one(self, document: Dict[str, Any]):
+        prepared = self._prepare_document(document)
+        async with self._lock:
+            self._memory[prepared["_id"]] = prepared
+        return SimpleResult(inserted_id=prepared["_id"])
+
+    async def _memory_update_one(self, query: Dict[str, Any], update: Dict[str, Any]):
+        async with self._lock:
+            for key, document in self._memory.items():
+                if self._matches_filter(document, query):
+                    updated = self._apply_update(document, update)
+                    self._memory[key] = updated
+                    return 1
+        return 0
+
+    async def _memory_delete(self, query: Dict[str, Any], single: bool):
+        async with self._lock:
+            keys_to_remove = []
+            for key, document in self._memory.items():
+                if self._matches_filter(document, query):
+                    keys_to_remove.append(key)
+                    if single:
+                        break
+            for key in keys_to_remove:
+                self._memory.pop(key, None)
+        return len(keys_to_remove)
+
+    def _prepare_document(self, document: Dict[str, Any]):
+        prepared = deepcopy(document)
+        identifier = prepared.get("_id")
+        if identifier is None:
+            identifier = str(uuid.uuid4())
+        identifier = self._stringify_identifier(identifier)
+        prepared["_id"] = identifier
+        return prepared
+
+    def _stringify_identifier(self, value):
+        if value is None:
+            return str(uuid.uuid4())
+        if ObjectId is not None and isinstance(value, ObjectId):
+            return str(value)
+        if isinstance(value, uuid.UUID):
+            return str(value)
+        return value
+
+    def _apply_update(self, document: Dict[str, Any], update: Dict[str, Any]):
+        updated = deepcopy(document)
+        for operator, fields in update.items():
+            if operator == "$set":
+                for field, value in fields.items():
+                    updated[field] = value
+        return updated
+
+    def _matches_filter(self, document: Dict[str, Any], query: Dict[str, Any]):
+        if not query:
+            return True
+        for field, expected in query.items():
+            value = document.get(field)
+            if isinstance(expected, dict):
+                for operator, operand in expected.items():
+                    if operator == "$in":
+                        operand_values = [self._normalize_filter_value(field, item) for item in operand]
+                        if self._normalize_filter_value(field, value) not in operand_values:
+                            return False
+                    elif operator == "$ne":
+                        if self._normalize_filter_value(field, value) == self._normalize_filter_value(field, operand):
+                            return False
+                    else:
+                        return False
+            else:
+                if self._normalize_filter_value(field, value) != self._normalize_filter_value(field, expected):
+                    return False
+        return True
+
+    def _normalize_filter_value(self, field: str, value):
+        if field == "_id":
+            return self._stringify_identifier(value)
+        return value
+
+    def _apply_sort(self, documents: List[Dict[str, Any]], sort: Optional[Tuple[str, int]]):
+        if not sort:
+            return documents
+        field, direction = sort
+        reverse = direction < 0
+        return sorted(documents, key=lambda item: item.get(field), reverse=reverse)
+
+
+class ResilientDatabase:
+    """Database wrapper that exposes collections with transparent fallbacks."""
+
+    def __init__(self, motor_db):
+        self._db = motor_db
+        self._memory: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._locks: Dict[str, asyncio.Lock] = {}
+        self._online = True
+        self._fallback_flag: ContextVar[bool] = ContextVar("resilient_db_fallback", default=False)
+
+    def __getattr__(self, item: str) -> ResilientCollection:
+        if item.startswith("_"):
+            raise AttributeError(item)
+        if item not in self._memory:
+            self._memory[item] = {}
+            self._locks[item] = asyncio.Lock()
+        return ResilientCollection(self._db[item], self._memory[item], self._locks[item], self)
+
+    def reset_operation_state(self):
+        return self._fallback_flag.set(False)
+
+    def was_fallback_used(self) -> bool:
+        return self._fallback_flag.get()
+
+    def restore_operation_state(self, token):
+        self._fallback_flag.reset(token)
+
+    def mark_fallback(self):
+        self._fallback_flag.set(True)
+
+    def _set_online(self):
+        if not self._online:
+            logger.info("MongoDB connection restored. Returning to primary storage.")
+        self._online = True
+
+    def _set_offline(self, exc: Exception):
+        if self._online:
+            logger.warning("MongoDB unavailable. Falling back to in-memory storage.", exc_info=exc)
+        self._online = False
+        self.mark_fallback()
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
