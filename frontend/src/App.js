@@ -16,9 +16,9 @@ import { Toaster } from './components/ui/sonner';
 
 
 // Icons
-import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye, Download } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 const API = `${BACKEND_URL}/api`;
 
 // Authentication Page
@@ -133,6 +133,31 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
     return status ? `${status.selected_count} of 25` : '0 of 25';
   };
 
+  const handleDownloadBinder = async (gradeId, event) => {
+    event?.stopPropagation();
+    event?.preventDefault();
+
+    try {
+      const response = await axios.get(`${API}/rhymes/binder/${school.school_id}/${gradeId}`, {
+        responseType: 'blob'
+      });
+
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${gradeId}-rhyme-binder.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Binder download started');
+    } catch (error) {
+      console.error('Error downloading binder:', error);
+      toast.error('Failed to download binder');
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
@@ -170,7 +195,7 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {grades.map((grade) => (
-            <Card 
+            <Card
               key={grade.id}
               className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
               onClick={() => onGradeSelect(grade.id)}
@@ -183,11 +208,29 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
                 <Badge variant="secondary" className="mb-4">
                   {getGradeStatusInfo(grade.id)} Rhymes Selected
                 </Badge>
-                <Button 
-                  className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
-                >
-                  Select Rhymes
-                </Button>
+                <div className="space-y-3">
+                  <Button
+                    className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
+                  >
+                    Select Rhymes
+                  </Button>
+                  {(() => {
+                    const status = gradeStatus.find(s => s.grade === grade.id);
+                    const isComplete = status ? status.selected_count >= 25 : false;
+                    if (!isComplete) return null;
+
+                    return (
+                      <Button
+                        variant="outline"
+                        onClick={(event) => handleDownloadBinder(grade.id, event)}
+                        className="w-full flex items-center justify-center gap-2 border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white/90"
+                      >
+                        <Download className="w-4 h-4" />
+                        Download Binder
+                      </Button>
+                    );
+                  })()}
+                </div>
               </CardContent>
             </Card>
           ))}
