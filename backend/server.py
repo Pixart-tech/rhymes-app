@@ -67,11 +67,11 @@ app = FastAPI()
 
 
 class PDFDependencyUnavailableError(RuntimeError):
-    """Raised when the core PDF toolchain cannot be imported at runtime."""
 
 
 @lru_cache(maxsize=1)
-def _load_pdf_dependencies() -> Tuple[Optional[Any], Any, Tuple[float, float], Optional[Any]]:
+def _load_pdf_dependencies() -> Tuple[Any, Any, Tuple[float, float], Any]:
+
     """Dynamically import heavy PDF dependencies when needed.
 
     Importing CairoSVG/ReportLab at module import time can crash the entire
@@ -79,6 +79,7 @@ def _load_pdf_dependencies() -> Tuple[Optional[Any], Any, Tuple[float, float], O
     missing. By delaying the import until the binder endpoint is actually
     requested we prevent authentication and other unrelated endpoints from
     failing with a 502 Bad Gateway.
+
 
     Returns a tuple containing the ``svg2png`` callable (``None`` when CairoSVG
     is unavailable), the ReportLab ``Canvas`` class, the default ``letter`` page
@@ -114,6 +115,8 @@ def _load_pdf_dependencies() -> Tuple[Optional[Any], Any, Tuple[float, float], O
         image_reader = _ImageReader
 
     return svg2png, pdf_canvas.Canvas, letter, image_reader
+
+   
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
