@@ -8,8 +8,9 @@ import os
 import logging
 import json
 from pathlib import Path
+from dataclasses import dataclass
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Any, Tuple
+from typing import Callable, List, Dict, Optional, Any, Tuple, Literal
 from io import BytesIO
 from functools import lru_cache
 
@@ -69,8 +70,29 @@ app = FastAPI()
 class PDFDependencyUnavailableError(RuntimeError):
 
 
+
+@dataclass(frozen=True)
+class _SvgBackend:
+    """Container describing how SVG assets should be rendered on the PDF canvas."""
+
+    mode: Literal["cairosvg", "svglib", "none"]
+    svg2png: Optional[Callable[..., Any]]
+    image_reader: Optional[Any]
+    svg2rlg: Optional[Callable[..., Any]]
+    render_pdf: Optional[Any]
+
+
+@dataclass(frozen=True)
+class _PdfResources:
+    """Return value for :func:`_load_pdf_dependencies`."""
+
+    canvas_factory: Any
+    page_size: Tuple[float, float]
+    svg_backend: _SvgBackend
+
+
 @lru_cache(maxsize=1)
-def _load_pdf_dependencies() -> Tuple[Any, Any, Tuple[float, float], Any]:
+def _load_pdf_dependencies() -> _PdfResources:
 
     """Dynamically import heavy PDF dependencies when needed.
 
@@ -81,9 +103,10 @@ def _load_pdf_dependencies() -> Tuple[Any, Any, Tuple[float, float], Any]:
     failing with a 502 Bad Gateway.
 
 
-    Returns a tuple containing the ``svg2png`` callable (``None`` when CairoSVG
-    is unavailable), the ReportLab ``Canvas`` class, the default ``letter`` page
-    size and the ``ImageReader`` helper (also ``None`` without CairoSVG).
+    Returns a :class:`_PdfResources` instance describing the configured PDF
+    canvas factory, page size and SVG rendering backend. When CairoSVG is not
+    available the function now attempts to fall back to ``svglib`` before
+    degrading to the text-only layout.
     """
 
     try:
@@ -98,23 +121,32 @@ def _load_pdf_dependencies() -> Tuple[Any, Any, Tuple[float, float], Any]:
             "Please contact the administrator to install the required dependencies."
         ) from exc
 
-    svg2png = None
-    image_reader: Optional[Any] = None
+    svg_backend = _SvgBackend("none", None, None, None, None)
 
     try:
         from cairosvg import svg2png as _svg2png  # type: ignore
         from reportlab.lib.utils import ImageReader as _ImageReader
     except (ImportError, OSError) as exc:
         logging.getLogger(__name__).warning(
-            "CairoSVG is not available. Falling back to a simplified text-only "
-            "PDF layout. Error: %s",
+            "CairoSVG is not available. Attempting svglib fallback. Error: %s",
             exc,
         )
-    else:
-        svg2png = _svg2png
-        image_reader = _ImageReader
 
-    return svg2png, pdf_canvas.Canvas, letter, image_reader
+        try:
+            from svglib.svglib import svg2rlg as _svg2rlg  # type: ignore
+            from reportlab.graphics import renderPDF as _renderPDF
+        except (ImportError, OSError) as svg_exc:
+            logging.getLogger(__name__).warning(
+                "svglib fallback is not available. Binder PDFs will use the text-only layout. "
+                "Error: %s",
+                svg_exc,
+            )
+        else:
+            svg_backend = _SvgBackend("svglib", None, None, _svg2rlg, _renderPDF)
+    else:
+        svg_backend = _SvgBackend("cairosvg", _svg2png, _ImageReader, None, None)
+
+    return _PdfResources(pdf_canvas.Canvas, letter, svg_backend)
 
    
 
@@ -656,8 +688,75 @@ def _draw_text_only_rhyme(
     pdf_canvas.drawCentredString(
         page_width / 2,
         rect_y + 20,
-        "Rendered without SVG assets. Install CairoSVG for enhanced visuals.",
+        "Rendered without SVG assets. Install CairoSVG or svglib for enhanced visuals.",
     )
+
+
+def _render_svg_on_canvas(
+    pdf_canvas: Any,
+    backend: _SvgBackend,
+    svg_markup: str,
+    width: float,
+    height: float,
+    *,
+    x: float = 0,
+    y: float = 0,
+) -> bool:
+    """Render ``svg_markup`` onto ``pdf_canvas`` using the available backend.
+
+    Returns ``True`` when the SVG could be rendered, ``False`` otherwise. The
+    function attempts CairoSVG first (when available) and falls back to svglib
+    before signalling failure.
+    """
+
+    logger = logging.getLogger(__name__)
+
+    if (
+        backend.mode == "cairosvg"
+        and backend.svg2png
+        and backend.image_reader
+    ):
+        try:
+            image_buffer = BytesIO()
+            backend.svg2png(
+                bytestring=svg_markup.encode("utf-8"),
+                write_to=image_buffer,
+                output_width=int(width),
+                output_height=int(height),
+            )
+            image_buffer.seek(0)
+            pdf_canvas.drawImage(
+                backend.image_reader(image_buffer),
+                x,
+                y,
+                width=width,
+                height=height,
+            )
+            return True
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to render SVG using CairoSVG: %s", exc)
+
+    if backend.mode == "svglib" and backend.svg2rlg and backend.render_pdf:
+        try:
+            drawing = backend.svg2rlg(BytesIO(svg_markup.encode("utf-8")))
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to parse SVG using svglib: %s", exc)
+            return False
+
+        if not drawing or not getattr(drawing, "width", None) or not getattr(drawing, "height", None):
+            return False
+
+        try:
+            scale_x = width / float(drawing.width)
+            scale_y = height / float(drawing.height)
+            drawing.scale(scale_x, scale_y)
+            drawing.translate(-drawing.minX, -drawing.minY)
+            backend.render_pdf.draw(drawing, pdf_canvas, x, y)
+            return True
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to render SVG using svglib: %s", exc)
+
+    return False
 
 
 @api_router.get("/rhymes/binder/{school_id}/{grade}")
@@ -665,7 +764,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
     """Generate a PDF binder containing all rhymes for the specified grade."""
 
     try:
-        svg2png, Canvas, letter, ImageReader = _load_pdf_dependencies()
+        pdf_resources = _load_pdf_dependencies()
     except PDFDependencyUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -686,8 +785,9 @@ async def download_rhyme_binder(school_id: str, grade: str):
         pages_map.setdefault(page_index, []).append(selection)
 
     buffer = BytesIO()
-    pdf_canvas = Canvas(buffer, pagesize=letter)
-    page_width, page_height = letter
+    pdf_canvas = pdf_resources.canvas_factory(buffer, pagesize=pdf_resources.page_size)
+    page_width, page_height = pdf_resources.page_size
+    svg_backend = pdf_resources.svg_backend
 
     for page_index in sorted(pages_map.keys()):
         entries = pages_map[page_index]
@@ -703,29 +803,20 @@ async def download_rhyme_binder(school_id: str, grade: str):
         )
 
         if full_page_entry:
-            if svg2png and ImageReader:
-                try:
-                    svg_markup = generate_rhyme_svg(full_page_entry["rhyme_code"])
-                except KeyError:
-                    pass
-                else:
-                    image_buffer = BytesIO()
-                    svg2png(
-                        bytestring=svg_markup.encode("utf-8"),
-                        write_to=image_buffer,
-                        output_width=int(page_width),
-                        output_height=int(page_height),
-                    )
-                    image_buffer.seek(0)
-                    pdf_canvas.drawImage(
-                        ImageReader(image_buffer),
-                        0,
-                        0,
-                        width=page_width,
-                        height=page_height,
-                    )
-                    pdf_canvas.showPage()
-                    continue
+            try:
+                svg_markup = generate_rhyme_svg(full_page_entry["rhyme_code"])
+            except KeyError:
+                svg_markup = None
+
+            if svg_markup and _render_svg_on_canvas(
+                pdf_canvas,
+                svg_backend,
+                svg_markup,
+                page_width,
+                page_height,
+            ):
+                pdf_canvas.showPage()
+                continue
 
             _draw_text_only_rhyme(pdf_canvas, full_page_entry, page_width, page_height)
         else:
@@ -746,31 +837,27 @@ async def download_rhyme_binder(school_id: str, grade: str):
                 if not entry:
                     continue
 
-                if svg2png and ImageReader:
-                    try:
-                        svg_markup = generate_rhyme_svg(entry["rhyme_code"])
-                    except KeyError:
-                        continue
+                y_position = page_height - slot_height if position == "top" else 0
 
-                    image_buffer = BytesIO()
-                    svg2png(
-                        bytestring=svg_markup.encode("utf-8"),
-                        write_to=image_buffer,
-                        output_width=int(page_width),
-                        output_height=int(slot_height),
-                    )
-                    image_buffer.seek(0)
+                svg_rendered = False
 
-                    y_position = page_height - slot_height if position == "top" else 0
-                    pdf_canvas.drawImage(
-                        ImageReader(image_buffer),
-                        0,
-                        y_position,
-                        width=page_width,
-                        height=slot_height,
+                try:
+                    svg_markup = generate_rhyme_svg(entry["rhyme_code"])
+                except KeyError:
+                    svg_markup = None
+
+                if svg_markup:
+                    svg_rendered = _render_svg_on_canvas(
+                        pdf_canvas,
+                        svg_backend,
+                        svg_markup,
+                        page_width,
+                        slot_height,
+                        x=0,
+                        y=y_position,
                     )
-                else:
-                    y_position = page_height - slot_height if position == "top" else 0
+
+                if not svg_rendered:
                     _draw_text_only_rhyme(
                         pdf_canvas,
                         entry,
