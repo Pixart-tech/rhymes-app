@@ -642,7 +642,14 @@ def _draw_text_only_rhyme(
     page_height: float,
     y_offset: float = 0,
 ) -> None:
-    """Render a simple fallback card when CairoSVG is unavailable."""
+    """Render a stylised fallback card when SVG backends are unavailable.
+
+    The previous implementation printed a diagnostic message that bubbled up to
+    the generated PDF. Users interpreted the message as an error even though
+    the export succeeded. To provide a polished experience regardless of
+    optional dependencies, the fallback now draws a colourful card directly
+    with ReportLab primitives, closely matching the SVG-based design.
+    """
 
     rhyme_code = entry.get("rhyme_code", "")
     rhyme_info = RHYMES_DATA.get(rhyme_code)
@@ -658,38 +665,76 @@ def _draw_text_only_rhyme(
     rect_width = page_width - padding * 2
     rect_height = page_height - padding * 2
 
-    pdf_canvas.setFillColorRGB(0.9, 0.9, 0.92)
+    # Create a soft gradient background by painting a stack of translucent bars.
+    gradient_steps = 24
+    start_color = (1.0, 0.42, 0.42)
+    end_color = (0.31, 0.8, 0.77)
+
+    card_path = pdf_canvas.beginPath()
+    card_path.roundRect(rect_x, rect_y, rect_width, rect_height, 12)
+
+    pdf_canvas.saveState()
+    pdf_canvas.clipPath(card_path, stroke=0, fill=0)
+
+    for step in range(gradient_steps):
+        blend = step / max(gradient_steps - 1, 1)
+        red = start_color[0] + (end_color[0] - start_color[0]) * blend
+        green = start_color[1] + (end_color[1] - start_color[1]) * blend
+        blue = start_color[2] + (end_color[2] - start_color[2]) * blend
+        band_height = rect_height / gradient_steps + 1  # overlap to avoid gaps
+        pdf_canvas.setFillColorRGB(red, green, blue)
+        pdf_canvas.rect(
+            rect_x,
+            rect_y + step * (rect_height / gradient_steps),
+            rect_width,
+            band_height,
+            stroke=0,
+            fill=1,
+        )
+
+    pdf_canvas.restoreState()
+
+    # Add a translucent overlay so text remains legible on the gradient.
+    pdf_canvas.saveState()
+    pdf_canvas.setFillColorRGB(1, 1, 1)
+    if hasattr(pdf_canvas, "setFillAlpha"):
+        pdf_canvas.setFillAlpha(0.15)
     pdf_canvas.roundRect(rect_x, rect_y, rect_width, rect_height, 12, stroke=0, fill=1)
+    pdf_canvas.restoreState()
 
-    pdf_canvas.setFillColorRGB(0.2, 0.2, 0.25)
-    pdf_canvas.setFont("Helvetica-Bold", 18)
-    pdf_canvas.drawCentredString(
-        page_width / 2,
-        rect_y + rect_height - 36,
-        rhyme_name,
-    )
+    pdf_canvas.setFillColorRGB(1, 1, 1)
+    pdf_canvas.setFont("Helvetica-Bold", 22)
+    pdf_canvas.drawCentredString(page_width / 2, rect_y + rect_height - 48, rhyme_name)
 
-    pdf_canvas.setFont("Helvetica", 12)
-    pdf_canvas.drawCentredString(
-        page_width / 2,
-        rect_y + rect_height - 60,
-        f"Code: {rhyme_code}",
-    )
+    pdf_canvas.setFont("Helvetica", 13)
+    pdf_canvas.drawCentredString(page_width / 2, rect_y + rect_height - 74, f"Code: {rhyme_code}")
 
     if pages_value is not None:
         pdf_canvas.drawCentredString(
             page_width / 2,
-            rect_y + rect_height - 80,
+            rect_y + rect_height - 94,
             f"Pages: {pages_value}",
         )
 
-    pdf_canvas.setFont("Helvetica-Oblique", 10)
-    pdf_canvas.setFillColorRGB(0.35, 0.35, 0.4)
-    pdf_canvas.drawCentredString(
-        page_width / 2,
-        rect_y + 20,
-        "Rendered without SVG assets. Install CairoSVG or svglib for enhanced visuals.",
-    )
+    pdf_canvas.saveState()
+    pdf_canvas.setStrokeColorRGB(1, 1, 1)
+    pdf_canvas.setLineWidth(1.2)
+    pdf_canvas.roundRect(rect_x, rect_y, rect_width, rect_height, 12, stroke=1, fill=0)
+    pdf_canvas.restoreState()
+
+    # Decorative musical note badge similar to the SVG layout.
+    badge_radius = 32
+    badge_center_x = page_width / 2
+    badge_center_y = rect_y + rect_height / 2
+    pdf_canvas.saveState()
+    pdf_canvas.setFillColorRGB(1, 1, 1)
+    if hasattr(pdf_canvas, "setFillAlpha"):
+        pdf_canvas.setFillAlpha(0.25)
+    pdf_canvas.circle(badge_center_x, badge_center_y, badge_radius, stroke=0, fill=1)
+    pdf_canvas.restoreState()
+    pdf_canvas.setFillColorRGB(1, 1, 1)
+    pdf_canvas.setFont("Helvetica-Bold", 28)
+    pdf_canvas.drawCentredString(badge_center_x, badge_center_y - 10, "♪")
 
 
 def _render_svg_on_canvas(
