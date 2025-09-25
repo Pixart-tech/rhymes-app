@@ -67,6 +67,8 @@ app = FastAPI()
 
 
 class PDFDependencyUnavailableError(RuntimeError):
+      """Raised when the core PDF toolchain cannot be imported at runtime."""
+    
 
 
 @lru_cache(maxsize=1)
