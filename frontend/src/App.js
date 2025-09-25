@@ -968,8 +968,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 py-6">
                     <div className="flex h-full items-center justify-center">
-                      <div className="relative flex h-full w-full max-w-4xl">
-                        <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
+                      <div className="relative flex w-full max-w-4xl justify-center">
+                        <div className="relative flex aspect-[210/297] w-full max-w-[900px] max-h-[80vh] flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
                           {showBottomContainer && (
                             <div className="pointer-events-none absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
                           )}
@@ -980,11 +980,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                               }`}
                             >
                               {hasTopRhyme ? (
-                                <div className="relative flex flex-1 min-h-0 flex-col pr-24 sm:pr-32">
+                                <div className="relative flex flex-1 min-h-0 flex-col pr-12 sm:pr-16">
                                   <Button
                                     onClick={() => handleAddRhyme('top')}
                                     variant="outline"
-                                    className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
+                                    className="absolute top-1/2 right-0 -translate-y-1/2 translate-x-1/2 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
                                   >
                                     <Replace className="w-4 h-4 mr-2" />
                                     Replace
@@ -1000,21 +1000,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     <p className="text-sm text-gray-500">
                                       Code: {currentPageRhymes.top.code} • Pages: {currentPageRhymes.top.pages}
                                     </p>
-                                  </div>
-                                  <div className="mt-4 flex justify-center sm:justify-end">
-                                    <Button
-                                      onClick={() => {
-                                        if (currentPageRhymes.top) {
-                                          handleRemoveRhyme(currentPageRhymes.top, 'top');
-                                        } else {
-                                          console.warn('No top rhyme to remove');
-                                        }
-                                      }}
-                                      variant="outline"
-                                      className="bg-white/70 hover:bg-white text-red-600 hover:text-red-700"
-                                    >
-                                      Remove
-                                    </Button>
                                   </div>
                                 </div>
                               ) : (
@@ -1032,11 +1017,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                             {showBottomContainer && (
                               <div className="relative flex-1 min-h-0 p-6 sm:p-8">
                                 {hasBottomRhyme ? (
-                                  <div className="relative flex flex-1 min-h-0 flex-col pr-24 sm:pr-32">
+                                  <div className="relative flex flex-1 min-h-0 flex-col pr-12 sm:pr-16">
                                     <Button
                                       onClick={() => handleAddRhyme('bottom')}
                                       variant="outline"
-                                      className="absolute top-1/2 right-4 sm:right-6 -translate-y-1/2 bg-white/80 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 hover:bg-white shadow-md"
+                                      className="absolute top-1/2 right-0 -translate-y-1/2 translate-x-1/2 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
                                     >
                                       <Replace className="w-4 h-4 mr-2" />
                                       Replace
@@ -1052,15 +1037,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       <p className="text-sm text-gray-500">
                                         Code: {currentPageRhymes.bottom.code} • Pages: {currentPageRhymes.bottom.pages}
                                       </p>
-                                    </div>
-                                    <div className="mt-4 flex justify-center sm:justify-end">
-                                      <Button
-                                        onClick={() => handleRemoveRhyme(currentPageRhymes.bottom, 'bottom')}
-                                        variant="outline"
-                                        className="bg-white/70 hover:bg-white text-red-600 hover:text-red-700"
-                                      >
-                                        Remove
-                                      </Button>
                                     </div>
                                   </div>
                                 ) : (
