@@ -1200,39 +1200,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
         {/* Main Content */}
         <div className="flex-1 overflow-hidden">
-          <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-4">
-            
-            {/* Tree Menu */}
-            <div
-              className={`lg:col-span-1 transition-all duration-300 ${showTreeMenu ? 'flex' : 'hidden'} ${showTreeMenu ? 'lg:flex' : 'lg:hidden'} min-h-0 flex-col`}
-            >
-              <div className="mb-4 flex-shrink-0">
-                <Button
-                  onClick={() => { setShowTreeMenu(false); setCurrentPosition(null); }}
-                  variant="outline"
-                  className="w-full mb-2"
-                >
-                  <ChevronLeft className="w-4 h-4 mr-2" />
-                  Close Menu
-                </Button>
-              </div>
-              <div className="flex-1 min-h-0">
-                <TreeMenu
-                  rhymesData={availableRhymes}
-                  reusableRhymes={reusableRhymes}
-                  showReusable={showReusable}
-                  onRhymeSelect={handleRhymeSelect}
-                  onToggleReusable={handleToggleReusable}
-                  hideFullPageRhymes={currentPosition === 'bottom'}
-                />
-              </div>
-            </div>
+          <div className="relative h-full">
 
             {/* Dual Container Interface */}
-            <div
-              className={`${showTreeMenu ? 'lg:col-span-3' : 'lg:col-span-4'} min-h-0 flex flex-col items-center`}
-            >
-              <div className="flex h-full w-full max-w-2xl flex-col">
+            <div className="flex h-full flex-col items-center">
+              <div className="flex h-full w-full flex-col">
 
                 {/* Navigation Controls */}
                 <div className="flex-shrink-0 space-y-6">
@@ -1266,14 +1238,14 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 py-4">
                     <div className="flex h-full items-center justify-center">
-                      <div className="relative flex w-full max-w-4xl justify-center">
+                      <div className="relative flex w-full justify-center">
                         <div className="a4-preview relative flex w-full flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
                           {showBottomContainer && (
                             <div className="pointer-events-none absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
                           )}
                           <div className="flex h-full flex-col">
                             <div
-                              className={`relative flex flex-1 min-h-0 flex-col p-4 sm:p-6 lg:p-8 ${
+                              className={`relative flex w-full flex-1 min-h-0 flex-col p-4 sm:p-6 lg:p-8 ${
                                 showBottomContainer ? 'border-b border-gray-200' : ''
                               } rhyme-slot`}
                             >
@@ -1287,7 +1259,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     <Replace className="w-4 h-4 mr-2" />
                                     Replace
                                   </Button>
-                                  <div className="rhyme-slot-container flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
+
+                                  <div className="rhyme-slot-container flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
+=======
+                                 
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
                                       className="rhyme-svg-content"
@@ -1307,7 +1282,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                             </div>
 
                             {showBottomContainer && (
-                              <div className="relative flex flex-1 min-h-0 flex-col p-4 sm:p-6 lg:p-8 rhyme-slot">
+
+                              <div className="relative flex w-full flex-1 min-h-0 flex-col p-4 sm:p-6 lg:p-8 rhyme-slot">
+
                                 {hasBottomRhyme ? (
                                   <div className="relative flex flex-1 min-h-0 flex-col">
                                     <Button
@@ -1318,7 +1295,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       <Replace className="w-4 h-4 mr-2" />
                                       Replace
                                     </Button>
-                                    <div className="rhyme-slot-container flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
+
+                                    <div className="rhyme-slot-container flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
+=======
+                                   
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
                                         className="rhyme-svg-content"
@@ -1342,6 +1322,43 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+            {showTreeMenu && (
+              <div className="absolute inset-0 z-40 flex">
+                <div className="relative flex h-full w-full max-w-md min-h-0 flex-col overflow-hidden bg-white/95 backdrop-blur shadow-2xl sm:max-w-lg lg:max-w-sm lg:rounded-r-3xl lg:border lg:border-gray-200">
+                  <div className="flex-shrink-0 p-4 sm:p-5 lg:p-6">
+                    <Button
+                      onClick={() => { setShowTreeMenu(false); setCurrentPosition(null); }}
+                      variant="outline"
+                      className="w-full"
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-2" />
+                      Close Menu
+                    </Button>
+                  </div>
+                  <div className="flex-1 min-h-0 overflow-hidden px-2 pb-4 sm:px-4">
+                    <TreeMenu
+                      rhymesData={availableRhymes}
+                      reusableRhymes={reusableRhymes}
+                      showReusable={showReusable}
+                      onRhymeSelect={handleRhymeSelect}
+                      onToggleReusable={handleToggleReusable}
+                      hideFullPageRhymes={currentPosition === 'bottom'}
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="flex-1 bg-black/30 backdrop-blur-sm"
+                  aria-label="Close tree menu overlay"
+                  onClick={() => { setShowTreeMenu(false); setCurrentPosition(null); }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
 
                   {/* Page Indicators */}
                   {totalPages > 1 && (
