@@ -980,7 +980,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
                                       className="rhyme-svg-content"
                                     />
-                                  </div>  
+                                  </div>
                                   <div className="mt-4 space-y-1 text-center">
                                     <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
                                     <p className="text-sm text-gray-500">Pages: {currentPageRhymes.top.pages}</p>
