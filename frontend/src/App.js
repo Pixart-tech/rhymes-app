@@ -21,6 +21,70 @@ import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Musi
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 const API = `${BACKEND_URL}/api`;
 
+const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
+  if (!svgContent || typeof svgContent !== 'string') {
+    return svgContent;
+  }
+
+  if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
+    return svgContent;
+  }
+
+  try {
+    const parser = new window.DOMParser();
+    const doc = parser.parseFromString(svgContent, 'image/svg+xml');
+    const svgElement = doc.querySelector('svg');
+
+    if (!svgElement) {
+      return svgContent;
+    }
+
+    const widthAttr = svgElement.getAttribute('width');
+    const heightAttr = svgElement.getAttribute('height');
+
+    svgElement.removeAttribute('width');
+    svgElement.removeAttribute('height');
+
+    if (!svgElement.getAttribute('viewBox')) {
+      const widthValue = parseFloat(widthAttr ?? '');
+      const heightValue = parseFloat(heightAttr ?? '');
+
+      if (Number.isFinite(widthValue) && Number.isFinite(heightValue) && widthValue > 0 && heightValue > 0) {
+        svgElement.setAttribute('viewBox', `0 0 ${widthValue} ${heightValue}`);
+      }
+    }
+
+    if (!svgElement.getAttribute('preserveAspectRatio')) {
+      svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    }
+
+    const normalizedCode = (rhymeCode ?? '').toString().trim().toLowerCase();
+    const textNodes = svgElement.querySelectorAll('text');
+
+    textNodes.forEach(node => {
+      const textContent = node.textContent?.trim().toLowerCase();
+
+      if (!textContent) {
+        return;
+      }
+
+      if (textContent.includes('rhyme code') || (normalizedCode && textContent.includes(normalizedCode))) {
+        node.remove();
+      }
+    });
+
+    if (typeof window.XMLSerializer === 'undefined') {
+      return svgElement.outerHTML;
+    }
+
+    const serializer = new window.XMLSerializer();
+    return serializer.serializeToString(svgElement);
+  } catch (error) {
+    console.error('Error sanitizing rhyme SVG:', error);
+    return svgContent;
+  }
+};
+
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
   const [schoolId, setSchoolId] = useState('');
@@ -458,7 +522,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         gradeSelections.map(async (rhyme) => {
           try {
             const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-            return { ...rhyme, position: rhyme.position || null, svgContent: svgResponse.data };
+            const sanitizedSvg = sanitizeRhymeSvgContent(svgResponse.data, rhyme.code);
+            return { ...rhyme, position: rhyme.position || null, svgContent: sanitizedSvg };
           } catch (error) {
             return { ...rhyme, position: rhyme.position || null, svgContent: null };
           }
@@ -612,7 +677,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       try {
         const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-        const svgContent = svgResponse.data;
+        const svgContent = sanitizeRhymeSvgContent(svgResponse.data, rhyme.code);
 
         setSelectedRhymes(prev => {
           const prevArrayInner = Array.isArray(prev) ? prev : [];
@@ -978,7 +1043,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       className="rhyme-svg-content"
                                     />
                                   </div>
-                                  <div className="mt-4 space-y-1 text-center">
+                                  <div>
                                     <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
                                     <p className="text-sm text-gray-500">Pages: {currentPageRhymes.top.pages}</p>
                                   </div>
@@ -1013,7 +1078,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                         className="rhyme-svg-content"
                                       />
                                     </div>
-                                    <div className="mt-4 space-y-1 text-center">
+                                    <div>
                                       <p className="font-semibold text-gray-800">{currentPageRhymes.bottom.name}</p>
                                       <p className="text-sm text-gray-500">Pages: {currentPageRhymes.bottom.pages}</p>
                                     </div>
