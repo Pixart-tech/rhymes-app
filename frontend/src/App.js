@@ -952,21 +952,16 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                   <div className="flex items-center justify-center">
                     {hasNextPageCapacity ? (
-                      <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-gray-600">
-                        <span>
-                          Next available page: <span className="font-semibold text-gray-700">Page {nextAvailablePageIndex + 1}</span>
-                        </span>
-                        <Button
-                          onClick={() => handlePageChange(nextAvailablePageIndex)}
-                          variant="outline"
-                          size="sm"
-                          disabled={nextAvailablePageIndex === currentPageIndex}
-                        >
-                          {nextAvailablePageIndex === currentPageIndex
-                            ? 'Viewing next page'
-                            : `Go to Page ${nextAvailablePageIndex + 1}`}
-                        </Button>
-                      </div>
+                      <Button
+                        onClick={() => handlePageChange(nextAvailablePageIndex)}
+                        variant="outline"
+                        size="sm"
+                        disabled={nextAvailablePageIndex === currentPageIndex}
+                      >
+                        {nextAvailablePageIndex === currentPageIndex
+                          ? `Viewing Page ${nextAvailablePageIndex + 1}`
+                          : `Go to Page ${nextAvailablePageIndex + 1}`}
+                      </Button>
                     ) : (
                       <span className="text-sm text-gray-500">
                         All {MAX_RHYMES_PER_GRADE} pages are currently filled.
@@ -990,26 +985,24 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                               }`}
                             >
                               {hasTopRhyme ? (
-                                <div className="relative flex flex-1 min-h-0 flex-col pr-12 sm:pr-16">
+                                <div className="relative flex flex-1 min-h-0 flex-col">
                                   <Button
                                     onClick={() => handleAddRhyme('top')}
                                     variant="outline"
-                                    className="absolute top-1/2 right-0 -translate-y-1/2 translate-x-1/2 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
+                                    className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
                                   >
                                     <Replace className="w-4 h-4 mr-2" />
                                     Replace
                                   </Button>
-                                  <div className="flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
+                                  <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-4">
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
-                                      className="rhyme-svg-content flex h-full w-full items-center justify-center"
+                                      className="rhyme-svg-content"
                                     />
                                   </div>
                                   <div className="mt-4 space-y-1 text-center">
                                     <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
-                                    <p className="text-sm text-gray-500">
-                                      Code: {currentPageRhymes.top.code} • Pages: {currentPageRhymes.top.pages}
-                                    </p>
+                                    <p className="text-sm text-gray-500">Pages: {currentPageRhymes.top.pages}</p>
                                   </div>
                                 </div>
                               ) : (
@@ -1027,26 +1020,24 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                             {showBottomContainer && (
                               <div className="relative flex-1 min-h-0 p-6 sm:p-8">
                                 {hasBottomRhyme ? (
-                                  <div className="relative flex flex-1 min-h-0 flex-col pr-12 sm:pr-16">
+                                  <div className="relative flex flex-1 min-h-0 flex-col">
                                     <Button
                                       onClick={() => handleAddRhyme('bottom')}
                                       variant="outline"
-                                      className="absolute top-1/2 right-0 -translate-y-1/2 translate-x-1/2 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
+                                      className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
                                     >
                                       <Replace className="w-4 h-4 mr-2" />
                                       Replace
                                     </Button>
-                                    <div className="flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
+                                    <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-4">
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
-                                        className="rhyme-svg-content flex h-full w-full items-center justify-center"
+                                        className="rhyme-svg-content"
                                       />
                                     </div>
                                     <div className="mt-4 space-y-1 text-center">
                                       <p className="font-semibold text-gray-800">{currentPageRhymes.bottom.name}</p>
-                                      <p className="text-sm text-gray-500">
-                                        Code: {currentPageRhymes.bottom.code} • Pages: {currentPageRhymes.bottom.pages}
-                                      </p>
+                                      <p className="text-sm text-gray-500">Pages: {currentPageRhymes.bottom.pages}</p>
                                     </div>
                                   </div>
                                 ) : (
