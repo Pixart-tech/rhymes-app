@@ -16,10 +16,98 @@ import { Toaster } from './components/ui/sonner';
 
 
 // Icons
-import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Music, ChevronLeft, ChevronUp, Eye, Download } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Replace, School, BookOpen, Music, ChevronLeft, Eye, Download, LayoutTemplate, BookMarked, Clock } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 const API = `${BACKEND_URL}/api`;
+
+const GRADE_OPTIONS = [
+  { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
+  { id: 'lkg', name: 'LKG', color: 'from-blue-400 to-cyan-400', icon: '🎈' },
+  { id: 'ukg', name: 'UKG', color: 'from-green-400 to-emerald-400', icon: '🌟' },
+  { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' }
+];
+
+const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
+  if (!svgContent || typeof svgContent !== 'string') {
+    return svgContent;
+  }
+
+  if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
+    return svgContent;
+  }
+
+  try {
+    const parser = new window.DOMParser();
+    const doc = parser.parseFromString(svgContent, 'image/svg+xml');
+    const svgElement = doc.querySelector('svg');
+
+    if (!svgElement) {
+      return svgContent;
+    }
+
+    const widthAttr = svgElement.getAttribute('width');
+    const heightAttr = svgElement.getAttribute('height');
+
+    svgElement.removeAttribute('width');
+    svgElement.removeAttribute('height');
+
+    if (!svgElement.getAttribute('viewBox')) {
+      const widthValue = parseFloat(widthAttr ?? '');
+      const heightValue = parseFloat(heightAttr ?? '');
+
+      if (Number.isFinite(widthValue) && Number.isFinite(heightValue) && widthValue > 0 && heightValue > 0) {
+        svgElement.setAttribute('viewBox', `0 0 ${widthValue} ${heightValue}`);
+      }
+    }
+
+    if (!svgElement.getAttribute('preserveAspectRatio')) {
+      svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    }
+
+    const normalizedCode = (rhymeCode ?? '').toString().trim();
+    const normalizedCodeLower = normalizedCode.toLowerCase();
+    const normalizedCodeCompact = normalizedCodeLower.replace(/[^a-z0-9]/g, '');
+    const textNodes = svgElement.querySelectorAll('text, tspan');
+
+    textNodes.forEach(node => {
+      const rawText = (node.textContent ?? '').toString();
+      const normalizedText = rawText.trim().toLowerCase();
+
+      if (!normalizedText) {
+        return;
+      }
+
+      const normalizedCompact = normalizedText.replace(/[^a-z0-9]/g, '');
+      const hasCodeReference = Boolean(
+        (normalizedCodeLower && normalizedText.includes(normalizedCodeLower)) ||
+        (normalizedCodeCompact && normalizedCompact.includes(normalizedCodeCompact))
+      );
+      const hasLabel = normalizedText.includes('rhyme code') || normalizedText.includes('code:');
+
+      if (hasCodeReference || hasLabel) {
+        if (typeof node.closest === 'function') {
+          const parentText = node.closest('text');
+          if (parentText) {
+            parentText.remove();
+            return;
+          }
+        }
+        node.remove();
+      }
+    });
+
+    if (typeof window.XMLSerializer === 'undefined') {
+      return svgElement.outerHTML;
+    }
+
+    const serializer = new window.XMLSerializer();
+    return serializer.serializeToString(svgElement);
+  } catch (error) {
+    console.error('Error sanitizing rhyme SVG:', error);
+    return svgContent;
+  }
+};
 
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
@@ -99,22 +187,128 @@ const AuthPage = ({ onAuth }) => {
   );
 };
 
+const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
+  const options = [
+    {
+      id: 'cover',
+      title: 'Cover Pages',
+      description: 'Design and manage engaging cover pages tailored to each grade.',
+      gradient: 'from-rose-400 to-pink-500',
+      icon: LayoutTemplate
+    },
+    {
+      id: 'rhymes',
+      title: 'Rhymes',
+      description: 'Select and organise rhymes to build your customised binders.',
+      gradient: 'from-orange-400 to-red-400',
+      icon: Music
+    },
+    {
+      id: 'books',
+      title: 'Books',
+      description: 'Plan and curate the book list appropriate for every class.',
+      gradient: 'from-blue-400 to-indigo-500',
+      icon: BookMarked
+    }
+  ];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
+      <div className="mx-auto flex max-w-5xl flex-col gap-8">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800">Welcome, {school.school_name}</h1>
+            <p className="text-gray-600">School ID: {school.school_id}</p>
+          </div>
+          <Button
+            onClick={onLogout}
+            variant="outline"
+            className="bg-white/80 hover:bg-white border-gray-200"
+          >
+            Logout
+          </Button>
+        </div>
+
+        <Card className="border-0 bg-white/80 backdrop-blur-md shadow-xl">
+          <CardHeader>
+            <CardTitle className="text-2xl font-semibold text-gray-800">Choose what you would like to work on</CardTitle>
+            <p className="text-gray-600">
+              Select one of the workflows below to continue. You can always return to this menu to switch tasks.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+              {options.map((option) => {
+                const IconComponent = option.icon;
+                return (
+                  <Card
+                    key={option.id}
+                    className="group cursor-pointer border border-transparent bg-white/70 transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-2xl"
+                    onClick={() => onModeSelect(option.id)}
+                  >
+                    <CardContent className="flex h-full flex-col gap-4 p-6">
+                      <div className={`w-16 h-16 rounded-2xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-2xl shadow-lg transition-transform duration-300 group-hover:scale-110`}>
+                        <IconComponent className="h-8 w-8" />
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="text-xl font-semibold text-gray-800">{option.title}</h3>
+                        <p className="text-sm text-gray-600 leading-relaxed">{option.description}</p>
+                      </div>
+                      <div className="mt-auto">
+                        <Button
+                          type="button"
+                          onClick={() => onModeSelect(option.id)}
+                          className="w-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:from-orange-500 hover:to-red-500"
+                        >
+                          Explore {option.title}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
 // Grade Selection Page
-const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
+const GradeSelectionPage = ({ school, mode, onGradeSelect, onLogout, onBackToMode }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  const grades = [
-    { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
-    { id: 'lkg', name: 'LKG', color: 'from-blue-400 to-cyan-400', icon: '🎈' },
-    { id: 'ukg', name: 'UKG', color: 'from-green-400 to-emerald-400', icon: '🌟' },
-    { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' }
-  ];
+  const modeConfig = {
+    rhymes: {
+      title: 'Select a Grade to Manage Rhymes',
+      subtitle: 'Review progress and curate the perfect rhyme list for each class.',
+      buttonText: 'Select Rhymes'
+    },
+    cover: {
+      title: 'Select a Grade for Cover Pages',
+      subtitle: 'Choose a class to start configuring its cover pages.',
+      buttonText: 'Select Grade'
+    },
+    books: {
+      title: 'Select a Grade for Books',
+      subtitle: 'Pick a class to organise its reading materials.',
+      buttonText: 'Select Grade'
+    }
+  };
 
   useEffect(() => {
+    if (mode !== 'rhymes') {
+      setGradeStatus([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     fetchGradeStatus();
-  }, []);
+  }, [mode]);
 
   const fetchGradeStatus = async () => {
     try {
@@ -176,6 +370,15 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
     navigate('/');
   };
 
+  const handleBackToMenu = () => {
+    if (typeof onBackToMode === 'function') {
+      onBackToMode();
+    }
+    navigate('/');
+  };
+
+  const currentMode = modeConfig[mode] || modeConfig.rhymes;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
       <div className="max-w-4xl mx-auto">
@@ -184,37 +387,53 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
             <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
             <p className="text-gray-600">School ID: {school.school_id}</p>
           </div>
-          <Button
-            onClick={handleLogoutClick}
-            variant="outline"
-            className="bg-white/80 hover:bg-white border-gray-200"
-          >
-            Logout
-          </Button>
+          <div className="flex items-center justify-center gap-3">
+            <Button
+              onClick={handleBackToMenu}
+              variant="outline"
+              className="bg-white/80 hover:bg-white border-gray-200"
+            >
+              Back to Menu
+            </Button>
+            <Button
+              onClick={handleLogoutClick}
+              variant="outline"
+              className="bg-white/80 hover:bg-white border-gray-200"
+            >
+              Logout
+            </Button>
+          </div>
+        </div>
+
+        <div className="mb-8 space-y-2 text-center md:text-left">
+          <h2 className="text-2xl font-semibold text-gray-800">{currentMode.title}</h2>
+          <p className="text-gray-600">{currentMode.subtitle}</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {grades.map((grade) => (
+          {GRADE_OPTIONS.map((grade) => (
             <Card
               key={grade.id}
               className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
-              onClick={() => onGradeSelect(grade.id)}
+              onClick={() => onGradeSelect(grade.id, mode)}
             >
               <CardContent className="p-6 text-center">
                 <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
                   <span className="text-2xl">{grade.icon}</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
-                <Badge variant="secondary" className="mb-4">
-                  {getGradeStatusInfo(grade.id)} Rhymes Selected
-                </Badge>
+                {mode === 'rhymes' && (
+                  <Badge variant="secondary" className="mb-4">
+                    {getGradeStatusInfo(grade.id)} Rhymes Selected
+                  </Badge>
+                )}
                 <div className="space-y-3">
                   <Button
                     className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
                   >
-                    Select Rhymes
+                    {currentMode.buttonText}
                   </Button>
-                  {(() => {
+                  {mode === 'rhymes' && (() => {
                     const status = gradeStatus.find(s => s.grade === grade.id);
                     const isComplete = status ? status.selected_count >= 25 : false;
                     if (!isComplete) return null;
@@ -235,6 +454,101 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
             </Card>
           ))}
         </div>
+      </div>
+    </div>
+  );
+};
+
+const FeaturePlaceholderPage = ({ school, mode, grade, onBackToGrades, onBackToMode, onLogout }) => {
+  const navigate = useNavigate();
+
+  const placeholderConfig = {
+    cover: {
+      title: 'Cover Pages experience coming soon',
+      subtitle: 'We are preparing the tools you need to craft beautiful cover pages.',
+      action: 'cover pages'
+    },
+    books: {
+      title: 'Books management coming soon',
+      subtitle: 'Soon you will be able to curate books for every class from here.',
+      action: 'book selections'
+    }
+  };
+
+  const gradeInfo = GRADE_OPTIONS.find((item) => item.id === grade);
+  const modeCopy = placeholderConfig[mode] || placeholderConfig.cover;
+
+  const handleBackToGrades = () => {
+    if (typeof onBackToGrades === 'function') {
+      onBackToGrades();
+    }
+    navigate('/');
+  };
+
+  const handleBackToMenu = () => {
+    if (typeof onBackToMode === 'function') {
+      onBackToMode();
+    }
+    navigate('/');
+  };
+
+  const handleLogoutClick = () => {
+    if (typeof onLogout === 'function') {
+      onLogout();
+    }
+    navigate('/');
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
+      <div className="mx-auto flex max-w-3xl flex-col gap-8">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between text-center md:text-left">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800">{school.school_name}</h1>
+            <p className="text-gray-600">School ID: {school.school_id}</p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button onClick={handleBackToMenu} variant="outline" className="bg-white/80 hover:bg-white border-gray-200">
+              Back to Menu
+            </Button>
+            <Button onClick={handleBackToGrades} variant="outline" className="bg-white/80 hover:bg-white border-gray-200">
+              Choose another Grade
+            </Button>
+            <Button onClick={handleLogoutClick} variant="outline" className="bg-white/80 hover:bg-white border-gray-200">
+              Logout
+            </Button>
+          </div>
+        </div>
+
+        <Card className="border-0 bg-white/85 backdrop-blur shadow-xl">
+          <CardHeader className="flex flex-col items-center text-center gap-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-red-400 text-white shadow-lg">
+              <Clock className="h-8 w-8" />
+            </div>
+            <div>
+              <CardTitle className="text-2xl font-semibold text-gray-800">{modeCopy.title}</CardTitle>
+              <p className="mt-2 text-sm text-gray-600">{modeCopy.subtitle}</p>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6 text-center">
+            <p className="text-gray-700">
+              The tools for managing {modeCopy.action} for{' '}
+              <span className="font-semibold text-gray-900">{gradeInfo ? gradeInfo.name : grade}</span>{' '}
+              are on the way. We are working hard to bring them to you soon.
+            </p>
+            <p className="text-sm text-gray-500">
+              In the meantime you can return to the main menu or pick another grade to continue working on available workflows.
+            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+              <Button onClick={handleBackToMenu} className="bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg hover:from-orange-500 hover:to-red-500">
+                Back to Menu
+              </Button>
+              <Button onClick={handleBackToGrades} variant="outline" className="border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50">
+                Choose another Grade
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
@@ -458,7 +772,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         gradeSelections.map(async (rhyme) => {
           try {
             const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-            return { ...rhyme, position: rhyme.position || null, svgContent: svgResponse.data };
+            const sanitizedSvg = sanitizeRhymeSvgContent(svgResponse.data, rhyme.code);
+            return { ...rhyme, position: rhyme.position || null, svgContent: sanitizedSvg };
           } catch (error) {
             return { ...rhyme, position: rhyme.position || null, svgContent: null };
           }
@@ -486,8 +801,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     setCurrentPosition(position);
     setShowTreeMenu(true);
     setShowReusable(false);
-    
-
   };
 
   const normalizeSlot = (value, fallback = '') => {
@@ -614,7 +927,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       try {
         const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-        const svgContent = svgResponse.data;
+        const svgContent = sanitizeRhymeSvgContent(svgResponse.data, rhyme.code);
 
         setSelectedRhymes(prev => {
           const prevArrayInner = Array.isArray(prev) ? prev : [];
@@ -656,7 +969,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
       setShowTreeMenu(false);
-      toast.message('rhyme added Successfully' )
       setCurrentPosition(null);
     } catch (error) {
       console.error('Error selecting rhyme:', error);
@@ -981,10 +1293,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       className="rhyme-svg-content"
                                     />
                                   </div>
-                                  <div className="mt-4 space-y-1 text-center">
-                                    <p className="font-semibold text-gray-800">{currentPageRhymes.top.name}</p>
-                                    <p className="text-sm text-gray-500">Pages: {currentPageRhymes.top.pages}</p>
-                                  </div>
                                 </div>
                               ) : (
                                 <div className="flex flex-1 items-center justify-center">
@@ -1015,10 +1323,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
                                         className="rhyme-svg-content"
                                       />
-                                    </div>
-                                    <div className="mt-4 space-y-1 text-center">
-                                      <p className="font-semibold text-gray-800">{currentPageRhymes.bottom.name}</p>
-                                      <p className="text-sm text-gray-500">Pages: {currentPageRhymes.bottom.pages}</p>
                                     </div>
                                   </div>
                                 ) : (
@@ -1069,22 +1373,39 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 // Main App Component
 function App() {
   const [school, setSchool] = useState(null);
+  const [selectedMode, setSelectedMode] = useState(null);
   const [selectedGrade, setSelectedGrade] = useState(null);
 
   const handleAuth = (schoolData) => {
     setSchool(schoolData);
+    setSelectedMode(null);
+    setSelectedGrade(null);
   };
 
-  const handleGradeSelect = (grade) => {
+  const handleModeSelect = (mode) => {
+    setSelectedMode(mode);
+    setSelectedGrade(null);
+  };
+
+  const handleGradeSelect = (grade, mode) => {
+    if (mode) {
+      setSelectedMode(mode);
+    }
     setSelectedGrade(grade);
   };
 
-  const handleBack = () => {
+  const handleBackToGrades = () => {
     setSelectedGrade(null);
+  };
+
+  const handleBackToModeSelection = () => {
+    setSelectedGrade(null);
+    setSelectedMode(null);
   };
 
   const handleLogout = () => {
     setSelectedGrade(null);
+    setSelectedMode(null);
     setSchool(null);
   };
 
@@ -1097,17 +1418,34 @@ function App() {
           <Route path="/" element={
             !school ? (
               <AuthPage onAuth={handleAuth} />
+            ) : !selectedMode ? (
+              <ModeSelectionPage
+                school={school}
+                onModeSelect={handleModeSelect}
+                onLogout={handleLogout}
+              />
             ) : !selectedGrade ? (
               <GradeSelectionPage
                 school={school}
+                mode={selectedMode}
                 onGradeSelect={handleGradeSelect}
                 onLogout={handleLogout}
+                onBackToMode={handleBackToModeSelection}
               />
-            ) : (
+            ) : selectedMode === 'rhymes' ? (
               <RhymeSelectionPage
                 school={school}
                 grade={selectedGrade}
-                onBack={handleBack}
+                onBack={handleBackToGrades}
+                onLogout={handleLogout}
+              />
+            ) : (
+              <FeaturePlaceholderPage
+                school={school}
+                mode={selectedMode}
+                grade={selectedGrade}
+                onBackToGrades={handleBackToGrades}
+                onBackToMode={handleBackToModeSelection}
                 onLogout={handleLogout}
               />
             )
@@ -1119,4 +1457,3 @@ function App() {
 }
 
 export default App;
-
