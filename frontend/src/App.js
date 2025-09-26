@@ -1259,7 +1259,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     <Replace className="w-4 h-4 mr-2" />
                                     Replace
                                   </Button>
+
                                   <div className="rhyme-slot-container flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
+=======
+                                 
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
                                       className="rhyme-svg-content"
@@ -1279,7 +1282,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                             </div>
 
                             {showBottomContainer && (
+
                               <div className="relative flex w-full flex-1 min-h-0 flex-col p-4 sm:p-6 lg:p-8 rhyme-slot">
+
                                 {hasBottomRhyme ? (
                                   <div className="relative flex flex-1 min-h-0 flex-col">
                                     <Button
@@ -1290,7 +1295,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       <Replace className="w-4 h-4 mr-2" />
                                       Replace
                                     </Button>
+
                                     <div className="rhyme-slot-container flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
+=======
+                                   
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
                                         className="rhyme-svg-content"
