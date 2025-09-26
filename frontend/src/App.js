@@ -974,13 +974,13 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 <div className="flex-1 min-h-0 py-4">
                     <div className="flex h-full items-center justify-center">
                       <div className="relative flex w-full max-w-4xl justify-center">
-                        <div className="relative flex aspect-[210/297] w-full max-w-[900px] max-h-[80vh] flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
+                        <div className="a4-preview relative flex w-full flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
                           {showBottomContainer && (
                             <div className="pointer-events-none absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
                           )}
                           <div className="flex h-full flex-col">
                             <div
-                              className={`relative flex flex-1 min-h-0 flex-col p-6 sm:p-8 ${
+                              className={`relative flex flex-1 min-h-0 flex-col p-4 sm:p-6 lg:p-8 ${
                                 showBottomContainer ? 'border-b border-gray-200' : ''
                               }`}
                             >
@@ -994,7 +994,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     <Replace className="w-4 h-4 mr-2" />
                                     Replace
                                   </Button>
-                                  <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-4">
+                                  <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
                                       className="rhyme-svg-content"
@@ -1018,7 +1018,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                             </div>
 
                             {showBottomContainer && (
-                              <div className="relative flex-1 min-h-0 p-6 sm:p-8">
+                              <div className="relative flex-1 min-h-0 p-4 sm:p-6 lg:p-8">
                                 {hasBottomRhyme ? (
                                   <div className="relative flex flex-1 min-h-0 flex-col">
                                     <Button
@@ -1029,7 +1029,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       <Replace className="w-4 h-4 mr-2" />
                                       Replace
                                     </Button>
-                                    <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-4">
+                                    <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
                                         className="rhyme-svg-content"
