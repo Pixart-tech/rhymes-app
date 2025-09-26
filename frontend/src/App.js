@@ -486,6 +486,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     setCurrentPosition(position);
     setShowTreeMenu(true);
     setShowReusable(false);
+    
+
   };
 
   const normalizeSlot = (value, fallback = '') => {
@@ -654,6 +656,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
       setShowTreeMenu(false);
+      toast.message('rhyme added Successfully' )
       setCurrentPosition(null);
     } catch (error) {
       console.error('Error selecting rhyme:', error);
