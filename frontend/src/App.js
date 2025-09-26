@@ -270,9 +270,9 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-white/50 backdrop-blur-sm rounded-lg border border-gray-200">
-      <div className="p-4 border-b bg-white/80">
-        <div className="flex items-center justify-between mb-2">
+    <div className="flex h-full max-h-[calc(100vh-220px)] flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm">
+      <div className="border-b bg-white/80 p-4">
+        <div className="mb-2 flex items-center justify-between">
           <h3 className="font-semibold text-gray-800 flex items-center gap-2">
             <BookOpen className="w-5 h-5" />
             {showReusable ? 'Reusable Rhymes' : 'Available Rhymes'}
@@ -288,8 +288,8 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
           </Button>
         </div>
       </div>
-      
-      <div className="p-2">
+
+      <div className="flex-1 overflow-y-auto p-2">
         {Object.entries(filteredRhymes).map(([pageKey, rhymes]) => {
           if (!rhymes || rhymes.length === 0) return null;
 
@@ -308,29 +308,36 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
                 }
               </CollapsibleTrigger>
               <CollapsibleContent className="pl-4">
-                <div className="space-y-1 mt-2">
+                <div className="mt-2 space-y-1">
                   {rhymes.map((rhyme) => (
-                    <button
+                    <div
                       key={rhyme.code}
-                      onClick={() => onRhymeSelect(rhyme)}
-                      className="w-full text-left p-3 rounded-lg bg-white/50 hover:bg-white/80 transition-all duration-200 border border-transparent hover:border-orange-200 group"
+                      className="group flex items-center justify-between gap-3 rounded-lg border border-transparent bg-white/50 p-3 transition-all duration-200 hover:border-orange-200 hover:bg-white/80"
                     >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <p className="font-medium text-gray-800 group-hover:text-orange-600 transition-colors duration-200">
-                            {rhyme.name}
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            Code: {rhyme.code} • {rhyme.personalized === "Yes" ? "Personalized" : "Standard"}
-                            {rhyme.used_in_grades && (
-                              <span className="ml-2 text-blue-600">
-                                (Used in: {rhyme.used_in_grades.join(', ')})
-                              </span>
-                            )}
-                          </p>
-                        </div>
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-800 transition-colors duration-200 group-hover:text-orange-600">
+                          {rhyme.name}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Code: {rhyme.code} • {rhyme.personalized === "Yes" ? "Personalized" : "Standard"}
+                          {rhyme.used_in_grades && (
+                            <span className="ml-2 text-blue-600">
+                              (Used in: {rhyme.used_in_grades.join(', ')})
+                            </span>
+                          )}
+                        </p>
                       </div>
-                    </button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        onClick={() => onRhymeSelect(rhyme)}
+                        className="shrink-0 rounded-full border-orange-200 text-orange-500 transition-colors duration-200 hover:border-orange-300 hover:text-orange-600"
+                        aria-label={`Add ${rhyme.name}`}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
                   ))}
                 </div>
               </CollapsibleContent>
@@ -966,7 +973,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 </div>
 
                 <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex-1 min-h-0 py-6">
+                <div className="flex-1 min-h-0 py-4">
                     <div className="flex h-full items-center justify-center">
                       <div className="relative flex w-full max-w-4xl justify-center">
                         <div className="relative flex aspect-[210/297] w-full max-w-[900px] max-h-[80vh] flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
@@ -992,7 +999,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   <div className="flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
-                                      className="flex h-full w-full items-center justify-center"
+                                      className="rhyme-svg-content flex h-full w-full items-center justify-center"
                                     />
                                   </div>
                                   <div className="mt-4 space-y-1 text-center">
@@ -1029,7 +1036,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     <div className="flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
-                                        className="flex h-full w-full items-center justify-center"
+                                        className="rhyme-svg-content flex h-full w-full items-center justify-center"
                                       />
                                     </div>
                                     <div className="mt-4 space-y-1 text-center">
@@ -1059,7 +1066,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                   {/* Page Indicators */}
                   {totalPages > 1 && (
-                    <div className="mt-6 flex justify-center space-x-2">
+                    <div className="mt-4 flex justify-center space-x-2">
                       {Array.from({ length: totalPages }, (_, index) => (
                         <button
                           key={index}
