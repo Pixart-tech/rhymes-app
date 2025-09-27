@@ -146,22 +146,21 @@ body {
 
 .rhyme-svg-content {
   position: relative;
-  display: flex;
+  display: grid;
+  place-items: center;
   flex: 1 1 auto;
   width: 100%;
-  height: auto;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
   min-height: 0;
   min-width: 0;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
 }
 
 .rhyme-svg-content svg {
   width: 100% !important;
-  height: auto !important;
+  height: 100% !important;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
