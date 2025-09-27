@@ -16,7 +16,21 @@ import { Toaster } from './components/ui/sonner';
 
 
 // Icons
-import { Plus, ChevronDown, ChevronRight, Replace, School, BookOpen, Music, ChevronLeft, Eye, Download, LayoutTemplate, BookMarked, Clock } from 'lucide-react';
+import {
+  Plus,
+  ChevronDown,
+  ChevronRight,
+  Replace,
+  School,
+  BookOpen,
+  Music,
+  ChevronLeft,
+  Eye,
+  Download,
+  LayoutTemplate,
+  BookMarked,
+  Clock
+} from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 const API = `${BACKEND_URL}/api`;
