@@ -1253,14 +1253,15 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                   <div className="flex-1 min-h-0 py-4">
                     <div className="flex h-full items-center justify-center">
                       <div className="relative flex w-full justify-center">
-                        <div className="a4-preview relative flex w-full flex-col overflow-hidden rounded-[32px] border border-gray-300 bg-gradient-to-b from-white to-gray-50 shadow-2xl">
+                        <div className="a4-preview relative flex w-full flex-col overflow-hidden">
                           {showBottomContainer && (
                             <div className="pointer-events-none absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
                           )}
                           <div className="flex h-full flex-col">
                             <div
-                              className={`relative flex w-full flex-1 min-h-0 flex-col p-4 sm:p-6 lg:p-8 ${showBottomContainer ? 'border-b border-gray-200' : ''
-                                } rhyme-slot`}
+
+                              className="relative flex w-full flex-1 min-h-0 flex-col rhyme-slot"
+
                             >
                               {hasTopRhyme ? (
                                 <div className="relative flex flex-1 min-h-0 flex-col">
@@ -1273,7 +1274,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     Replace
                                   </Button>
 
-                                  <div className="rhyme-slot-container flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
+
+                                  <div className="rhyme-slot-container">
+
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
                                       className="rhyme-svg-content"
@@ -1281,20 +1284,22 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   </div>
                                 </div>
                               ) : (
-                                <div className="flex flex-1 items-center justify-center">
-                                  <Button
-                                    onClick={() => handleAddRhyme('top')}
-                                    className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
-                                  >
-                                    <Plus className="h-8 w-8" />
-                                  </Button>
+                                <div className="rhyme-slot-container">
+                                  <div className="flex flex-1 items-center justify-center">
+                                    <Button
+                                      onClick={() => handleAddRhyme('top')}
+                                      className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                    >
+                                      <Plus className="h-8 w-8" />
+                                    </Button>
+                                  </div>
                                 </div>
                               )}
                             </div>
 
                             {showBottomContainer && (
 
-                              <div className="relative flex w-full flex-1 min-h-0 flex-col p-4 sm:p-6 lg:p-8 rhyme-slot">
+                              <div className="relative flex w-full flex-1 min-h-0 flex-col rhyme-slot">
 
                                 {hasBottomRhyme ? (
                                   <div className="relative flex flex-1 min-h-0 flex-col">
@@ -1307,7 +1312,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       Replace
                                     </Button>
 
-                                    <div className="rhyme-slot-container flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
+
+                                    <div className="rhyme-slot-container">
+
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
                                         className="rhyme-svg-content"
@@ -1315,13 +1322,15 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     </div>
                                   </div>
                                 ) : (
-                                  <div className="flex flex-1 items-center justify-center">
-                                    <Button
-                                      onClick={() => handleAddRhyme('bottom')}
-                                      className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
-                                    >
-                                      <Plus className="h-8 w-8" />
-                                    </Button>
+                                  <div className="rhyme-slot-container">
+                                    <div className="flex flex-1 items-center justify-center">
+                                      <Button
+                                        onClick={() => handleAddRhyme('bottom')}
+                                        className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                      >
+                                        <Plus className="h-8 w-8" />
+                                      </Button>
+                                    </div>
                                   </div>
                                 )}
                               </div>
