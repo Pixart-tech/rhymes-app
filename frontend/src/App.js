@@ -13,6 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './component
 import { Separator } from './components/ui/separator';
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
+import CoverPageWorkflow from './components/CoverPageWorkflow';
 
 
 // Icons
@@ -95,61 +96,60 @@ const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
       }
     }
 
-    const targetWidth = Number.isFinite(viewBoxWidth) ? viewBoxWidth : widthValue;
-    const targetHeight = Number.isFinite(viewBoxHeight) ? viewBoxHeight : heightValue;
+    const referenceWidth = Number.isFinite(viewBoxWidth) ? viewBoxWidth : widthValue;
+    const referenceHeight = Number.isFinite(viewBoxHeight) ? viewBoxHeight : heightValue;
 
-    if (Number.isFinite(targetWidth) && Number.isFinite(targetHeight)) {
-      const rectElements = svgElement.querySelectorAll('rect');
+    const rectElements = svgElement.querySelectorAll('rect');
 
-      rectElements.forEach((rect) => {
-        const rectWidthAttr = rect.getAttribute('width');
-        const rectHeightAttr = rect.getAttribute('height');
-        const rectWidthValue = Number.parseFloat(rectWidthAttr ?? '');
-        const rectHeightValue = Number.parseFloat(rectHeightAttr ?? '');
+    rectElements.forEach((rect) => {
+      const rectWidthAttr = rect.getAttribute('width');
+      const rectHeightAttr = rect.getAttribute('height');
+      const rectXAttr = rect.getAttribute('x');
+      const rectYAttr = rect.getAttribute('y');
 
+      const rectWidthValue = Number.parseFloat(rectWidthAttr ?? '');
+      const rectHeightValue = Number.parseFloat(rectHeightAttr ?? '');
+      const rectXValue = Number.parseFloat(rectXAttr ?? '');
+      const rectYValue = Number.parseFloat(rectYAttr ?? '');
 
-        const rectWidthMatchesSvg =
-          Number.isFinite(widthValue) && Number.isFinite(rectWidthValue) && Math.abs(rectWidthValue - widthValue) < 0.5;
-        const rectHeightMatchesSvg =
-          Number.isFinite(heightValue) && Number.isFinite(rectHeightValue) && Math.abs(rectHeightValue - heightValue) < 0.5;
+      const widthLooksLikeCanvas =
+        Number.isFinite(referenceWidth) &&
+        Number.isFinite(rectWidthValue) &&
+        Math.abs(rectWidthValue - referenceWidth) < 1;
 
-        const rectWidthNeedsUpdate =
-          !rectWidthAttr ||
-          /%/i.test(rectWidthAttr) ||
-          !Number.isFinite(rectWidthValue) ||
-          rectWidthMatchesSvg;
+      const heightLooksLikeCanvas =
+        Number.isFinite(referenceHeight) &&
+        Number.isFinite(rectHeightValue) &&
+        Math.abs(rectHeightValue - referenceHeight) < 1;
 
-        const rectHeightNeedsUpdate =
-          !rectHeightAttr ||
-          /%/i.test(rectHeightAttr) ||
-          !Number.isFinite(rectHeightValue) ||
-          rectHeightMatchesSvg;
+      const shouldStretchWidth =
+        !rectWidthAttr ||
+        /%/i.test(rectWidthAttr) ||
+        !Number.isFinite(rectWidthValue) ||
+        widthLooksLikeCanvas;
 
+      const shouldStretchHeight =
+        !rectHeightAttr ||
+        /%/i.test(rectHeightAttr) ||
+        !Number.isFinite(rectHeightValue) ||
+        heightLooksLikeCanvas;
 
-        const rectXNeedsUpdate =
-          rectWidthNeedsUpdate && (!rectXAttr || !Number.isFinite(rectXValue) || Math.abs(rectXValue) < 0.5);
-        const rectYNeedsUpdate =
-          rectHeightNeedsUpdate && (!rectYAttr || !Number.isFinite(rectYValue) || Math.abs(rectYValue) < 0.5);
+      if (shouldStretchWidth) {
+        rect.setAttribute('width', '100%');
+      }
 
-        if (rectWidthNeedsUpdate) {
-          rect.setAttribute('width', '100%');
-        }
+      if (shouldStretchHeight) {
+        rect.setAttribute('height', '100%');
+      }
 
-        if (rectHeightNeedsUpdate) {
-          rect.setAttribute('height', '100%');
-        }
+      if (shouldStretchWidth && (!rectXAttr || !Number.isFinite(rectXValue) || Math.abs(rectXValue) < 0.5)) {
+        rect.setAttribute('x', '0');
+      }
 
-        if (rectXNeedsUpdate) {
-          rect.setAttribute('x', '0');
-        }
-
-        if (rectYNeedsUpdate) {
-          rect.setAttribute('y', '0');
-
-     
-        }
-      });
-    }
+      if (shouldStretchHeight && (!rectYAttr || !Number.isFinite(rectYValue) || Math.abs(rectYValue) < 0.5)) {
+        rect.setAttribute('y', '0');
+      }
+    });
 
     const normalizedCode = (rhymeCode ?? '').toString().trim();
     const normalizedCodeLower = normalizedCode.toLowerCase();
@@ -1338,7 +1338,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                             >
                               {hasTopRhyme ? (
-                                <div className="relative flex flex-1 min-h-0 flex-col">
+                                <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper">
                                   <Button
                                     onClick={() => handleAddRhyme('top')}
                                     variant="outline"
@@ -1376,7 +1376,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
 
                                 {hasBottomRhyme ? (
-                                  <div className="relative flex flex-1 min-h-0 flex-col">
+                                  <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper">
                                     <Button
                                       onClick={() => handleAddRhyme('bottom')}
                                       variant="outline"
@@ -1547,6 +1547,14 @@ function App() {
                 school={school}
                 grade={selectedGrade}
                 onBack={handleBackToGrades}
+                onLogout={handleLogout}
+              />
+            ) : selectedMode === 'cover' ? (
+              <CoverPageWorkflow
+                school={school}
+                grade={selectedGrade}
+                onBackToGrades={handleBackToGrades}
+                onBackToMode={handleBackToModeSelection}
                 onLogout={handleLogout}
               />
             ) : (
