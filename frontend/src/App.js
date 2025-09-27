@@ -200,7 +200,6 @@ const AuthPage = ({ onAuth }) => {
   const [schoolId, setSchoolId] = useState('');
   const [schoolName, setSchoolName] = useState('');
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -653,10 +652,16 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
 
   const currentRhymes = showReusable ? reusableRhymes : rhymesData;
 
-  // Filter out 1.0 page rhymes if hideFullPageRhymes is true
+  // Filter out full-page rhymes if hideFullPageRhymes is true
   const filteredRhymes = hideFullPageRhymes
     ? Object.fromEntries(
-      Object.entries(currentRhymes).filter(([pageKey]) => parseFloat(pageKey) !== 1.0)
+      Object.entries(currentRhymes).filter(([pageKey]) => {
+        const numericKey = Number.parseFloat(pageKey);
+        if (!Number.isFinite(numericKey)) {
+          return true;
+        }
+        return numericKey <= 0.5;
+      })
     )
     : currentRhymes;
 
