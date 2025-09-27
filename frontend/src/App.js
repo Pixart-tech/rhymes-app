@@ -1275,8 +1275,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   </Button>
 
                                   <div className="rhyme-slot-container flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
-=======
-                                 
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
                                       className="rhyme-svg-content"
@@ -1311,8 +1309,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     </Button>
 
                                     <div className="rhyme-slot-container flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
-=======
-                                   
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
                                         className="rhyme-svg-content"
