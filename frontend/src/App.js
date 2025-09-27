@@ -107,6 +107,7 @@ const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
         const rectWidthValue = Number.parseFloat(rectWidthAttr ?? '');
         const rectHeightValue = Number.parseFloat(rectHeightAttr ?? '');
 
+
         const rectWidthMatchesSvg =
           Number.isFinite(widthValue) && Number.isFinite(rectWidthValue) && Math.abs(rectWidthValue - widthValue) < 0.5;
         const rectHeightMatchesSvg =
@@ -124,12 +125,28 @@ const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
           !Number.isFinite(rectHeightValue) ||
           rectHeightMatchesSvg;
 
+
+        const rectXNeedsUpdate =
+          rectWidthNeedsUpdate && (!rectXAttr || !Number.isFinite(rectXValue) || Math.abs(rectXValue) < 0.5);
+        const rectYNeedsUpdate =
+          rectHeightNeedsUpdate && (!rectYAttr || !Number.isFinite(rectYValue) || Math.abs(rectYValue) < 0.5);
+
         if (rectWidthNeedsUpdate) {
-          rect.setAttribute('width', `${targetWidth}`);
+          rect.setAttribute('width', '100%');
         }
 
         if (rectHeightNeedsUpdate) {
-          rect.setAttribute('height', `${targetHeight}`);
+          rect.setAttribute('height', '100%');
+        }
+
+        if (rectXNeedsUpdate) {
+          rect.setAttribute('x', '0');
+        }
+
+        if (rectYNeedsUpdate) {
+          rect.setAttribute('y', '0');
+
+     
         }
       });
     }
