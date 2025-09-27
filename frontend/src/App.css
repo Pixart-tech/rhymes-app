@@ -215,9 +215,7 @@ body {
 
 .rhyme-svg-content {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   flex: 1 1 auto;
   width: 100%;
   max-width: 100%;
@@ -226,6 +224,7 @@ body {
   min-width: 0;
   overflow: hidden;
   padding: clamp(6px, 1.5vw, 12px);
+  line-height: 0;
 }
 
 .rhyme-svg-content svg {
