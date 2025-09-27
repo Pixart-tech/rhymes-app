@@ -16,7 +16,21 @@ import { Toaster } from './components/ui/sonner';
 
 
 // Icons
-import { Plus, ChevronDown, ChevronRight, Replace, School, BookOpen, Music, ChevronLeft, Eye, Download, LayoutTemplate, BookMarked, Clock } from 'lucide-react';
+import {
+  Plus,
+  ChevronDown,
+  ChevronRight,
+  Replace,
+  School,
+  BookOpen,
+  Music,
+  ChevronLeft,
+  Eye,
+  Download,
+  LayoutTemplate,
+  BookMarked,
+  Clock
+} from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 const API = `${BACKEND_URL}/api`;
@@ -1261,8 +1275,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   </Button>
 
                                   <div className="rhyme-slot-container flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
-=======
-                                 
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
                                       className="rhyme-svg-content"
@@ -1297,8 +1309,6 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     </Button>
 
                                     <div className="rhyme-slot-container flex h-full w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-gray-50 p-3 sm:p-4">
-=======
-                                   
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
                                         className="rhyme-svg-content"
