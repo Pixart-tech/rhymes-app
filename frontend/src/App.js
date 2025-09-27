@@ -13,7 +13,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './component
 import { Separator } from './components/ui/separator';
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
-import CoverPageWorkflow from './components/CoverPageWorkflow';
 
 
 // Icons
@@ -200,6 +199,7 @@ const AuthPage = ({ onAuth }) => {
   const [schoolId, setSchoolId] = useState('');
   const [schoolName, setSchoolName] = useState('');
   const [loading, setLoading] = useState(false);
+
   const handleAuth = async (e) => {
     e.preventDefault();
     if (!schoolId.trim() || !schoolName.trim()) {
@@ -651,7 +651,7 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
 
   const currentRhymes = showReusable ? reusableRhymes : rhymesData;
 
-  // Filter out full-page rhymes (anything larger than half-page) if hideFullPageRhymes is true
+  // Filter out full-page rhymes if hideFullPageRhymes is true
   const filteredRhymes = hideFullPageRhymes
     ? Object.fromEntries(
       Object.entries(currentRhymes).filter(([pageKey]) => {
@@ -1253,11 +1253,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const currentPageRhymes = getCurrentPageRhymes();
   const hasTopRhyme = currentPageRhymes.top !== null;
   const hasBottomRhyme = currentPageRhymes.bottom !== null;
-  const topRhymePages = hasTopRhyme ? parsePagesValue(currentPageRhymes.top.pages) : null;
-  const isSingleFullPage = topRhymePages === 1;
-  const isDoublePageSpread = topRhymePages !== null && topRhymePages >= 2;
-  const showBottomContainer = !isSingleFullPage && !isDoublePageSpread;
-  const topRhymeSvgContent = hasTopRhyme ? (currentPageRhymes.top.svgContent || '') : '';
+  const isTopFullPage = hasTopRhyme && parsePagesValue(currentPageRhymes.top.pages) === 1;
+  const showBottomContainer = !isTopFullPage;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50">
@@ -1335,15 +1332,17 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                       <div className="relative flex w-full justify-center transition-all duration-300 ease-out">
 
                         <div className="a4-preview relative flex w-full flex-col overflow-hidden">
-                          {isDoublePageSpread ? (
-                            <div className="pointer-events-none absolute inset-y-12 left-1/2 w-px bg-gradient-to-b from-transparent via-gray-300 to-transparent" />
-                          ) : showBottomContainer && (
+                          {showBottomContainer && (
                             <div className="pointer-events-none absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
                           )}
-                          <div className={`rhyme-page-grid h-full${isDoublePageSpread ? ' double-layout' : ''}`}>
-                            {isDoublePageSpread ? (
-                              <div className="relative flex w-full min-h-0 flex-col rhyme-slot">
-                                <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper rhyme-double-spread-wrapper">
+                          <div className="rhyme-page-grid h-full">
+                            <div
+
+                              className="relative flex w-full min-h-0 flex-col rhyme-slot"
+
+                            >
+                              {hasTopRhyme ? (
+                                <div className="relative flex flex-1 min-h-0 flex-col">
                                   <Button
                                     onClick={() => handleAddRhyme('top')}
                                     variant="outline"
@@ -1352,113 +1351,66 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     <Replace className="w-4 h-4 mr-2" />
                                     Replace
                                   </Button>
-                                  <div className="rhyme-double-spread">
-                                    <div className="rhyme-double-panel">
-                                      <div className={`rhyme-slot-container double-page double-left${hasTopRhyme ? ' has-svg' : ''}`}>
-                                        {topRhymeSvgContent ? (
-                                          <div
-                                            dangerouslySetInnerHTML={{ __html: topRhymeSvgContent }}
-                                            className="rhyme-svg-content"
-                                          />
-                                        ) : (
-                                          <div className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500">
-                                            Preview unavailable
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="rhyme-double-panel">
-                                      <div className={`rhyme-slot-container double-page double-right${hasTopRhyme ? ' has-svg' : ''}`}>
-                                        {topRhymeSvgContent ? (
-                                          <div
-                                            dangerouslySetInnerHTML={{ __html: topRhymeSvgContent }}
-                                            className="rhyme-svg-content"
-                                          />
-                                        ) : (
-                                          <div className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500">
-                                            Preview unavailable
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
+
+                                  <div className={`rhyme-slot-container${hasTopRhyme ? ' has-svg' : ''}`}>
+
+                                    <div
+                                      dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
+                                      className="rhyme-svg-content"
+                                    />
                                   </div>
                                 </div>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="relative flex w-full min-h-0 flex-col rhyme-slot">
-                                  {hasTopRhyme ? (
-                                    <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper">
-                                      <Button
-                                        onClick={() => handleAddRhyme('top')}
-                                        variant="outline"
-                                        className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
-                                      >
-                                        <Replace className="w-4 h-4 mr-2" />
-                                        Replace
-                                      </Button>
-
-                                      <div className={`rhyme-slot-container${hasTopRhyme ? ' has-svg' : ''}`}>
-
-                                        <div
-                                          dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
-                                          className="rhyme-svg-content"
-                                        />
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div className="rhyme-slot-container">
-                                      <div className="flex flex-1 items-center justify-center">
-                                        <Button
-                                          onClick={() => handleAddRhyme('top')}
-                                          className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
-                                        >
-                                          <Plus className="h-8 w-8" />
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  )}
+                              ) : (
+                                <div className="rhyme-slot-container">
+                                  <div className="flex flex-1 items-center justify-center">
+                                    <Button
+                                      onClick={() => handleAddRhyme('top')}
+                                      className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                    >
+                                      <Plus className="h-8 w-8" />
+                                    </Button>
+                                  </div>
                                 </div>
+                              )}
+                            </div>
 
-                                {showBottomContainer && (
+                            {showBottomContainer && (
 
-                                  <div className="relative flex w-full min-h-0 flex-col rhyme-slot">
+                              <div className="relative flex w-full min-h-0 flex-col rhyme-slot">
 
 
-                                    {hasBottomRhyme ? (
-                                      <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper">
-                                        <Button
-                                          onClick={() => handleAddRhyme('bottom')}
-                                          variant="outline"
-                                          className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
-                                        >
-                                          <Replace className="w-4 h-4 mr-2" />
-                                          Replace
-                                        </Button>
+                                {hasBottomRhyme ? (
+                                  <div className="relative flex flex-1 min-h-0 flex-col">
+                                    <Button
+                                      onClick={() => handleAddRhyme('bottom')}
+                                      variant="outline"
+                                      className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
+                                    >
+                                      <Replace className="w-4 h-4 mr-2" />
+                                      Replace
+                                    </Button>
 
-                                        <div className={`rhyme-slot-container${hasBottomRhyme ? ' has-svg' : ''}`}>
+                                    <div className={`rhyme-slot-container${hasBottomRhyme ? ' has-svg' : ''}`}>
 
-                                          <div
-                                            dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
-                                            className="rhyme-svg-content"
-                                          />
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="rhyme-slot-container">
-                                        <div className="flex flex-1 items-center justify-center">
-                                          <Button
-                                            onClick={() => handleAddRhyme('bottom')}
-                                            className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
-                                          >
-                                            <Plus className="h-8 w-8" />
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    )}
+                                      <div
+                                        dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
+                                        className="rhyme-svg-content"
+                                      />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="rhyme-slot-container">
+                                    <div className="flex flex-1 items-center justify-center">
+                                      <Button
+                                        onClick={() => handleAddRhyme('bottom')}
+                                        className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                      >
+                                        <Plus className="h-8 w-8" />
+                                      </Button>
+                                    </div>
                                   </div>
                                 )}
-                              </>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -1599,14 +1551,6 @@ function App() {
                 school={school}
                 grade={selectedGrade}
                 onBack={handleBackToGrades}
-                onLogout={handleLogout}
-              />
-            ) : selectedMode === 'cover' ? (
-              <CoverPageWorkflow
-                school={school}
-                grade={selectedGrade}
-                onBackToGrades={handleBackToGrades}
-                onBackToMode={handleBackToModeSelection}
                 onLogout={handleLogout}
               />
             ) : (
