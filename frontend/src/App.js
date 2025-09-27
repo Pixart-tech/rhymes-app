@@ -143,7 +143,7 @@ const AuthPage = ({ onAuth }) => {
         school_id: schoolId.trim(),
         school_name: schoolName.trim()
       });
-      
+
       onAuth(response.data);
       toast.success('Successfully logged in!');
     } catch (error) {
@@ -193,7 +193,7 @@ const AuthPage = ({ onAuth }) => {
             >
               {loading ? 'Authenticating...' : 'Enter School'}
             </Button>
-            
+
           </form>
         </CardContent>
       </Card>
@@ -582,10 +582,10 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
   const currentRhymes = showReusable ? reusableRhymes : rhymesData;
 
   // Filter out 1.0 page rhymes if hideFullPageRhymes is true
-  const filteredRhymes = hideFullPageRhymes 
+  const filteredRhymes = hideFullPageRhymes
     ? Object.fromEntries(
-        Object.entries(currentRhymes).filter(([pageKey]) => parseFloat(pageKey) !== 1.0)
-      )
+      Object.entries(currentRhymes).filter(([pageKey]) => parseFloat(pageKey) !== 1.0)
+    )
     : currentRhymes;
 
   if (!filteredRhymes || Object.keys(filteredRhymes).length === 0) {
@@ -630,8 +630,8 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
                   </div>
                   {pageKey} Page{parseFloat(pageKey) !== 1 ? 's' : ''} ({rhymes.length})
                 </span>
-                {expandedGroups[pageKey] ? 
-                  <ChevronDown className="w-4 h-4 text-gray-500" /> : 
+                {expandedGroups[pageKey] ?
+                  <ChevronDown className="w-4 h-4 text-gray-500" /> :
                   <ChevronRight className="w-4 h-4 text-gray-500" />
                 }
               </CollapsibleTrigger>
@@ -697,67 +697,67 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     fetchSelectedRhymes();
   }, []);
 
-    const computePageUsage = (rhymesList = selectedRhymes) => {
-      const usageMap = new Map();
-      let highestIndex = -1;
-      let lowestIndex = Number.POSITIVE_INFINITY;
+  const computePageUsage = (rhymesList = selectedRhymes) => {
+    const usageMap = new Map();
+    let highestIndex = -1;
+    let lowestIndex = Number.POSITIVE_INFINITY;
 
-      if (Array.isArray(rhymesList)) {
-        rhymesList.forEach((selection) => {
-          if (!selection) return;
-          const numericIndex = Number(selection?.page_index);
-          if (!Number.isFinite(numericIndex) || numericIndex < 0) {
-            return;
-          }
-
-          const pageIndex = numericIndex;
-          const pagesValue = parsePagesValue(selection?.pages);
-          const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
-
-          if (pagesValue === 0.5) {
-            const slot = normalizeSlot(selection?.position, 'top') || 'top';
-            entry[slot] = true;
-          } else {
-            entry.top = true;
-            entry.bottom = true;
-          }
-
-          usageMap.set(pageIndex, entry);
-          highestIndex = Math.max(highestIndex, pageIndex);
-          lowestIndex = Math.min(lowestIndex, pageIndex);
-        });
-      }
-
-      return {
-        usageMap,
-        highestIndex,
-        lowestIndex: lowestIndex === Number.POSITIVE_INFINITY ? -1 : lowestIndex
-      };
-    };
-
-    const computeNextAvailablePageInfoFromUsage = ({ usageMap, highestIndex }) => {
-      for (let index = 0; index < MAX_RHYMES_PER_GRADE; index += 1) {
-        const entry = usageMap.get(index);
-        if (!entry) {
-          return { index, hasCapacity: true, highestIndex };
+    if (Array.isArray(rhymesList)) {
+      rhymesList.forEach((selection) => {
+        if (!selection) return;
+        const numericIndex = Number(selection?.page_index);
+        if (!Number.isFinite(numericIndex) || numericIndex < 0) {
+          return;
         }
-        if (!entry.top || !entry.bottom) {
-          return { index, hasCapacity: true, highestIndex };
+
+        const pageIndex = numericIndex;
+        const pagesValue = parsePagesValue(selection?.pages);
+        const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
+
+        if (pagesValue === 0.5) {
+          const slot = normalizeSlot(selection?.position, 'top') || 'top';
+          entry[slot] = true;
+        } else {
+          entry.top = true;
+          entry.bottom = true;
         }
+
+        usageMap.set(pageIndex, entry);
+        highestIndex = Math.max(highestIndex, pageIndex);
+        lowestIndex = Math.min(lowestIndex, pageIndex);
+      });
+    }
+
+    return {
+      usageMap,
+      highestIndex,
+      lowestIndex: lowestIndex === Number.POSITIVE_INFINITY ? -1 : lowestIndex
+    };
+  };
+
+  const computeNextAvailablePageInfoFromUsage = ({ usageMap, highestIndex }) => {
+    for (let index = 0; index < MAX_RHYMES_PER_GRADE; index += 1) {
+      const entry = usageMap.get(index);
+      if (!entry) {
+        return { index, hasCapacity: true, highestIndex };
       }
+      if (!entry.top || !entry.bottom) {
+        return { index, hasCapacity: true, highestIndex };
+      }
+    }
 
-      const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_RHYMES_PER_GRADE - 1);
-      return { index: fallbackIndex, hasCapacity: false, highestIndex };
-    };
+    const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_RHYMES_PER_GRADE - 1);
+    return { index: fallbackIndex, hasCapacity: false, highestIndex };
+  };
 
-    const computeNextAvailablePageInfo = (rhymesList = selectedRhymes) => {
-      const usage = computePageUsage(rhymesList);
-      const info = computeNextAvailablePageInfoFromUsage(usage);
-      return {
-        ...info,
-        lowestIndex: usage.lowestIndex
-      };
+  const computeNextAvailablePageInfo = (rhymesList = selectedRhymes) => {
+    const usage = computePageUsage(rhymesList);
+    const info = computeNextAvailablePageInfoFromUsage(usage);
+    return {
+      ...info,
+      lowestIndex: usage.lowestIndex
     };
+  };
 
   const fetchAvailableRhymes = async () => {
     try {
@@ -781,7 +781,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     try {
       const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
       const gradeSelections = response.data[grade] || [];
-      
+
       const rhymesWithSvg = await Promise.all(
         gradeSelections.map(async (rhyme) => {
           try {
@@ -1252,14 +1252,18 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 min-h-0 py-4">
                     <div className="flex h-full items-center justify-center">
+
                       <div className="relative flex w-full justify-center transition-all duration-300 ease-out">
+
                         <div className="a4-preview relative flex w-full flex-col overflow-hidden">
                           {showBottomContainer && (
                             <div className="pointer-events-none absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
                           )}
                           <div className="rhyme-page-grid h-full">
                             <div
+
                               className="relative flex w-full min-h-0 flex-col rhyme-slot"
+
                             >
                               {hasTopRhyme ? (
                                 <div className="relative flex flex-1 min-h-0 flex-col">
@@ -1273,6 +1277,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                   </Button>
 
                                   <div className="rhyme-slot-container">
+
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
                                       className="rhyme-svg-content"
@@ -1297,6 +1302,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                               <div className="relative flex w-full min-h-0 flex-col rhyme-slot">
 
+
                                 {hasBottomRhyme ? (
                                   <div className="relative flex flex-1 min-h-0 flex-col">
                                     <Button
@@ -1309,6 +1315,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     </Button>
 
                                     <div className="rhyme-slot-container">
+
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
                                         className="rhyme-svg-content"
@@ -1380,30 +1387,24 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
           </div>
         </div>
 
-                  {/* Page Indicators */}
-                  {totalPages > 1 && (
-                    <div className="mt-4 flex justify-center space-x-2">
-                      {Array.from({ length: totalPages }, (_, index) => (
-                        <button
-                          key={index}
-                          onClick={() => handlePageChange(index)}
-                          className={`h-3 w-3 rounded-full transition-colors duration-200 ${
-                            index === currentPageIndex
-                              ? 'bg-orange-400'
-                              : 'bg-gray-300'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+        {/* Page Indicators */}
+        {totalPages > 1 && (
+          <div className="mt-4 flex justify-center space-x-2">
+            {Array.from({ length: totalPages }, (_, index) => (
+              <button
+                key={index}
+                onClick={() => handlePageChange(index)}
+                className={`h-3 w-3 rounded-full transition-colors duration-200 ${index === currentPageIndex
+                    ? 'bg-orange-400'
+                    : 'bg-gray-300'
+                  }`}
+              />
+            ))}
           </div>
-
-        </div>
+        )}
       </div>
     </div>
+            
   );
 };
 
@@ -1451,7 +1452,7 @@ function App() {
       <Toaster position="top-right" />
       <BrowserRouter>
         <Routes>
-          
+
           <Route path="/" element={
             !school ? (
               <AuthPage onAuth={handleAuth} />
@@ -1494,4 +1495,3 @@ function App() {
 }
 
 export default App;
-
