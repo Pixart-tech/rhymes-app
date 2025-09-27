@@ -62,14 +62,13 @@ const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
 
     const widthAttr = svgElement.getAttribute('width');
     const heightAttr = svgElement.getAttribute('height');
+    const widthValue = Number.parseFloat(widthAttr ?? '');
+    const heightValue = Number.parseFloat(heightAttr ?? '');
 
     svgElement.removeAttribute('width');
     svgElement.removeAttribute('height');
 
     if (!svgElement.getAttribute('viewBox')) {
-      const widthValue = parseFloat(widthAttr ?? '');
-      const heightValue = parseFloat(heightAttr ?? '');
-
       if (Number.isFinite(widthValue) && Number.isFinite(heightValue) && widthValue > 0 && heightValue > 0) {
         svgElement.setAttribute('viewBox', `0 0 ${widthValue} ${heightValue}`);
       }
@@ -77,6 +76,62 @@ const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
 
     if (!svgElement.getAttribute('preserveAspectRatio')) {
       svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    }
+
+    const viewBoxAttr = svgElement.getAttribute('viewBox');
+    let viewBoxWidth;
+    let viewBoxHeight;
+
+    if (typeof viewBoxAttr === 'string' && viewBoxAttr.trim().length > 0) {
+      const viewBoxParts = viewBoxAttr
+        .trim()
+        .split(/[\s,]+/)
+        .map((part) => Number.parseFloat(part))
+        .filter((part) => Number.isFinite(part));
+
+      if (viewBoxParts.length >= 4) {
+        viewBoxWidth = viewBoxParts[2];
+        viewBoxHeight = viewBoxParts[3];
+      }
+    }
+
+    const targetWidth = Number.isFinite(viewBoxWidth) ? viewBoxWidth : widthValue;
+    const targetHeight = Number.isFinite(viewBoxHeight) ? viewBoxHeight : heightValue;
+
+    if (Number.isFinite(targetWidth) && Number.isFinite(targetHeight)) {
+      const rectElements = svgElement.querySelectorAll('rect');
+
+      rectElements.forEach((rect) => {
+        const rectWidthAttr = rect.getAttribute('width');
+        const rectHeightAttr = rect.getAttribute('height');
+        const rectWidthValue = Number.parseFloat(rectWidthAttr ?? '');
+        const rectHeightValue = Number.parseFloat(rectHeightAttr ?? '');
+
+        const rectWidthMatchesSvg =
+          Number.isFinite(widthValue) && Number.isFinite(rectWidthValue) && Math.abs(rectWidthValue - widthValue) < 0.5;
+        const rectHeightMatchesSvg =
+          Number.isFinite(heightValue) && Number.isFinite(rectHeightValue) && Math.abs(rectHeightValue - heightValue) < 0.5;
+
+        const rectWidthNeedsUpdate =
+          !rectWidthAttr ||
+          /%/i.test(rectWidthAttr) ||
+          !Number.isFinite(rectWidthValue) ||
+          rectWidthMatchesSvg;
+
+        const rectHeightNeedsUpdate =
+          !rectHeightAttr ||
+          /%/i.test(rectHeightAttr) ||
+          !Number.isFinite(rectHeightValue) ||
+          rectHeightMatchesSvg;
+
+        if (rectWidthNeedsUpdate) {
+          rect.setAttribute('width', `${targetWidth}`);
+        }
+
+        if (rectHeightNeedsUpdate) {
+          rect.setAttribute('height', `${targetHeight}`);
+        }
+      });
     }
 
     const normalizedCode = (rhymeCode ?? '').toString().trim();
@@ -1276,7 +1331,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     Replace
                                   </Button>
 
-                                  <div className="rhyme-slot-container">
+                                  <div className={`rhyme-slot-container${hasTopRhyme ? ' has-svg' : ''}`}>
 
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
@@ -1314,7 +1369,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       Replace
                                     </Button>
 
-                                    <div className="rhyme-slot-container">
+                                    <div className={`rhyme-slot-container${hasBottomRhyme ? ' has-svg' : ''}`}>
 
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
