@@ -152,7 +152,9 @@ body {
 .rhyme-svg-content {
   position: relative;
   display: grid;
+
   place-items: stretch;
+
   flex: 1 1 auto;
   width: 100%;
   height: 100%;
