@@ -1276,7 +1276,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                     Replace
                                   </Button>
 
-                                  <div className="rhyme-slot-container">
+                                  <div className={`rhyme-slot-container${hasTopRhyme ? ' has-svg' : ''}`}>
 
                                     <div
                                       dangerouslySetInnerHTML={{ __html: currentPageRhymes.top.svgContent || '' }}
@@ -1314,7 +1314,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       Replace
                                     </Button>
 
-                                    <div className="rhyme-slot-container">
+                                    <div className={`rhyme-slot-container${hasBottomRhyme ? ' has-svg' : ''}`}>
 
                                       <div
                                         dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom.svgContent || '' }}
