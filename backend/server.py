@@ -20,6 +20,25 @@ from datetime import datetime
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
+logger = logging.getLogger(__name__)
+
+
+def _resolve_svg_base_path() -> Optional[Path]:
+    """Return the configured base path for rhyme SVG assets, if any."""
+
+    base_path = os.environ.get("RHYME_SVG_BASE_PATH")
+    if not base_path:
+        return None
+
+    try:
+        return Path(base_path).expanduser()
+    except (OSError, RuntimeError) as exc:
+        logger.warning("Invalid RHYME_SVG_BASE_PATH '%s': %s", base_path, exc)
+        return None
+
+
+RHYME_SVG_BASE_PATH = _resolve_svg_base_path()
+
 # MongoDB connection
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -628,11 +647,31 @@ async def delete_school(school_id: str):
 
 @api_router.get("/rhymes/svg/{rhyme_code}")
 async def get_rhyme_svg(rhyme_code: str):
-    """Get SVG content for a rhyme (mock implementation)"""
-    try:
-        svg_content = generate_rhyme_svg(rhyme_code)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Rhyme not found")
+    """Return SVG markup for the requested rhyme.
+
+    When ``RHYME_SVG_BASE_PATH`` is configured the endpoint will attempt to
+    resolve ``<rhyme_code>.svg`` within that directory so real artwork from a
+    network share or local folder can be exercised in development. If the file
+    cannot be found the function falls back to the generated placeholder SVG so
+    the frontend continues to work for missing assets.
+    """
+
+    svg_content: Optional[str] = None
+
+    if RHYME_SVG_BASE_PATH is not None:
+        svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
+        try:
+            svg_content = svg_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
+        except OSError as exc:
+            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
+
+    if svg_content is None:
+        try:
+            svg_content = generate_rhyme_svg(rhyme_code)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Rhyme not found")
 
     return Response(content=svg_content, media_type="image/svg+xml")
 
