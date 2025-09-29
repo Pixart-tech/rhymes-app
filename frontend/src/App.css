@@ -398,6 +398,7 @@ body {
 .cover-theme-button.is-active {
   border-color: #fb923c;
   box-shadow: 0 28px 46px -22px rgba(249, 115, 22, 0.4);
+
 }
 
 .cover-theme-button.is-active::after {
@@ -409,6 +410,7 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   gap: 16px;
 }
+
 
 .cover-colour-chip {
   position: relative;
@@ -457,6 +459,39 @@ body {
   border-color: #fb923c;
   box-shadow: 0 32px 54px -26px rgba(249, 115, 22, 0.55);
 }
+
+.cover-personalisation-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.cover-personalisation-grid.two-column {
+  gap: 18px;
+}
+
+@media (min-width: 640px) {
+  .cover-personalisation-grid.two-column {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  .cover-personalisation-grid:not(.two-column) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.cover-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cover-form-field label {
+  font-weight: 600;
+  color: #0f172a;
+}
+
 
 .cover-carousel-stage {
   min-height: clamp(300px, 40vw, 460px);

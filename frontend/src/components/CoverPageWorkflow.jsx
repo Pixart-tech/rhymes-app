@@ -6,6 +6,10 @@ import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { Skeleton } from './ui/skeleton';
+
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+
 import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 
 const GRADE_LABELS = {
@@ -47,8 +51,8 @@ const buildSelectionKey = (themeId, colourId) => {
   }
 
   return `${normalizeToken(themeId)}.${normalizeToken(colourId)}`;
-};
 
+};
 const joinUrl = (baseUrl, path) => {
   if (!baseUrl) {
     return path;
@@ -64,10 +68,14 @@ const extractFileName = (entry) => {
     return '';
   }
 
+
+};
+
   if (typeof entry === 'string') {
     const clean = entry.trim();
     if (!clean) {
       return '';
+
     }
     const segments = clean.split(/[\\/]/);
     return segments[segments.length - 1] || '';
@@ -201,6 +209,136 @@ const resolveErrorMessage = (error) => {
   return 'An unexpected error occurred.';
 };
 
+const PERSONALISATION_TARGETS = {
+  schoolLogo: ['#school-logo', '[data-cover-binding="school-logo"]'],
+  gradeName: ['#grade-name', '[data-cover-binding="grade-name"]'],
+  kidName: ['#kid-name', '[data-cover-binding="kid-name"]'],
+  addressLine1: ['#address-line-1', '[data-cover-binding="address-line-1"]'],
+  addressLine2: ['#address-line-2', '[data-cover-binding="address-line-2"]'],
+  addressLine3: ['#address-line-3', '[data-cover-binding="address-line-3"]'],
+  contactNumber: ['#contact-number', '[data-cover-binding="contact-number"]']
+};
+
+const collectNodes = (doc, selectors = []) => {
+  if (!doc || !Array.isArray(selectors)) {
+    return [];
+  }
+
+  const results = [];
+  selectors.forEach((selector) => {
+    if (!selector) {
+      return;
+    }
+
+    const found = doc.querySelectorAll(selector);
+    found.forEach((node) => {
+      if (!results.includes(node)) {
+        results.push(node);
+      }
+    });
+  });
+
+  return results;
+};
+
+const updateNodeText = (nodes, value) => {
+  const textValue = value ?? '';
+  nodes.forEach((node) => {
+    if (!node) {
+      return;
+    }
+
+    node.textContent = textValue;
+  });
+};
+
+const updateNodeImage = (nodes, value) => {
+  const imageValue = value ?? '';
+
+  nodes.forEach((node) => {
+    if (!node) {
+      return;
+    }
+
+    if (imageValue) {
+      node.setAttribute('href', imageValue);
+      node.setAttribute('xlink:href', imageValue);
+      if (typeof node.setAttributeNS === 'function') {
+        try {
+          node.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageValue);
+        } catch (error) {
+          // Ignore namespace errors in older browsers.
+        }
+      }
+
+      if (node.tagName?.toLowerCase() === 'image') {
+        node.setAttribute('preserveAspectRatio', node.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+      }
+
+      const imgChild = node.tagName?.toLowerCase() === 'image' ? null : node.querySelector('img');
+      if (imgChild) {
+        imgChild.setAttribute('src', imageValue);
+      }
+    } else {
+      node.removeAttribute('href');
+      node.removeAttribute('xlink:href');
+      if (typeof node.removeAttributeNS === 'function') {
+        try {
+          node.removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        } catch (error) {
+          // Ignore namespace errors in older browsers.
+        }
+      }
+
+      const imgChild = node.tagName?.toLowerCase() === 'image' ? null : node.querySelector('img');
+      if (imgChild) {
+        imgChild.removeAttribute('src');
+      }
+    }
+  });
+};
+
+const applyPersonalisationToSvg = (svgMarkup, personalisation) => {
+  if (!svgMarkup || typeof svgMarkup !== 'string') {
+    return '';
+  }
+
+  if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
+    return svgMarkup;
+  }
+
+  try {
+    const parser = new window.DOMParser();
+    const doc = parser.parseFromString(svgMarkup, 'image/svg+xml');
+    const svgElement = doc?.documentElement;
+
+    if (!svgElement || svgElement.nodeName.toLowerCase() !== 'svg') {
+      return svgMarkup;
+    }
+
+    const { schoolLogo, gradeName, kidName, addressLine1, addressLine2, addressLine3, contactNumber } =
+      personalisation || {};
+
+    updateNodeImage(collectNodes(svgElement, PERSONALISATION_TARGETS.schoolLogo), schoolLogo);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.gradeName), gradeName);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.kidName), kidName);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine1), addressLine1);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine2), addressLine2);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine3), addressLine3);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.contactNumber), contactNumber);
+
+    if (typeof XMLSerializer === 'undefined') {
+      return svgMarkup;
+    }
+
+    const serializer = new XMLSerializer();
+    return serializer.serializeToString(svgElement);
+  } catch (error) {
+    return svgMarkup;
+  }
+
+ }
+   
 const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogout }) => {
   const manifestUrl = process.env.REACT_APP_COVER_ASSETS_MANIFEST_URL;
   const baseAssetsUrl = process.env.REACT_APP_COVER_ASSETS_BASE_URL;
@@ -216,12 +354,43 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   const [carouselAssets, setCarouselAssets] = useState([]);
   const [assetError, setAssetError] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
+  const [personalisation, setPersonalisation] = useState({
+    schoolLogo: '',
+    gradeName: '',
+    kidName: '',
+    addressLine1: '',
+    addressLine2: '',
+    addressLine3: '',
+    contactNumber: ''
+  });
+  const [gradeNameDirty, setGradeNameDirty] = useState(false);
 
   const assetCacheRef = useRef(new Map());
 
   const gradeLabel = useMemo(() => {
     return GRADE_LABELS[grade] || grade?.toUpperCase() || 'Grade';
   }, [grade]);
+
+
+  useEffect(() => {
+    if (!gradeLabel) {
+      return;
+    }
+
+    setPersonalisation((current) => {
+      if (gradeNameDirty) {
+        return current;
+      }
+
+      if (current.gradeName === gradeLabel) {
+        return current;
+      }
+
+      return { ...current, gradeName: gradeLabel };
+    });
+  }, [gradeLabel, gradeNameDirty]);
+
+
 
   const selectedTheme = useMemo(
     () => THEME_OPTIONS.find((theme) => theme.id === selectedThemeId) || null,
@@ -280,6 +449,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
       setCarouselAssets([]);
       setAssetError('');
       setActiveIndex(0);
+
       return;
     }
 
@@ -299,6 +469,11 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
       setActiveIndex(0);
       return;
     }
+
+
+     
+
+
 
     let isCancelled = false;
 
@@ -353,36 +528,97 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
           setIsFetchingAssets(false);
         }
       }
+
     };
 
     loadAssets();
 
     return () => {
       isCancelled = true;
+
     };
   }, [selectedTheme, selectedColour, availableAssets]);
 
+  const trimmedPersonalisation = useMemo(
+    () => ({
+      schoolLogo: personalisation.schoolLogo.trim(),
+      gradeName: personalisation.gradeName.trim(),
+      kidName: personalisation.kidName.trim(),
+      addressLine1: personalisation.addressLine1.trim(),
+      addressLine2: personalisation.addressLine2.trim(),
+      addressLine3: personalisation.addressLine3.trim(),
+      contactNumber: personalisation.contactNumber.trim()
+    }),
+    [personalisation]
+  );
+
+  const isPersonalisationComplete = useMemo(() => {
+    return Object.values(trimmedPersonalisation).every((value) => value.length > 0);
+  }, [trimmedPersonalisation]);
+
+  const personalisedAssets = useMemo(() => {
+    if (!carouselAssets.length) {
+      return [];
+    }
+
+    return carouselAssets.map((asset) => ({
+      ...asset,
+      personalisedMarkup: applyPersonalisationToSvg(asset.svgMarkup, trimmedPersonalisation)
+    }));
+  }, [carouselAssets, trimmedPersonalisation]);
+
+  const displayedAssets = isPersonalisationComplete ? personalisedAssets : [];
+  const displayedAssetsLength = displayedAssets.length;
+
   const handlePrev = useCallback(() => {
     setActiveIndex((current) => {
-      if (carouselAssets.length === 0) {
+      if (displayedAssetsLength === 0) {
         return 0;
       }
 
-      return (current - 1 + carouselAssets.length) % carouselAssets.length;
+      return (current - 1 + displayedAssetsLength) % displayedAssetsLength;
     });
-  }, [carouselAssets.length]);
+  }, [displayedAssetsLength]);
 
   const handleNext = useCallback(() => {
     setActiveIndex((current) => {
-      if (carouselAssets.length === 0) {
+      if (displayedAssetsLength === 0) {
         return 0;
       }
 
-      return (current + 1) % carouselAssets.length;
+      return (current + 1) % displayedAssetsLength;
     });
-  }, [carouselAssets.length]);
+  }, [displayedAssetsLength]);
 
-  const activeAsset = carouselAssets[activeIndex] || null;
+  useEffect(() => {
+    if (activeIndex >= displayedAssetsLength && displayedAssetsLength > 0) {
+      setActiveIndex(0);
+      return;
+    }
+
+    if (displayedAssetsLength === 0 && activeIndex !== 0) {
+      setActiveIndex(0);
+    }
+  }, [activeIndex, displayedAssetsLength]);
+
+  const handlePersonalisationChange = useCallback(
+    (field) => (event) => {
+      const value = event?.target?.value ?? '';
+      setPersonalisation((current) => ({
+        ...current,
+        [field]: value
+      }));
+
+      if (field === 'gradeName') {
+        setGradeNameDirty(true);
+      }
+    },
+    []
+  );
+
+  const activeAsset = displayedAssets[activeIndex] || null;
+
+  
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
@@ -452,6 +688,93 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                       </button>
                     );
                   })}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-xl shadow-orange-100/60">
+              <CardHeader className="space-y-2">
+
+                <CardTitle className="text-xl font-semibold text-slate-900">Cover details</CardTitle>
+                <p className="text-sm text-slate-600">
+                  Personalise the cover by filling in the school information below. The values you enter
+                  will be merged into the SVG artwork before it appears in the carousel.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="cover-personalisation-grid two-column">
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-school-logo">School logo URL</Label>
+                    <Input
+                      id="cover-school-logo"
+                      type="url"
+                      inputMode="url"
+                      placeholder="https://example.com/logo.png"
+                      value={personalisation.schoolLogo}
+                      onChange={handlePersonalisationChange('schoolLogo')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-grade-name">Grade name</Label>
+                    <Input
+                      id="cover-grade-name"
+                      placeholder="e.g. UKG"
+                      value={personalisation.gradeName}
+                      onChange={handlePersonalisationChange('gradeName')}
+                    />
+                  </div>
+                </div>
+
+                <div className="cover-form-field">
+                  <Label htmlFor="cover-kid-name">Kid name</Label>
+                  <Input
+                    id="cover-kid-name"
+                    placeholder="Enter kid name"
+                    value={personalisation.kidName}
+                    onChange={handlePersonalisationChange('kidName')}
+                  />
+                </div>
+
+                <div className="cover-personalisation-grid">
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-address-line-1">Address line 1</Label>
+                    <Input
+                      id="cover-address-line-1"
+                      placeholder="Address line 1"
+                      value={personalisation.addressLine1}
+                      onChange={handlePersonalisationChange('addressLine1')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-address-line-2">Address line 2</Label>
+                    <Input
+                      id="cover-address-line-2"
+                      placeholder="Address line 2"
+                      value={personalisation.addressLine2}
+                      onChange={handlePersonalisationChange('addressLine2')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-address-line-3">Address line 3</Label>
+                    <Input
+                      id="cover-address-line-3"
+                      placeholder="Address line 3"
+                      value={personalisation.addressLine3}
+                      onChange={handlePersonalisationChange('addressLine3')}
+                    />
+                  </div>
+                </div>
+
+                <div className="cover-form-field">
+                  <Label htmlFor="cover-contact-number">School contact number</Label>
+                  <Input
+                    id="cover-contact-number"
+                    type="tel"
+                    inputMode="tel"
+                    placeholder="Contact number"
+                    value={personalisation.contactNumber}
+                    onChange={handlePersonalisationChange('contactNumber')}
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -531,26 +854,46 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                 </div>
               )}
 
-              {!isFetchingAssets && !assetError && selectedTheme && selectedColour && carouselAssets.length === 0 && (
-                <div className="cover-carousel-empty">
-                  <p className="text-sm text-slate-500">
-                    No cover artwork has been uploaded yet for this combination.
-                  </p>
-                </div>
+              {!isFetchingAssets &&
+                !assetError &&
+                selectedTheme &&
+                selectedColour &&
+                carouselAssets.length > 0 &&
+                !isPersonalisationComplete && (
+                  <div className="cover-carousel-empty">
+                    <p className="text-sm text-slate-500">
+                      Enter the school logo, grade name, kid name, address lines, and contact number to
+                      personalise the covers.
+                    </p>
+                  </div>
+                )}
+
+              {!isFetchingAssets &&
+                !assetError &&
+                selectedTheme &&
+                selectedColour &&
+                carouselAssets.length === 0 && (
+                  <div className="cover-carousel-empty">
+                    <p className="text-sm text-slate-500">
+                      No cover artwork has been uploaded yet for this combination.
+                    </p>
+                  </div>
               )}
 
-              {!isFetchingAssets && !assetError && carouselAssets.length > 0 && activeAsset && (
+              {!isFetchingAssets && !assetError && displayedAssetsLength > 0 && activeAsset && (
                 <div className="space-y-4">
                   <div className="cover-carousel-stage">
                     <div
                       className="cover-carousel-svg"
-                      dangerouslySetInnerHTML={{ __html: activeAsset.svgMarkup }}
+                      dangerouslySetInnerHTML={{
+                        __html: activeAsset.personalisedMarkup || activeAsset.svgMarkup
+                      }}
                     />
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
                     <span className="font-medium text-slate-700">{activeAsset.fileName}</span>
-                    {carouselAssets.length > 1 && (
+                    {displayedAssetsLength > 1 && (
                       <div className="cover-carousel-controls">
                         <Button
                           type="button"
@@ -563,7 +906,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                           <ChevronLeft className="h-5 w-5" />
                         </Button>
                         <span className="text-sm font-medium text-slate-700">
-                          {activeIndex + 1} of {carouselAssets.length}
+                          {activeIndex + 1} of {displayedAssetsLength}
                         </span>
                         <Button
                           type="button"
@@ -579,9 +922,10 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                     )}
                   </div>
 
-                  {carouselAssets.length > 1 && (
+                  {displayedAssetsLength > 1 && (
                     <div className="cover-carousel-indicators">
-                      {carouselAssets.map((asset, index) => (
+                      {displayedAssets.map((asset, index) => 
+               
                         <button
                           key={asset.url || asset.fileName || index}
                           type="button"
