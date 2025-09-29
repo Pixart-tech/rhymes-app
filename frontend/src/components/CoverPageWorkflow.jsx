@@ -6,8 +6,10 @@ import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { Skeleton } from './ui/skeleton';
+
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+
 import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 
 const GRADE_LABELS = {
@@ -49,8 +51,8 @@ const buildSelectionKey = (themeId, colourId) => {
   }
 
   return `${normalizeToken(themeId)}.${normalizeToken(colourId)}`;
-};
 
+};
 const joinUrl = (baseUrl, path) => {
   if (!baseUrl) {
     return path;
@@ -66,10 +68,14 @@ const extractFileName = (entry) => {
     return '';
   }
 
+
+};
+
   if (typeof entry === 'string') {
     const clean = entry.trim();
     if (!clean) {
       return '';
+
     }
     const segments = clean.split(/[\\/]/);
     return segments[segments.length - 1] || '';
@@ -330,8 +336,9 @@ const applyPersonalisationToSvg = (svgMarkup, personalisation) => {
   } catch (error) {
     return svgMarkup;
   }
-};
 
+ }
+   
 const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogout }) => {
   const manifestUrl = process.env.REACT_APP_COVER_ASSETS_MANIFEST_URL;
   const baseAssetsUrl = process.env.REACT_APP_COVER_ASSETS_BASE_URL;
@@ -364,6 +371,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     return GRADE_LABELS[grade] || grade?.toUpperCase() || 'Grade';
   }, [grade]);
 
+
   useEffect(() => {
     if (!gradeLabel) {
       return;
@@ -381,6 +389,8 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
       return { ...current, gradeName: gradeLabel };
     });
   }, [gradeLabel, gradeNameDirty]);
+
+
 
   const selectedTheme = useMemo(
     () => THEME_OPTIONS.find((theme) => theme.id === selectedThemeId) || null,
@@ -439,6 +449,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
       setCarouselAssets([]);
       setAssetError('');
       setActiveIndex(0);
+
       return;
     }
 
@@ -458,6 +469,11 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
       setActiveIndex(0);
       return;
     }
+
+
+     
+
+
 
     let isCancelled = false;
 
@@ -512,12 +528,14 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
           setIsFetchingAssets(false);
         }
       }
+
     };
 
     loadAssets();
 
     return () => {
       isCancelled = true;
+
     };
   }, [selectedTheme, selectedColour, availableAssets]);
 
@@ -600,6 +618,8 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
 
   const activeAsset = displayedAssets[activeIndex] || null;
 
+  
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
       <div className="mx-auto max-w-6xl space-y-8">
@@ -674,6 +694,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
 
             <Card className="border-none shadow-xl shadow-orange-100/60">
               <CardHeader className="space-y-2">
+
                 <CardTitle className="text-xl font-semibold text-slate-900">Cover details</CardTitle>
                 <p className="text-sm text-slate-600">
                   Personalise the cover by filling in the school information below. The values you enter
@@ -903,7 +924,8 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
 
                   {displayedAssetsLength > 1 && (
                     <div className="cover-carousel-indicators">
-                      {displayedAssets.map((asset, index) => (
+                      {displayedAssets.map((asset, index) => 
+               
                         <button
                           key={asset.url || asset.fileName || index}
                           type="button"
