@@ -366,7 +366,14 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   });
   const [gradeNameDirty, setGradeNameDirty] = useState(false);
 
+  const [currentStep, setCurrentStep] = useState(1);
+  const [hasSubmittedDetails, setHasSubmittedDetails] = useState(false);
+
   const assetCacheRef = useRef(new Map());
+  const selectionSnapshotRef = useRef({
+    theme: null,
+    colour: null
+  });
 
   const gradeLabel = useMemo(() => {
     return GRADE_LABELS[grade] || grade?.toUpperCase() || 'Grade';
@@ -391,7 +398,21 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     });
   }, [gradeLabel, gradeNameDirty]);
 
+  useEffect(() => {
+    const previous = selectionSnapshotRef.current;
+    if (
+      hasSubmittedDetails &&
+      (selectedThemeId !== previous.theme || selectedColourId !== previous.colour)
+    ) {
+      setHasSubmittedDetails(false);
+      setCurrentStep(1);
+    }
 
+    selectionSnapshotRef.current = {
+      theme: selectedThemeId,
+      colour: selectedColourId
+    };
+  }, [selectedThemeId, selectedColourId, hasSubmittedDetails]);
 
   const selectedTheme = useMemo(
     () => THEME_OPTIONS.find((theme) => theme.id === selectedThemeId) || null,
@@ -613,13 +634,58 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
       if (field === 'gradeName') {
         setGradeNameDirty(true);
       }
+
+      if (hasSubmittedDetails) {
+        setHasSubmittedDetails(false);
+      }
     },
-    []
+    [hasSubmittedDetails]
   );
 
   const activeAsset = displayedAssets[activeIndex] || null;
 
-  
+  const canProceedToDetails = Boolean(selectedTheme && selectedColour);
+  const canSubmitDetails = Boolean(isPersonalisationComplete && canProceedToDetails);
+
+  const handleThemeContinue = useCallback(() => {
+    if (!canProceedToDetails) {
+      return;
+    }
+
+    setCurrentStep(2);
+  }, [canProceedToDetails]);
+
+  const handleBackToSelection = useCallback(() => {
+    setCurrentStep(1);
+    setHasSubmittedDetails(false);
+  }, []);
+
+  const handleEditDetails = useCallback(() => {
+    setCurrentStep(2);
+    setHasSubmittedDetails(false);
+  }, []);
+
+  const handlePersonalisationSubmit = useCallback(
+    (event) => {
+      event.preventDefault();
+
+      if (!canSubmitDetails) {
+        return;
+      }
+
+      setHasSubmittedDetails(true);
+      setCurrentStep(3);
+    },
+    [canSubmitDetails]
+  );
+
+  const stepLabels = [
+    'Select theme & colour',
+    'Enter cover details',
+    'Preview covers'
+  ];
+  const currentStepLabel = stepLabels[currentStep - 1] || stepLabels[0];
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
@@ -646,8 +712,31 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
           </div>
         </div>
 
-        <div className="cover-workflow-layout">
-          <div className="space-y-4">
+
+        <Card className="border-none bg-white/70 shadow-md shadow-orange-100/40">
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-orange-500">
+                Step {currentStep} of 3
+              </p>
+              <p className="text-base font-semibold text-slate-800">{currentStepLabel}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-slate-700">Theme:</span>
+                <span>{selectedTheme ? selectedTheme.label : 'Not selected'}</span>
+              </div>
+              <Separator orientation="vertical" className="hidden h-4 sm:block" />
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-slate-700">Colour:</span>
+                <span>{selectedColour ? selectedColour.label : 'Not selected'}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {currentStep === 1 && (
+          <div className="space-y-6">
             <Card className="border-none shadow-xl shadow-orange-100/60">
               <CardHeader className="space-y-2">
                 <CardTitle className="text-xl font-semibold text-slate-900">Select a theme</CardTitle>
@@ -695,7 +784,56 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
 
             <Card className="border-none shadow-xl shadow-orange-100/60">
               <CardHeader className="space-y-2">
+                <CardTitle className="text-xl font-semibold text-slate-900">Choose a colour</CardTitle>
+                <p className="text-sm text-slate-600">
+                  Every theme provides the same four colour families. Select a colour to load matching
+                  cover artwork.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="cover-colour-grid">
+                  {COLOUR_OPTIONS.map((colour) => {
+                    const isSelected = selectedColourId === colour.id;
+                    return (
+                      <button
+                        key={colour.id}
+                        type="button"
+                        onClick={() => setSelectedColourId(colour.id)}
+                        className={`cover-colour-chip${isSelected ? ' is-active' : ''}`}
+                        style={{ backgroundColor: colour.hex }}
+                        aria-pressed={isSelected}
+                        aria-label={`${colour.label} ${colour.hex}`}
+                      >
+                        <span className="cover-colour-chip-label">{colour.label}</span>
+                        <span className="cover-colour-chip-hex">{colour.hex}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
 
+            <div className="flex justify-end">
+              <Button type="button" onClick={handleThemeContinue} disabled={!canProceedToDetails}>
+                Continue to details
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {currentStep === 2 && (
+          <form onSubmit={handlePersonalisationSubmit} className="space-y-6">
+            <Card className="border-none bg-white/80 shadow-sm shadow-orange-100/40">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm text-slate-600">
+                <p>Complete the school details below to personalise every cover automatically.</p>
+                <Button type="button" variant="outline" onClick={handleBackToSelection}>
+                  Change theme or colour
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-xl shadow-orange-100/60">
+              <CardHeader className="space-y-2">
                 <CardTitle className="text-xl font-semibold text-slate-900">Cover details</CardTitle>
                 <p className="text-sm text-slate-600">
                   Personalise the cover by filling in the school information below. The values you enter
@@ -724,19 +862,15 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                       onChange={handlePersonalisationChange('gradeName')}
                     />
                   </div>
-                </div>
-
-                <div className="cover-form-field">
-                  <Label htmlFor="cover-kid-name">Kid name</Label>
-                  <Input
-                    id="cover-kid-name"
-                    placeholder="Enter kid name"
-                    value={personalisation.kidName}
-                    onChange={handlePersonalisationChange('kidName')}
-                  />
-                </div>
-
-                <div className="cover-personalisation-grid">
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-kid-name">Kid name</Label>
+                    <Input
+                      id="cover-kid-name"
+                      placeholder="Kid name"
+                      value={personalisation.kidName}
+                      onChange={handlePersonalisationChange('kidName')}
+                    />
+                  </div>
                   <div className="cover-form-field">
                     <Label htmlFor="cover-address-line-1">Address line 1</Label>
                     <Input
@@ -780,168 +914,144 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
               </CardContent>
             </Card>
 
-            <Card className="border-none shadow-xl shadow-orange-100/60">
-              <CardHeader className="space-y-2">
-                <CardTitle className="text-xl font-semibold text-slate-900">Choose a colour</CardTitle>
-                <p className="text-sm text-slate-600">
-                  Every theme provides the same four colour families. Select a colour to load matching
-                  cover artwork.
-                </p>
-              </CardHeader>
-              <CardContent>
-                <div className="cover-colour-grid">
-                  {COLOUR_OPTIONS.map((colour) => {
-                    const isSelected = selectedColourId === colour.id;
-                    return (
-                      <button
-                        key={colour.id}
-                        type="button"
-                        onClick={() => setSelectedColourId(colour.id)}
-                        className={`cover-colour-chip${isSelected ? ' is-active' : ''}`}
-                        style={{ backgroundColor: colour.hex }}
-                        aria-pressed={isSelected}
-                        aria-label={`${colour.label} ${colour.hex}`}
-                      >
-                        <span className="cover-colour-chip-label">{colour.label}</span>
-                        <span className="cover-colour-chip-hex">{colour.hex}</span>
-                      </button>
-                    );
-                  })}
+            <div className="flex flex-wrap justify-between gap-3">
+              <Button type="button" variant="outline" onClick={handleBackToSelection}>
+                Back
+              </Button>
+              <Button type="submit" disabled={!canSubmitDetails}>
+                Submit &amp; preview
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {currentStep === 3 && (
+          <div className="space-y-6">
+            {hasSubmittedDetails && (
+              <Alert className="border-emerald-200 bg-emerald-50 text-emerald-800">
+                <AlertTitle>Displaying preview</AlertTitle>
+                <AlertDescription>
+                  Your personalised covers are ready. Use the carousel below to review each design.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <Card className="border-none bg-white/80 shadow-sm shadow-orange-100/40">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm text-slate-600">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-slate-700">Theme:</span>
+                    <span>{selectedTheme ? selectedTheme.label : 'Not selected'}</span>
+                  </div>
+                  <Separator orientation="vertical" className="hidden h-4 sm:block" />
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-slate-700">Colour:</span>
+                    <span>{selectedColour ? selectedColour.label : 'Not selected'}</span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={handleEditDetails}>
+                    Edit details
+                  </Button>
+                  <Button type="button" variant="outline" onClick={handleBackToSelection}>
+                    Change theme
+                  </Button>
                 </div>
               </CardContent>
             </Card>
-          </div>
 
-          <Card className="border-none shadow-xl shadow-orange-100/60">
-            <CardHeader className="space-y-2">
-              <CardTitle className="text-xl font-semibold text-slate-900">Cover previews</CardTitle>
-              <p className="text-sm text-slate-600">
-                Select a theme and colour to fetch every matching SVG cover file. The carousel below lets
-                you browse the available designs without any extra menus.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-slate-800">Theme:</span>
-                  <span>{selectedTheme ? selectedTheme.label : '—'}</span>
-                </div>
-                <Separator orientation="vertical" className="hidden h-4 sm:block" />
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-slate-800">Colour:</span>
-                  <span>{selectedColour ? selectedColour.label : '—'}</span>
-                </div>
-              </div>
-
-              {isFetchingAssets && (
-                <div className="cover-carousel-stage">
-                  <Skeleton className="h-full w-full" />
-                </div>
-              )}
-
-              {!isFetchingAssets && assetError && (
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertTitle>Unable to load covers</AlertTitle>
-                  <AlertDescription>{assetError}</AlertDescription>
-                </Alert>
-              )}
-
-              {!isFetchingAssets && !assetError && (!selectedTheme || !selectedColour) && (
-                <div className="cover-carousel-empty">
-                  <p className="text-sm text-slate-500">
-                    Choose both a theme and a colour to load the available cover designs.
-                  </p>
-                </div>
-              )}
-
-              {!isFetchingAssets &&
-                !assetError &&
-                selectedTheme &&
-                selectedColour &&
-                carouselAssets.length > 0 &&
-                !isPersonalisationComplete && (
-                  <div className="cover-carousel-empty">
-                    <p className="text-sm text-slate-500">
-                      Enter the school logo, grade name, kid name, address lines, and contact number to
-                      personalise the covers.
-                    </p>
+            <Card className="border-none shadow-xl shadow-orange-100/60">
+              <CardHeader className="space-y-2">
+                <CardTitle className="text-xl font-semibold text-slate-900">Cover previews</CardTitle>
+                <p className="text-sm text-slate-600">
+                  Browse the personalised artwork using the carousel controls below.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {isFetchingAssets && (
+                  <div className="cover-carousel-stage">
+                    <Skeleton className="h-full w-full" />
                   </div>
                 )}
 
-              {!isFetchingAssets &&
-                !assetError &&
-                selectedTheme &&
-                selectedColour &&
-                carouselAssets.length === 0 && (
+                {!isFetchingAssets && assetError && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Unable to load covers</AlertTitle>
+                    <AlertDescription>{assetError}</AlertDescription>
+                  </Alert>
+                )}
+
+                {!isFetchingAssets && !assetError && carouselAssets.length === 0 && (
                   <div className="cover-carousel-empty">
                     <p className="text-sm text-slate-500">
                       No cover artwork has been uploaded yet for this combination.
                     </p>
                   </div>
-              )}
+                )}
 
-              {!isFetchingAssets && !assetError && displayedAssetsLength > 0 && activeAsset && (
-                <div className="space-y-4">
-                  <div className="cover-carousel-stage">
-                    <div
-                      className="cover-carousel-svg"
-                      dangerouslySetInnerHTML={{
-                        __html: activeAsset.personalisedMarkup || activeAsset.svgMarkup
-                      }}
-                    />
-                  </div>
+                {!isFetchingAssets && !assetError && displayedAssetsLength > 0 && activeAsset && (
+                  <div className="space-y-4">
+                    <div className="cover-carousel-stage">
+                      <div
+                        className="cover-carousel-svg"
+                        dangerouslySetInnerHTML={{
+                          __html: activeAsset.personalisedMarkup || activeAsset.svgMarkup
+                        }}
+                      />
+                    </div>
 
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
-                    <span className="font-medium text-slate-700">{activeAsset.fileName}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+                      <span className="font-medium text-slate-700">{activeAsset.fileName}</span>
+                      {displayedAssetsLength > 1 && (
+                        <div className="cover-carousel-controls">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={handlePrev}
+                            className="bg-white"
+                            aria-label="Previous cover"
+                          >
+                            <ChevronLeft className="h-5 w-5" />
+                          </Button>
+                          <span className="text-sm font-medium text-slate-700">
+                            {activeIndex + 1} of {displayedAssetsLength}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={handleNext}
+                            className="bg-white"
+                            aria-label="Next cover"
+                          >
+                            <ChevronRight className="h-5 w-5" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
                     {displayedAssetsLength > 1 && (
-                      <div className="cover-carousel-controls">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={handlePrev}
-                          className="bg-white"
-                          aria-label="Previous cover"
-                        >
-                          <ChevronLeft className="h-5 w-5" />
-                        </Button>
-                        <span className="text-sm font-medium text-slate-700">
-                          {activeIndex + 1} of {displayedAssetsLength}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={handleNext}
-                          className="bg-white"
-                          aria-label="Next cover"
-                        >
-                          <ChevronRight className="h-5 w-5" />
-                        </Button>
+                      <div className="cover-carousel-indicators">
+                        {displayedAssets.map((asset, index) => (
+                          <button
+                            key={asset.url || asset.fileName || index}
+                            type="button"
+                            onClick={() => setActiveIndex(index)}
+                            className={`cover-carousel-indicator${index === activeIndex ? ' is-active' : ''}`}
+                            aria-label={`Go to cover ${index + 1}`}
+                          />
+                        ))}
                       </div>
                     )}
                   </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
-                  {displayedAssetsLength > 1 && (
-                    <div className="cover-carousel-indicators">
-                      {displayedAssets.map((asset, index) => 
-               
-                        <button
-                          key={asset.url || asset.fileName || index}
-                          type="button"
-                          onClick={() => setActiveIndex(index)}
-                          className={`cover-carousel-indicator${index === activeIndex ? ' is-active' : ''}`}
-                          aria-label={`Go to cover ${index + 1}`}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
       </div>
     </div>
   );
