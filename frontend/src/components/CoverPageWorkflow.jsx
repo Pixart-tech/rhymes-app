@@ -843,10 +843,10 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
               <CardContent className="space-y-4">
                 <div className="cover-personalisation-grid two-column">
                   <div className="cover-form-field">
-                    <Label htmlFor="cover-school-logo">School logo URL</Label>
+                    <Label htmlFor="cover-school-logo">Upload School logo </Label>
                     <Input
                       id="cover-school-logo"
-                      type="url"
+                      type="file"
                       inputMode="url"
                       placeholder="https://example.com/logo.png"
                       value={personalisation.schoolLogo}
