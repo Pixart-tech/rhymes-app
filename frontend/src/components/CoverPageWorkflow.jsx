@@ -75,7 +75,6 @@ const extractFileName = (entry) => {
     const clean = entry.trim();
     if (!clean) {
       return '';
-
     }
     const segments = clean.split(/[\\/]/);
     return segments[segments.length - 1] || '';
