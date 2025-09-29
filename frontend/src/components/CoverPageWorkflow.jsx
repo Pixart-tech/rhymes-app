@@ -69,7 +69,7 @@ const extractFileName = (entry) => {
   }
 
 
-};
+
 
   if (typeof entry === 'string') {
     const clean = entry.trim();
