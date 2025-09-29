@@ -339,8 +339,10 @@ const applyPersonalisationToSvg = (svgMarkup, personalisation) => {
  }
    
 const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogout }) => {
-  const manifestUrl = process.env.REACT_APP_COVER_ASSETS_MANIFEST_URL;
-  const baseAssetsUrl = process.env.REACT_APP_COVER_ASSETS_BASE_URL;
+  const manifestUrl =
+    process.env.REACT_APP_COVER_ASSETS_MANIFEST_URL || '/api/cover-assets/manifest';
+  const baseAssetsUrl =
+    process.env.REACT_APP_COVER_ASSETS_BASE_URL || '/api/cover-assets/svg';
 
   const [manifestLoading, setManifestLoading] = useState(false);
   const [manifestError, setManifestError] = useState('');

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from typing import Callable, List, Dict, Optional, Any, Tuple, Literal
 from io import BytesIO
 from functools import lru_cache
+from urllib.parse import quote
 
 import uuid
 from datetime import datetime
@@ -38,6 +39,73 @@ def _resolve_svg_base_path() -> Optional[Path]:
 
 
 RHYME_SVG_BASE_PATH = _resolve_svg_base_path()
+
+
+def _resolve_cover_svg_base_path() -> Optional[Path]:
+    """Return the configured base path for cover SVG assets, if any."""
+
+    base_path = os.environ.get("COVER_SVG_BASE_PATH")
+    if not base_path:
+        return None
+
+    try:
+        return Path(base_path).expanduser()
+    except (OSError, RuntimeError) as exc:
+        logger.warning("Invalid COVER_SVG_BASE_PATH '%s': %s", base_path, exc)
+        return None
+
+
+COVER_SVG_BASE_PATH = _resolve_cover_svg_base_path()
+
+
+def _ensure_cover_assets_base_path() -> Path:
+    """Return the configured cover assets directory or raise an HTTP error."""
+
+    if COVER_SVG_BASE_PATH is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "COVER_SVG_BASE_PATH is not configured on the server. "
+                "Please set it to the directory containing the cover SVG files."
+            ),
+        )
+
+    if not COVER_SVG_BASE_PATH.exists() or not COVER_SVG_BASE_PATH.is_dir():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The configured COVER_SVG_BASE_PATH does not exist or is not a directory."
+            ),
+        )
+
+    return COVER_SVG_BASE_PATH
+
+
+def _build_cover_asset_manifest(base_path: Path) -> List[Dict[str, str]]:
+    """Build a manifest describing all SVG cover assets under ``base_path``."""
+
+    assets: List[Dict[str, str]] = []
+
+    for svg_path in sorted(base_path.rglob("*.svg")):
+        if not svg_path.is_file():
+            continue
+
+        try:
+            relative_path = svg_path.relative_to(base_path)
+        except ValueError:
+            # Skip files that fall outside the configured base directory.
+            continue
+
+        relative_posix = relative_path.as_posix()
+        assets.append(
+            {
+                "fileName": svg_path.name,
+                "path": relative_posix,
+                "url": f"/api/cover-assets/svg/{quote(relative_posix, safe='/')}",
+            }
+        )
+
+    return assets
 
 # MongoDB connection
 mongo_url = os.environ["MONGO_URL"]
@@ -674,6 +742,41 @@ async def get_rhyme_svg(rhyme_code: str):
             raise HTTPException(status_code=404, detail="Rhyme not found")
 
     return Response(content=svg_content, media_type="image/svg+xml")
+
+
+@api_router.get("/cover-assets/manifest")
+async def get_cover_assets_manifest():
+    """Return a manifest describing all available cover SVG assets."""
+
+    base_path = _ensure_cover_assets_base_path()
+    assets = _build_cover_asset_manifest(base_path)
+
+    return {"assets": assets}
+
+
+@api_router.get("/cover-assets/svg/{relative_path:path}")
+async def get_cover_asset(relative_path: str):
+    """Return the raw SVG bytes for the cover asset ``relative_path``."""
+
+    base_path = _ensure_cover_assets_base_path()
+
+    candidate_path = (base_path / Path(relative_path)).resolve()
+
+    try:
+        candidate_path.relative_to(base_path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid cover asset path requested.")
+
+    if not candidate_path.exists() or not candidate_path.is_file():
+        raise HTTPException(status_code=404, detail="Cover asset not found.")
+
+    try:
+        svg_bytes = candidate_path.read_bytes()
+    except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+        logger.error("Unable to read cover SVG '%s': %s", candidate_path, exc)
+        raise HTTPException(status_code=500, detail="Unable to read cover asset.") from exc
+
+    return Response(content=svg_bytes, media_type="image/svg+xml")
 
 
 def _draw_text_only_rhyme(
