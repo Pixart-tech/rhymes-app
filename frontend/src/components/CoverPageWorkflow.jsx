@@ -1,11 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Button } from './ui/button';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Input } from './ui/input';
-import { Textarea } from './ui/textarea';
 import { Separator } from './ui/separator';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { Skeleton } from './ui/skeleton';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 
 const GRADE_LABELS = {
   nursery: 'Nursery',
@@ -14,437 +17,588 @@ const GRADE_LABELS = {
   playgroup: 'Playgroup'
 };
 
-const COVER_THEMES = [
+const THEME_OPTIONS = [
   {
-    id: 'nature-discovery',
-    name: 'Nature Discovery',
-    description: 'Soft botanical shapes and warm sunlight to welcome curious explorers.',
-    icon: '🌿',
-    colors: [
-      {
-        id: 'spring-harmony',
-        name: 'Spring Harmony',
-        stops: ['#34d399', '#22d3ee'],
-        accent: '#facc15',
-        background: '#f0fdfa',
-        text: '#064e3b'
-      },
-      {
-        id: 'sunny-meadow',
-        name: 'Sunny Meadow',
-        stops: ['#f97316', '#facc15'],
-        accent: '#fcd34d',
-        background: '#fff7ed',
-        text: '#92400e'
-      },
-      {
-        id: 'forest-mist',
-        name: 'Forest Mist',
-        stops: ['#0ea5e9', '#6366f1'],
-        accent: '#a5b4fc',
-        background: '#eef2ff',
-        text: '#1e293b'
-      },
-      {
-        id: 'petal-pop',
-        name: 'Petal Pop',
-        stops: ['#fb7185', '#f97316'],
-        accent: '#fda4af',
-        background: '#fff1f2',
-        text: '#831843'
-      }
-    ]
+    id: 'theme1',
+    label: 'Theme 1',
+    description: 'Soft introductory theme designed for playful, imaginative cover layouts.'
   },
   {
-    id: 'space-adventure',
-    name: 'Space Adventure',
-    description: 'A cosmic voyage filled with friendly planets and gleaming stars.',
-    icon: '🪐',
-    colors: [
-      {
-        id: 'starlight',
-        name: 'Starlight',
-        stops: ['#4338ca', '#7c3aed'],
-        accent: '#fbbf24',
-        background: '#eef2ff',
-        text: '#1f2937'
-      },
-      {
-        id: 'cosmic-dream',
-        name: 'Cosmic Dream',
-        stops: ['#4f46e5', '#0ea5e9'],
-        accent: '#38bdf8',
-        background: '#e0f2fe',
-        text: '#0f172a'
-      },
-      {
-        id: 'meteor-shower',
-        name: 'Meteor Shower',
-        stops: ['#c026d3', '#fb7185'],
-        accent: '#f472b6',
-        background: '#fdf4ff',
-        text: '#581c87'
-      },
-      {
-        id: 'aurora',
-        name: 'Aurora Glow',
-        stops: ['#2dd4bf', '#818cf8'],
-        accent: '#c4b5fd',
-        background: '#ecfeff',
-        text: '#064e3b'
-      }
-    ]
-  },
-  {
-    id: 'ocean-friends',
-    name: 'Ocean Friends',
-    description: 'Playful underwater scenes with bubbly waves and smiling sea creatures.',
-    icon: '🌊',
-    colors: [
-      {
-        id: 'sea-breeze',
-        name: 'Sea Breeze',
-        stops: ['#38bdf8', '#22d3ee'],
-        accent: '#a5f3fc',
-        background: '#ecfeff',
-        text: '#0f172a'
-      },
-      {
-        id: 'coral-reef',
-        name: 'Coral Reef',
-        stops: ['#f97316', '#f472b6'],
-        accent: '#f9a8d4',
-        background: '#fff7ed',
-        text: '#7c2d12'
-      },
-      {
-        id: 'deep-blue',
-        name: 'Deep Blue',
-        stops: ['#0f172a', '#1e40af'],
-        accent: '#38bdf8',
-        background: '#1d4ed8',
-        text: '#f8fafc'
-      },
-      {
-        id: 'lagoon',
-        name: 'Lagoon Glow',
-        stops: ['#22d3ee', '#10b981'],
-        accent: '#bbf7d0',
-        background: '#f0fdfa',
-        text: '#0f172a'
-      }
-    ]
-  },
-  {
-    id: 'joyful-shapes',
-    name: 'Joyful Shapes',
-    description: 'Bright geometric playtime with confetti patterns and bold colour pops.',
-    icon: '🎨',
-    colors: [
-      {
-        id: 'confetti',
-        name: 'Confetti Burst',
-        stops: ['#f97316', '#ef4444'],
-        accent: '#facc15',
-        background: '#fff7ed',
-        text: '#7c2d12'
-      },
-      {
-        id: 'bubblegum',
-        name: 'Bubblegum Pop',
-        stops: ['#fb7185', '#c084fc'],
-        accent: '#f0abfc',
-        background: '#fdf4ff',
-        text: '#701a75'
-      },
-      {
-        id: 'rainbow-sky',
-        name: 'Rainbow Sky',
-        stops: ['#22d3ee', '#f59e0b'],
-        accent: '#fde68a',
-        background: '#ecfeff',
-        text: '#0f172a'
-      },
-      {
-        id: 'candy-splash',
-        name: 'Candy Splash',
-        stops: ['#f472b6', '#6366f1'],
-        accent: '#c4b5fd',
-        background: '#fdf2f8',
-        text: '#701a75'
-      }
-    ]
+    id: 'theme2',
+    label: 'Theme 2',
+    description: 'Bold shapes and accents ideal for energetic class storytelling covers.'
   }
 ];
 
-const defaultFormValues = {
-  title: '',
-  studentName: '',
-  teacherName: '',
-  academicYear: '',
-  message: ''
-};
+const COLOUR_OPTIONS = [
+  { id: 'colour1', label: 'Colour 1', hex: '#eea0c6' },
+  { id: 'colour2', label: 'Colour 2', hex: '#8faedb' },
+  { id: 'colour3', label: 'Colour 3', hex: '#f9b475' },
+  { id: 'colour4', label: 'Colour 4', hex: '#c8e9f1' }
+];
 
-const wrapMessage = (message, maxChars = 32, maxLines = 3) => {
-  if (!message) {
-    return ['Add a special message to make this cover unique.'];
+const normalizeToken = (value) =>
+  (value ?? '')
+    .toString()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+
+const buildSelectionKey = (themeId, colourId) => {
+  if (!themeId || !colourId) {
+    return '';
   }
 
-  const words = message.split(/\s+/).filter(Boolean);
-  const lines = [];
-  let currentLine = '';
+  return `${normalizeToken(themeId)}.${normalizeToken(colourId)}`;
+};
 
-  words.forEach((word) => {
-    const tentative = currentLine ? `${currentLine} ${word}` : word;
-    if (tentative.length > maxChars && currentLine) {
-      lines.push(currentLine);
-      currentLine = word;
-    } else {
-      currentLine = tentative;
-    }
-  });
-
-  if (currentLine) {
-    lines.push(currentLine);
+const joinUrl = (baseUrl, path) => {
+  if (!baseUrl) {
+    return path;
   }
 
-  return lines.slice(0, maxLines);
+  const trimmedBase = baseUrl.replace(/\/+$/, '');
+  const trimmedPath = (path ?? '').replace(/^\/+/, '');
+  return `${trimmedBase}/${trimmedPath}`;
 };
 
-const formatGradeLabel = (gradeId) => GRADE_LABELS[gradeId] || gradeId;
-
-const buildSampleCover = (gradeId) => {
-  const theme = COVER_THEMES[0];
-  const colour = theme.colors[0];
-  const gradeLabel = formatGradeLabel(gradeId);
-
-  return {
-    id: `sample-${gradeId}`,
-    grade: gradeId,
-    isSample: true,
-    themeId: theme.id,
-    colorId: colour.id,
-    details: {
-      title: `${gradeLabel} Adventures`,
-      studentName: 'Student Name',
-      teacherName: 'Class Teacher',
-      academicYear: '2024 - 2025',
-      message: 'This is a sample preview. Submit real details to replace it.'
-    }
-  };
-};
-
-const CoverPreview = ({ cover, gradeLabel }) => {
-  if (!cover) {
-    return null;
+const extractFileName = (entry) => {
+  if (!entry) {
+    return '';
   }
 
-  const theme = COVER_THEMES.find((item) => item.id === cover.themeId) || COVER_THEMES[0];
-  const colour = theme.colors.find((item) => item.id === cover.colorId) || theme.colors[0];
-  const gradientId = `cover-gradient-${theme.id}-${colour.id}`;
-  const details = cover.details || {};
-  const title = details.title || `${gradeLabel} Adventures`;
-  const studentName = details.studentName || 'Student Name';
-  const teacherName = details.teacherName || 'Class Teacher';
-  const academicYear = details.academicYear || 'Academic Year';
-  const messageLines = wrapMessage(details.message);
-
-  return (
-    <svg viewBox="0 0 432 302" preserveAspectRatio="xMidYMid meet" role="img" aria-label={`Preview cover for ${gradeLabel}`}>
-      <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor={colour.stops[0]} />
-          <stop offset="100%" stopColor={colour.stops[1]} />
-        </linearGradient>
-      </defs>
-
-      <rect x="0" y="0" width="432" height="302" rx="28" fill={`url(#${gradientId})`} />
-      <rect x="16" y="16" width="400" height="270" rx="22" fill={colour.background} />
-
-      <circle cx="360" cy="60" r="38" fill={colour.accent} opacity="0.4" />
-      <circle cx="84" cy="80" r="36" fill={colour.accent} opacity="0.18" />
-
-      <text x="84" y="92" fontSize="46" textAnchor="middle" aria-hidden="true">
-        {theme.icon}
-      </text>
-
-      <text x="216" y="110" fontFamily="'Inter', sans-serif" fontSize="28" fontWeight="700" textAnchor="middle" fill={colour.text}>
-        {title}
-      </text>
-
-      <text x="216" y="140" fontFamily="'Inter', sans-serif" fontSize="16" textAnchor="middle" fill={colour.text} opacity="0.75">
-        {gradeLabel}
-      </text>
-
-      <rect x="40" y="156" width="352" height="2" fill={colour.accent} opacity="0.35" />
-
-      <text x="56" y="182" fontFamily="'Inter', sans-serif" fontSize="14" fontWeight="600" fill={colour.text}>
-        Student
-      </text>
-      <text x="56" y="200" fontFamily="'Inter', sans-serif" fontSize="16" fill={colour.text}>
-        {studentName || '—'}
-      </text>
-
-      <text x="216" y="182" fontFamily="'Inter', sans-serif" fontSize="14" fontWeight="600" textAnchor="middle" fill={colour.text}>
-        Academic Year
-      </text>
-      <text x="216" y="200" fontFamily="'Inter', sans-serif" fontSize="16" textAnchor="middle" fill={colour.text}>
-        {academicYear || '—'}
-      </text>
-
-      <text x="376" y="182" fontFamily="'Inter', sans-serif" fontSize="14" fontWeight="600" textAnchor="end" fill={colour.text}>
-        Teacher
-      </text>
-      <text x="376" y="200" fontFamily="'Inter', sans-serif" fontSize="16" textAnchor="end" fill={colour.text}>
-        {teacherName || '—'}
-      </text>
-
-      <text x="56" y="230" fontFamily="'Inter', sans-serif" fontSize="13" fontWeight="600" fill={colour.text}>
-        Message
-      </text>
-      {messageLines.map((line, index) => (
-        <text
-          key={index}
-          x="56"
-          y={248 + index * 16}
-          fontFamily="'Inter', sans-serif"
-          fontSize="14"
-          fill={colour.text}
-          opacity="0.85"
-        >
-          {line}
-        </text>
-      ))}
-    </svg>
-  );
-};
-
-const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogout }) => {
-  const gradeLabel = formatGradeLabel(grade);
-  const sampleCover = useMemo(() => buildSampleCover(grade), [grade]);
-
-  const [step, setStep] = useState('theme');
-  const [selectedThemeId, setSelectedThemeId] = useState(null);
-  const [selectedColorId, setSelectedColorId] = useState(null);
-  const [formValues, setFormValues] = useState(defaultFormValues);
-  const [covers, setCovers] = useState([sampleCover]);
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  useEffect(() => {
-    setStep('theme');
-    setSelectedThemeId(null);
-    setSelectedColorId(null);
-    setFormValues(defaultFormValues);
-    setCovers([sampleCover]);
-    setActiveIndex(0);
-  }, [sampleCover]);
-
-  const selectedTheme = useMemo(
-    () => COVER_THEMES.find((theme) => theme.id === selectedThemeId) || null,
-    [selectedThemeId]
-  );
-
-  const selectedColour = useMemo(() => {
-    if (!selectedTheme) {
-      return null;
+  if (typeof entry === 'string') {
+    const clean = entry.trim();
+    if (!clean) {
+      return '';
     }
-    return selectedTheme.colors.find((colour) => colour.id === selectedColorId) || null;
-  }, [selectedTheme, selectedColorId]);
+    const segments = clean.split(/[\\/]/);
+    return segments[segments.length - 1] || '';
+  }
 
-  const draftCover = useMemo(() => {
-    if (!selectedTheme || !selectedColour) {
-      return null;
-    }
-
-    return {
-      id: 'draft',
-      grade,
-      themeId: selectedTheme.id,
-      colorId: selectedColour.id,
-      details: {
-        title: formValues.title.trim() || `${gradeLabel} Adventures`,
-        studentName: formValues.studentName.trim(),
-        teacherName: formValues.teacherName.trim(),
-        academicYear: formValues.academicYear.trim(),
-        message: formValues.message.trim()
+  if (typeof entry === 'object') {
+    const fields = ['fileName', 'filename', 'name', 'path', 'key'];
+    for (const field of fields) {
+      const value = entry[field];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        const segments = value.trim().split(/[\\/]/);
+        return segments[segments.length - 1] || '';
       }
-    };
-  }, [selectedTheme, selectedColour, formValues, grade, gradeLabel]);
+    }
+  }
 
-  const activeCover = covers.length > 0 ? covers[Math.min(activeIndex, covers.length - 1)] : sampleCover;
-  const previewCover = draftCover || activeCover || sampleCover;
+  return '';
+};
 
-  const previewTheme = COVER_THEMES.find((theme) => theme.id === previewCover.themeId) || COVER_THEMES[0];
-  const previewColour = previewTheme.colors.find((colour) => colour.id === previewCover.colorId) || previewTheme.colors[0];
+const parseSelectionKeyFromFileName = (fileName) => {
+  if (!fileName || typeof fileName !== 'string') {
+    return '';
+  }
 
-  const handleThemeSelect = (themeId) => {
-    setSelectedThemeId(themeId);
-    setSelectedColorId(null);
-    setStep('details');
-  };
+  const withoutExt = fileName.replace(/\.svg$/i, '');
+  const parts = withoutExt.split('.');
 
-  const handleColourSelect = (colourId) => {
-    setSelectedColorId(colourId);
-  };
+  if (parts.length < 2) {
+    return '';
+  }
 
-  const handleFormChange = (field) => (event) => {
-    setFormValues((previous) => ({
-      ...previous,
-      [field]: event.target.value
-    }));
-  };
+  const themeToken = normalizeToken(parts[0]);
+  const colourToken = normalizeToken(parts[1]);
 
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    if (!draftCover) {
+  if (!themeToken || !colourToken) {
+    return '';
+  }
+
+  return `${themeToken}.${colourToken}`;
+};
+
+const extractManifestEntries = (payload) => {
+  if (!payload) {
+    return [];
+  }
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (typeof payload === 'object') {
+    const candidateKeys = ['assets', 'files', 'items', 'data', 'results'];
+    for (const key of candidateKeys) {
+      const value = payload[key];
+      if (Array.isArray(value)) {
+        return value;
+      }
+    }
+  }
+
+  return [];
+};
+
+const normaliseManifest = (payload, baseUrl) => {
+  const rawEntries = extractManifestEntries(payload);
+  const seen = new Set();
+  const normalised = [];
+
+  rawEntries.forEach((entry) => {
+    const fileName = extractFileName(entry);
+    if (!fileName) {
       return;
     }
 
-    const savedCover = {
-      ...draftCover,
-      id: `cover-${Date.now()}`,
-      createdAt: new Date().toISOString()
-    };
+    const selectionKey = parseSelectionKeyFromFileName(fileName);
+    if (!selectionKey) {
+      return;
+    }
 
-    setCovers((previous) => {
-      const next = [...previous, savedCover];
-      setActiveIndex(next.length - 1);
-      return next;
+    let url = '';
+
+    if (typeof entry === 'string') {
+      const clean = entry.trim();
+      if (/^https?:/i.test(clean)) {
+        url = clean;
+      } else {
+        url = baseUrl ? joinUrl(baseUrl, clean) : '';
+      }
+    } else if (typeof entry === 'object') {
+      if (typeof entry.url === 'string' && entry.url.trim().length > 0) {
+        url = entry.url.trim();
+      } else if (typeof entry.href === 'string' && entry.href.trim().length > 0) {
+        url = entry.href.trim();
+      } else if (typeof entry.path === 'string' && entry.path.trim().length > 0 && baseUrl) {
+        url = joinUrl(baseUrl, entry.path.trim());
+      } else if (baseUrl) {
+        url = joinUrl(baseUrl, fileName);
+      }
+    }
+
+    const key = `${fileName}|${url}`;
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    normalised.push({ fileName, url, selectionKey });
+  });
+
+  normalised.sort((a, b) => a.fileName.localeCompare(b.fileName));
+  return normalised;
+};
+
+const resolveErrorMessage = (error) => {
+  if (!error) {
+    return 'An unexpected error occurred.';
+  }
+
+  if (typeof error === 'string') {
+    return error;
+  }
+
+  if (error.response?.data?.detail) {
+    return error.response.data.detail;
+  }
+
+  if (error.message) {
+    return error.message;
+  }
+
+  return 'An unexpected error occurred.';
+};
+
+const PERSONALISATION_TARGETS = {
+  schoolLogo: ['#school-logo', '[data-cover-binding="school-logo"]'],
+  gradeName: ['#grade-name', '[data-cover-binding="grade-name"]'],
+  kidName: ['#kid-name', '[data-cover-binding="kid-name"]'],
+  addressLine1: ['#address-line-1', '[data-cover-binding="address-line-1"]'],
+  addressLine2: ['#address-line-2', '[data-cover-binding="address-line-2"]'],
+  addressLine3: ['#address-line-3', '[data-cover-binding="address-line-3"]'],
+  contactNumber: ['#contact-number', '[data-cover-binding="contact-number"]']
+};
+
+const collectNodes = (doc, selectors = []) => {
+  if (!doc || !Array.isArray(selectors)) {
+    return [];
+  }
+
+  const results = [];
+  selectors.forEach((selector) => {
+    if (!selector) {
+      return;
+    }
+
+    const found = doc.querySelectorAll(selector);
+    found.forEach((node) => {
+      if (!results.includes(node)) {
+        results.push(node);
+      }
     });
+  });
 
-    setStep('preview');
-  };
+  return results;
+};
 
-  const canSubmit = Boolean(
-    draftCover &&
-      draftCover.details.studentName &&
-      draftCover.details.teacherName &&
-      draftCover.details.academicYear
+const updateNodeText = (nodes, value) => {
+  const textValue = value ?? '';
+  nodes.forEach((node) => {
+    if (!node) {
+      return;
+    }
+
+    node.textContent = textValue;
+  });
+};
+
+const updateNodeImage = (nodes, value) => {
+  const imageValue = value ?? '';
+
+  nodes.forEach((node) => {
+    if (!node) {
+      return;
+    }
+
+    if (imageValue) {
+      node.setAttribute('href', imageValue);
+      node.setAttribute('xlink:href', imageValue);
+      if (typeof node.setAttributeNS === 'function') {
+        try {
+          node.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageValue);
+        } catch (error) {
+          // Ignore namespace errors in older browsers.
+        }
+      }
+
+      if (node.tagName?.toLowerCase() === 'image') {
+        node.setAttribute('preserveAspectRatio', node.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+      }
+
+      const imgChild = node.tagName?.toLowerCase() === 'image' ? null : node.querySelector('img');
+      if (imgChild) {
+        imgChild.setAttribute('src', imageValue);
+      }
+    } else {
+      node.removeAttribute('href');
+      node.removeAttribute('xlink:href');
+      if (typeof node.removeAttributeNS === 'function') {
+        try {
+          node.removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        } catch (error) {
+          // Ignore namespace errors in older browsers.
+        }
+      }
+
+      const imgChild = node.tagName?.toLowerCase() === 'image' ? null : node.querySelector('img');
+      if (imgChild) {
+        imgChild.removeAttribute('src');
+      }
+    }
+  });
+};
+
+const applyPersonalisationToSvg = (svgMarkup, personalisation) => {
+  if (!svgMarkup || typeof svgMarkup !== 'string') {
+    return '';
+  }
+
+  if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
+    return svgMarkup;
+  }
+
+  try {
+    const parser = new window.DOMParser();
+    const doc = parser.parseFromString(svgMarkup, 'image/svg+xml');
+    const svgElement = doc?.documentElement;
+
+    if (!svgElement || svgElement.nodeName.toLowerCase() !== 'svg') {
+      return svgMarkup;
+    }
+
+    const { schoolLogo, gradeName, kidName, addressLine1, addressLine2, addressLine3, contactNumber } =
+      personalisation || {};
+
+    updateNodeImage(collectNodes(svgElement, PERSONALISATION_TARGETS.schoolLogo), schoolLogo);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.gradeName), gradeName);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.kidName), kidName);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine1), addressLine1);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine2), addressLine2);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine3), addressLine3);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.contactNumber), contactNumber);
+
+    if (typeof XMLSerializer === 'undefined') {
+      return svgMarkup;
+    }
+
+    const serializer = new XMLSerializer();
+    return serializer.serializeToString(svgElement);
+  } catch (error) {
+    return svgMarkup;
+  }
+};
+
+const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogout }) => {
+  const manifestUrl = process.env.REACT_APP_COVER_ASSETS_MANIFEST_URL;
+  const baseAssetsUrl = process.env.REACT_APP_COVER_ASSETS_BASE_URL;
+
+  const [manifestLoading, setManifestLoading] = useState(false);
+  const [manifestError, setManifestError] = useState('');
+  const [availableAssets, setAvailableAssets] = useState([]);
+
+  const [selectedThemeId, setSelectedThemeId] = useState(null);
+  const [selectedColourId, setSelectedColourId] = useState(null);
+
+  const [isFetchingAssets, setIsFetchingAssets] = useState(false);
+  const [carouselAssets, setCarouselAssets] = useState([]);
+  const [assetError, setAssetError] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [personalisation, setPersonalisation] = useState({
+    schoolLogo: '',
+    gradeName: '',
+    kidName: '',
+    addressLine1: '',
+    addressLine2: '',
+    addressLine3: '',
+    contactNumber: ''
+  });
+  const [gradeNameDirty, setGradeNameDirty] = useState(false);
+
+  const assetCacheRef = useRef(new Map());
+
+  const gradeLabel = useMemo(() => {
+    return GRADE_LABELS[grade] || grade?.toUpperCase() || 'Grade';
+  }, [grade]);
+
+  useEffect(() => {
+    if (!gradeLabel) {
+      return;
+    }
+
+    setPersonalisation((current) => {
+      if (gradeNameDirty) {
+        return current;
+      }
+
+      if (current.gradeName === gradeLabel) {
+        return current;
+      }
+
+      return { ...current, gradeName: gradeLabel };
+    });
+  }, [gradeLabel, gradeNameDirty]);
+
+  const selectedTheme = useMemo(
+    () => THEME_OPTIONS.find((theme) => theme.id === selectedThemeId) || null,
+    [selectedThemeId]
   );
 
-  const handleCreateAnother = () => {
-    setStep('theme');
-    setSelectedThemeId(null);
-    setSelectedColorId(null);
-    setFormValues(defaultFormValues);
-  };
+  const selectedColour = useMemo(
+    () => COLOUR_OPTIONS.find((colour) => colour.id === selectedColourId) || null,
+    [selectedColourId]
+  );
 
-  const stepCopy = {
-    theme: {
-      title: 'Pick a cover theme',
-      description: 'Choose one of the four creative themes to begin personalising this grade\'s cover.'
-    },
-    details: {
-      title: 'Select colours & personalise',
-      description: 'Pick a colour palette, enter the student details and preview the cover in real time.'
-    },
-    preview: {
-      title: 'Review saved cover pages',
-      description: 'Use the carousel to browse every cover created for this grade. You can add more at any time.'
+  useEffect(() => {
+    if (!manifestUrl) {
+      setManifestError('Cover assets manifest URL is not configured.');
+      setAvailableAssets([]);
+      return;
     }
-  };
 
-  const currentCopy = stepCopy[step];
+    let isCancelled = false;
+
+    const loadManifest = async () => {
+      setManifestLoading(true);
+      setManifestError('');
+
+      try {
+        const response = await axios.get(manifestUrl);
+        if (isCancelled) {
+          return;
+        }
+
+        const data = normaliseManifest(response.data, baseAssetsUrl);
+        setAvailableAssets(data);
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
+        setAvailableAssets([]);
+        setManifestError(resolveErrorMessage(error));
+      } finally {
+        if (!isCancelled) {
+          setManifestLoading(false);
+        }
+      }
+    };
+
+    loadManifest();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [manifestUrl, baseAssetsUrl]);
+
+  useEffect(() => {
+    if (!selectedTheme || !selectedColour) {
+      setCarouselAssets([]);
+      setAssetError('');
+      setActiveIndex(0);
+      return;
+    }
+
+    const expectedKey = buildSelectionKey(selectedTheme.id, selectedColour.id);
+    if (!expectedKey) {
+      setCarouselAssets([]);
+      setAssetError('');
+      setActiveIndex(0);
+      return;
+    }
+
+    const matchingAssets = availableAssets.filter((asset) => asset.selectionKey === expectedKey);
+
+    if (matchingAssets.length === 0) {
+      setCarouselAssets([]);
+      setAssetError('No cover files found for this theme and colour combination yet.');
+      setActiveIndex(0);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const loadAssets = async () => {
+      setIsFetchingAssets(true);
+      setAssetError('');
+
+      try {
+        const resolved = await Promise.all(
+          matchingAssets.map(async (asset) => {
+            if (asset.selectionKey !== expectedKey) {
+              throw new Error(
+                `Cover file “${asset.fileName}” does not match the selected theme and colour.`
+              );
+            }
+
+            if (!asset.url) {
+              throw new Error(`No download URL configured for “${asset.fileName}”.`);
+            }
+
+            if (assetCacheRef.current.has(asset.url)) {
+              return assetCacheRef.current.get(asset.url);
+            }
+
+            const response = await axios.get(asset.url, { responseType: 'text' });
+            const svgMarkup = typeof response.data === 'string' ? response.data : '';
+
+            const record = {
+              fileName: asset.fileName,
+              url: asset.url,
+              selectionKey: asset.selectionKey,
+              svgMarkup
+            };
+
+            assetCacheRef.current.set(asset.url, record);
+            return record;
+          })
+        );
+
+        if (!isCancelled) {
+          setCarouselAssets(resolved);
+          setActiveIndex(0);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setCarouselAssets([]);
+          setAssetError(resolveErrorMessage(error));
+          setActiveIndex(0);
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsFetchingAssets(false);
+        }
+      }
+    };
+
+    loadAssets();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedTheme, selectedColour, availableAssets]);
+
+  const trimmedPersonalisation = useMemo(
+    () => ({
+      schoolLogo: personalisation.schoolLogo.trim(),
+      gradeName: personalisation.gradeName.trim(),
+      kidName: personalisation.kidName.trim(),
+      addressLine1: personalisation.addressLine1.trim(),
+      addressLine2: personalisation.addressLine2.trim(),
+      addressLine3: personalisation.addressLine3.trim(),
+      contactNumber: personalisation.contactNumber.trim()
+    }),
+    [personalisation]
+  );
+
+  const isPersonalisationComplete = useMemo(() => {
+    return Object.values(trimmedPersonalisation).every((value) => value.length > 0);
+  }, [trimmedPersonalisation]);
+
+  const personalisedAssets = useMemo(() => {
+    if (!carouselAssets.length) {
+      return [];
+    }
+
+    return carouselAssets.map((asset) => ({
+      ...asset,
+      personalisedMarkup: applyPersonalisationToSvg(asset.svgMarkup, trimmedPersonalisation)
+    }));
+  }, [carouselAssets, trimmedPersonalisation]);
+
+  const displayedAssets = isPersonalisationComplete ? personalisedAssets : [];
+  const displayedAssetsLength = displayedAssets.length;
+
+  const handlePrev = useCallback(() => {
+    setActiveIndex((current) => {
+      if (displayedAssetsLength === 0) {
+        return 0;
+      }
+
+      return (current - 1 + displayedAssetsLength) % displayedAssetsLength;
+    });
+  }, [displayedAssetsLength]);
+
+  const handleNext = useCallback(() => {
+    setActiveIndex((current) => {
+      if (displayedAssetsLength === 0) {
+        return 0;
+      }
+
+      return (current + 1) % displayedAssetsLength;
+    });
+  }, [displayedAssetsLength]);
+
+  useEffect(() => {
+    if (activeIndex >= displayedAssetsLength && displayedAssetsLength > 0) {
+      setActiveIndex(0);
+      return;
+    }
+
+    if (displayedAssetsLength === 0 && activeIndex !== 0) {
+      setActiveIndex(0);
+    }
+  }, [activeIndex, displayedAssetsLength]);
+
+  const handlePersonalisationChange = useCallback(
+    (field) => (event) => {
+      const value = event?.target?.value ?? '';
+      setPersonalisation((current) => ({
+        ...current,
+        [field]: value
+      }));
+
+      if (field === 'gradeName') {
+        setGradeNameDirty(true);
+      }
+    },
+    []
+  );
+
+  const activeAsset = displayedAssets[activeIndex] || null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
@@ -471,251 +625,300 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
           </div>
         </div>
 
-        <Card className="border-none shadow-xl shadow-orange-100/60">
-          <CardHeader className="space-y-2">
-            <CardTitle className="text-2xl font-semibold text-slate-900">{currentCopy.title}</CardTitle>
-            <p className="text-sm text-slate-600">{currentCopy.description}</p>
-          </CardHeader>
-          <CardContent>
-            <div className="cover-workflow-grid">
-              <div className="space-y-6">
-                {step === 'theme' && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {COVER_THEMES.map((theme) => (
+        <div className="cover-workflow-layout">
+          <div className="space-y-4">
+            <Card className="border-none shadow-xl shadow-orange-100/60">
+              <CardHeader className="space-y-2">
+                <CardTitle className="text-xl font-semibold text-slate-900">Select a theme</CardTitle>
+                <p className="text-sm text-slate-600">
+                  Pick one of the available cover themes. Additional themes can be added later without
+                  changing this workflow.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {manifestLoading && (
+                  <div className="space-y-2">
+                    <Skeleton className="h-14 w-full rounded-2xl" />
+                    <Skeleton className="h-14 w-full rounded-2xl" />
+                  </div>
+                )}
+
+                {!manifestLoading && manifestError && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Unable to load cover assets</AlertTitle>
+                    <AlertDescription>{manifestError}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="cover-theme-grid">
+                  {THEME_OPTIONS.map((theme) => {
+                    const isSelected = selectedThemeId === theme.id;
+                    return (
                       <button
                         key={theme.id}
                         type="button"
-                        onClick={() => handleThemeSelect(theme.id)}
-                        className="cover-theme-card bg-white/80 p-6 text-left shadow-sm"
+                        onClick={() => setSelectedThemeId(theme.id)}
+                        className={`cover-theme-button${isSelected ? ' is-active' : ''}`}
                       >
-                        <div className="flex items-start gap-4">
-                          <span className="text-3xl" aria-hidden="true">{theme.icon}</span>
-                          <div className="space-y-1">
-                            <p className="text-lg font-semibold text-slate-800">{theme.name}</p>
-                            <p className="text-sm text-slate-500 leading-relaxed">{theme.description}</p>
-                          </div>
-                        </div>
-                        <Separator className="my-4" />
-                        <div className="flex items-center gap-2">
-                          {theme.colors.map((colour) => (
-                            <span
-                              key={colour.id}
-                              className="h-2 w-10 rounded-full"
-                              style={{
-                                background: `linear-gradient(135deg, ${colour.stops[0]}, ${colour.stops[1]})`
-                              }}
-                              aria-hidden="true"
-                            />
-                          ))}
+                        <div>
+                          <p className="text-base font-semibold text-slate-800">{theme.label}</p>
+                          <p className="text-sm text-slate-500 leading-relaxed">{theme.description}</p>
                         </div>
                       </button>
-                    ))}
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-xl shadow-orange-100/60">
+              <CardHeader className="space-y-2">
+                <CardTitle className="text-xl font-semibold text-slate-900">Cover details</CardTitle>
+                <p className="text-sm text-slate-600">
+                  Personalise the cover by filling in the school information below. The values you enter
+                  will be merged into the SVG artwork before it appears in the carousel.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="cover-personalisation-grid two-column">
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-school-logo">School logo URL</Label>
+                    <Input
+                      id="cover-school-logo"
+                      type="url"
+                      inputMode="url"
+                      placeholder="https://example.com/logo.png"
+                      value={personalisation.schoolLogo}
+                      onChange={handlePersonalisationChange('schoolLogo')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-grade-name">Grade name</Label>
+                    <Input
+                      id="cover-grade-name"
+                      placeholder="e.g. UKG"
+                      value={personalisation.gradeName}
+                      onChange={handlePersonalisationChange('gradeName')}
+                    />
+                  </div>
+                </div>
+
+                <div className="cover-form-field">
+                  <Label htmlFor="cover-kid-name">Kid name</Label>
+                  <Input
+                    id="cover-kid-name"
+                    placeholder="Enter kid name"
+                    value={personalisation.kidName}
+                    onChange={handlePersonalisationChange('kidName')}
+                  />
+                </div>
+
+                <div className="cover-personalisation-grid">
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-address-line-1">Address line 1</Label>
+                    <Input
+                      id="cover-address-line-1"
+                      placeholder="Address line 1"
+                      value={personalisation.addressLine1}
+                      onChange={handlePersonalisationChange('addressLine1')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-address-line-2">Address line 2</Label>
+                    <Input
+                      id="cover-address-line-2"
+                      placeholder="Address line 2"
+                      value={personalisation.addressLine2}
+                      onChange={handlePersonalisationChange('addressLine2')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-address-line-3">Address line 3</Label>
+                    <Input
+                      id="cover-address-line-3"
+                      placeholder="Address line 3"
+                      value={personalisation.addressLine3}
+                      onChange={handlePersonalisationChange('addressLine3')}
+                    />
+                  </div>
+                </div>
+
+                <div className="cover-form-field">
+                  <Label htmlFor="cover-contact-number">School contact number</Label>
+                  <Input
+                    id="cover-contact-number"
+                    type="tel"
+                    inputMode="tel"
+                    placeholder="Contact number"
+                    value={personalisation.contactNumber}
+                    onChange={handlePersonalisationChange('contactNumber')}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-xl shadow-orange-100/60">
+              <CardHeader className="space-y-2">
+                <CardTitle className="text-xl font-semibold text-slate-900">Choose a colour</CardTitle>
+                <p className="text-sm text-slate-600">
+                  Every theme provides the same four colour families. Select a colour to load matching
+                  cover artwork.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="cover-colour-grid">
+                  {COLOUR_OPTIONS.map((colour) => {
+                    const isSelected = selectedColourId === colour.id;
+                    return (
+                      <button
+                        key={colour.id}
+                        type="button"
+                        onClick={() => setSelectedColourId(colour.id)}
+                        className={`cover-colour-chip${isSelected ? ' is-active' : ''}`}
+                        style={{ backgroundColor: colour.hex }}
+                        aria-pressed={isSelected}
+                        aria-label={`${colour.label} ${colour.hex}`}
+                      >
+                        <span className="cover-colour-chip-label">{colour.label}</span>
+                        <span className="cover-colour-chip-hex">{colour.hex}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="border-none shadow-xl shadow-orange-100/60">
+            <CardHeader className="space-y-2">
+              <CardTitle className="text-xl font-semibold text-slate-900">Cover previews</CardTitle>
+              <p className="text-sm text-slate-600">
+                Select a theme and colour to fetch every matching SVG cover file. The carousel below lets
+                you browse the available designs without any extra menus.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-slate-800">Theme:</span>
+                  <span>{selectedTheme ? selectedTheme.label : '—'}</span>
+                </div>
+                <Separator orientation="vertical" className="hidden h-4 sm:block" />
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-slate-800">Colour:</span>
+                  <span>{selectedColour ? selectedColour.label : '—'}</span>
+                </div>
+              </div>
+
+              {isFetchingAssets && (
+                <div className="cover-carousel-stage">
+                  <Skeleton className="h-full w-full" />
+                </div>
+              )}
+
+              {!isFetchingAssets && assetError && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Unable to load covers</AlertTitle>
+                  <AlertDescription>{assetError}</AlertDescription>
+                </Alert>
+              )}
+
+              {!isFetchingAssets && !assetError && (!selectedTheme || !selectedColour) && (
+                <div className="cover-carousel-empty">
+                  <p className="text-sm text-slate-500">
+                    Choose both a theme and a colour to load the available cover designs.
+                  </p>
+                </div>
+              )}
+
+              {!isFetchingAssets &&
+                !assetError &&
+                selectedTheme &&
+                selectedColour &&
+                carouselAssets.length > 0 &&
+                !isPersonalisationComplete && (
+                  <div className="cover-carousel-empty">
+                    <p className="text-sm text-slate-500">
+                      Enter the school logo, grade name, kid name, address lines, and contact number to
+                      personalise the covers.
+                    </p>
                   </div>
                 )}
 
-                {step === 'details' && (
-                  <div className="space-y-6">
-                    {selectedTheme ? (
-                      <>
-                        <div className="space-y-3">
-                          <div>
-                            <p className="text-sm font-medium text-slate-700">Theme selected</p>
-                            <p className="text-lg font-semibold text-slate-900">{selectedTheme.name}</p>
-                          </div>
-                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                            {selectedTheme.colors.map((colour) => {
-                              const isSelected = selectedColorId === colour.id;
-                              return (
-                                <button
-                                  key={colour.id}
-                                  type="button"
-                                  onClick={() => handleColourSelect(colour.id)}
-                                  className={`cover-color-swatch${isSelected ? ' is-selected' : ''}`}
-                                  style={{
-                                    background: `linear-gradient(135deg, ${colour.stops[0]}, ${colour.stops[1]})`
-                                  }}
-                                  aria-label={colour.name}
-                                />
-                              );
-                            })}
-                          </div>
-                          <p className="text-sm text-slate-500">
-                            Pick one of the colours to see the preview update instantly.
-                          </p>
-                        </div>
+              {!isFetchingAssets &&
+                !assetError &&
+                selectedTheme &&
+                selectedColour &&
+                carouselAssets.length === 0 && (
+                  <div className="cover-carousel-empty">
+                    <p className="text-sm text-slate-500">
+                      No cover artwork has been uploaded yet for this combination.
+                    </p>
+                  </div>
+              )}
 
-                        <Separator />
+              {!isFetchingAssets && !assetError && displayedAssetsLength > 0 && activeAsset && (
+                <div className="space-y-4">
+                  <div className="cover-carousel-stage">
+                    <div
+                      className="cover-carousel-svg"
+                      dangerouslySetInnerHTML={{
+                        __html: activeAsset.personalisedMarkup || activeAsset.svgMarkup
+                      }}
+                    />
+                  </div>
 
-                        <form className="space-y-5" onSubmit={handleSubmit}>
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <div className="space-y-1.5">
-                              <label className="text-sm font-medium text-slate-700">Cover title</label>
-                              <Input
-                                value={formValues.title}
-                                onChange={handleFormChange('title')}
-                                placeholder={`${gradeLabel} Adventures`}
-                                className="h-11"
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <label className="text-sm font-medium text-slate-700">Academic year</label>
-                              <Input
-                                value={formValues.academicYear}
-                                onChange={handleFormChange('academicYear')}
-                                placeholder="2024 - 2025"
-                                className="h-11"
-                                required
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <label className="text-sm font-medium text-slate-700">Student name</label>
-                              <Input
-                                value={formValues.studentName}
-                                onChange={handleFormChange('studentName')}
-                                placeholder="Enter student name"
-                                className="h-11"
-                                required
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <label className="text-sm font-medium text-slate-700">Teacher name</label>
-                              <Input
-                                value={formValues.teacherName}
-                                onChange={handleFormChange('teacherName')}
-                                placeholder="Class teacher"
-                                className="h-11"
-                                required
-                              />
-                            </div>
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-slate-700">Special message</label>
-                            <Textarea
-                              value={formValues.message}
-                              onChange={handleFormChange('message')}
-                              placeholder="Add a warm note, motto or vision statement."
-                              rows={4}
-                            />
-                          </div>
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={() => setStep('theme')}
-                              className="text-slate-600 hover:text-slate-800"
-                            >
-                              Back to themes
-                            </Button>
-                            <Button type="submit" disabled={!canSubmit} className="bg-gradient-to-r from-orange-400 to-red-400 text-white">
-                              Save cover page
-                            </Button>
-                          </div>
-                        </form>
-                      </>
-                    ) : (
-                      <p className="text-sm text-slate-500">Choose a theme to personalise the cover.</p>
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+                    <span className="font-medium text-slate-700">{activeAsset.fileName}</span>
+                    {displayedAssetsLength > 1 && (
+                      <div className="cover-carousel-controls">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={handlePrev}
+                          className="bg-white"
+                          aria-label="Previous cover"
+                        >
+                          <ChevronLeft className="h-5 w-5" />
+                        </Button>
+                        <span className="text-sm font-medium text-slate-700">
+                          {activeIndex + 1} of {displayedAssetsLength}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={handleNext}
+                          className="bg-white"
+                          aria-label="Next cover"
+                        >
+                          <ChevronRight className="h-5 w-5" />
+                        </Button>
+                      </div>
                     )}
                   </div>
-                )}
 
-                {step === 'preview' && (
-                  <div className="space-y-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-lg font-semibold text-slate-900">Saved cover pages</p>
-                        <p className="text-sm text-slate-500">
-                          Use the carousel controls to browse every cover generated for this grade.
-                        </p>
-                      </div>
-                      <Button variant="outline" onClick={handleCreateAnother} className="bg-white">
-                        Create another cover
-                      </Button>
-                    </div>
-
-                    <div className="cover-carousel-controls">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        onClick={() => setActiveIndex((index) => (index - 1 + covers.length) % covers.length)}
-                        className="bg-white"
-                        aria-label="Previous cover"
-                      >
-                        <ChevronLeft className="h-5 w-5" />
-                      </Button>
-                      <span className="text-sm font-medium text-slate-700">
-                        {activeIndex + 1} of {covers.length}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        onClick={() => setActiveIndex((index) => (index + 1) % covers.length)}
-                        className="bg-white"
-                        aria-label="Next cover"
-                      >
-                        <ChevronRight className="h-5 w-5" />
-                      </Button>
-                    </div>
-
+                  {displayedAssetsLength > 1 && (
                     <div className="cover-carousel-indicators">
-                      {covers.map((cover, index) => (
+                      {displayedAssets.map((asset, index) => (
                         <button
-                          key={cover.id}
+                          key={asset.url || asset.fileName || index}
                           type="button"
                           onClick={() => setActiveIndex(index)}
-                          className={`h-2.5 w-2.5 rounded-full transition ${index === activeIndex ? 'is-active' : ''}`}
+                          className={`cover-carousel-indicator${index === activeIndex ? ' is-active' : ''}`}
                           aria-label={`Go to cover ${index + 1}`}
                         />
                       ))}
                     </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-4">
-                <div className="cover-preview-frame">
-                  <CoverPreview cover={previewCover} gradeLabel={gradeLabel} />
+                  )}
                 </div>
-
-                <div className="rounded-2xl bg-white/70 p-4 shadow-sm">
-                  <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-slate-800">Theme:</span>
-                      <span>{previewTheme.name}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-slate-800">Colour:</span>
-                      <span>{previewColour.name}</span>
-                    </div>
-                    {previewCover.isSample && <Badge variant="outline">Sample data</Badge>}
-                  </div>
-                  <Separator className="my-3" />
-                  <div className="grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
-                    <div>
-                      <p className="font-medium">Student</p>
-                      <p className="text-slate-500">{previewCover.details?.studentName || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium">Teacher</p>
-                      <p className="text-slate-500">{previewCover.details?.teacherName || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium">Academic year</p>
-                      <p className="text-slate-500">{previewCover.details?.academicYear || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium">Message</p>
-                      <p className="text-slate-500">
-                        {previewCover.details?.message || 'Add a message to see it appear on the cover.'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

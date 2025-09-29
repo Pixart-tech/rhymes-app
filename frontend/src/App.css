@@ -352,66 +352,175 @@ body {
 }
 
 /* Cover page workflow */
-.cover-workflow-grid {
+.cover-workflow-layout {
   display: grid;
   gap: clamp(20px, 3vw, 32px);
 }
 
 @media (min-width: 1024px) {
-  .cover-workflow-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+  .cover-workflow-layout {
+    grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
     align-items: start;
   }
 }
 
-.cover-theme-card {
+.cover-theme-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.cover-theme-button {
+  width: 100%;
+  text-align: left;
+  border-radius: 22px;
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  padding: clamp(14px, 2vw, 18px);
+  background: rgba(255, 255, 255, 0.85);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   position: relative;
   overflow: hidden;
-  border-radius: 24px;
-  border: 1px solid rgba(248, 113, 113, 0.25);
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
-.cover-theme-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 28px 52px -28px rgba(15, 23, 42, 0.3);
+.cover-theme-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(254, 215, 170, 0.2), rgba(248, 113, 113, 0.15));
+  opacity: 0;
+  transition: opacity 0.2s ease;
 }
 
-.cover-color-swatch {
+.cover-theme-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 24px 42px -24px rgba(15, 23, 42, 0.35);
+}
+
+.cover-theme-button.is-active {
+  border-color: #fb923c;
+  box-shadow: 0 28px 46px -22px rgba(249, 115, 22, 0.4);
+}
+
+.cover-theme-button.is-active::after {
+  opacity: 1;
+}
+
+.cover-colour-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 16px;
+}
+
+.cover-colour-chip {
   position: relative;
   width: 100%;
   aspect-ratio: 1;
   border-radius: 20px;
   border: 2px solid transparent;
-  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
-  box-shadow: 0 18px 40px -24px rgba(15, 23, 42, 0.35);
-}
-
-.cover-color-swatch.is-selected {
-  transform: translateY(-2px);
-  border-color: #fb923c;
-  box-shadow: 0 28px 48px -24px rgba(249, 115, 22, 0.45);
-}
-
-.cover-preview-frame {
-  width: 100%;
-  max-width: 620px;
-  aspect-ratio: 432 / 302;
-  background: #fff;
-  border-radius: 28px;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  box-shadow: 0 34px 70px -30px rgba(15, 23, 42, 0.35);
-  padding: clamp(16px, 2.4vw, 28px);
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: center;
   overflow: hidden;
+  box-shadow: 0 16px 36px -24px rgba(15, 23, 42, 0.35);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.cover-preview-frame svg {
+.cover-colour-chip .cover-colour-chip-label {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 6px 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(15, 23, 42, 0.8);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.cover-colour-chip .cover-colour-chip-hex {
+  position: absolute;
+  inset: 10px 10px auto auto;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(15, 23, 42, 0.7);
+  background: rgba(255, 255, 255, 0.65);
+  padding: 4px 6px;
+  border-radius: 9999px;
+}
+
+.cover-colour-chip:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 28px 48px -26px rgba(249, 115, 22, 0.45);
+}
+
+.cover-colour-chip.is-active {
+  border-color: #fb923c;
+  box-shadow: 0 32px 54px -26px rgba(249, 115, 22, 0.55);
+}
+
+.cover-personalisation-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.cover-personalisation-grid.two-column {
+  gap: 18px;
+}
+
+@media (min-width: 640px) {
+  .cover-personalisation-grid.two-column {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  .cover-personalisation-grid:not(.two-column) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.cover-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cover-form-field label {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.cover-carousel-stage {
+  min-height: clamp(300px, 40vw, 460px);
+  border-radius: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.9));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(18px, 2.6vw, 26px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.cover-carousel-stage .cover-carousel-svg {
   width: 100%;
   height: 100%;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cover-carousel-stage .cover-carousel-svg svg {
+  width: 100%;
+  height: 100%;
+}
+
+.cover-carousel-empty {
+  border-radius: 24px;
+  border: 1px dashed rgba(148, 163, 184, 0.5);
+  padding: 32px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.75);
 }
 
 .cover-carousel-controls {
@@ -428,7 +537,7 @@ body {
   justify-content: center;
 }
 
-.cover-carousel-indicators button {
+.cover-carousel-indicator {
   width: 10px;
   height: 10px;
   border-radius: 9999px;
@@ -438,7 +547,7 @@ body {
   transition: background 0.2s ease;
 }
 
-.cover-carousel-indicators button.is-active {
+.cover-carousel-indicator.is-active {
   background: #fb923c;
 }
 
