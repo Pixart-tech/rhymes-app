@@ -56,7 +56,7 @@ RHYME_SVG_BASE_PATH = _resolve_svg_base_path()
 def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]:
     """Return the authored SVG path for ``rhyme_code`` if it exists."""
 
-    base_path = RHYME_SVG_BASE_PATH
+    base_path = Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs")
     if base_path is None:
         return None
 
