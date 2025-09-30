@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
@@ -803,7 +803,259 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  const svgCacheRef = useRef(new Map());
+  const svgInFlightRef = useRef(new Map());
+  const imageAssetCacheRef = useRef(new Set());
+  const imageInFlightRef = useRef(new Map());
+  const selectedRhymesRef = useRef([]);
+  const pageFetchPromisesRef = useRef(new Map());
+
   const MAX_RHYMES_PER_GRADE = 25;
+
+  useEffect(() => {
+    selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
+  }, [selectedRhymes]);
+
+  const extractImageUrlsFromSvg = useCallback((svgContent) => {
+    if (!svgContent || typeof svgContent !== 'string') {
+      return [];
+    }
+
+    if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
+      return [];
+    }
+
+    try {
+      const parser = new window.DOMParser();
+      const doc = parser.parseFromString(svgContent, 'image/svg+xml');
+      const imageNodes = doc.querySelectorAll('image, img');
+      const urls = new Set();
+
+      imageNodes.forEach((node) => {
+        if (!node) {
+          return;
+        }
+
+        const candidates = [
+          node.getAttribute('href'),
+          node.getAttribute('xlink:href'),
+          node.getAttribute('data-href'),
+          node.getAttribute('src')
+        ];
+
+        candidates.forEach((candidate) => {
+          if (typeof candidate !== 'string') {
+            return;
+          }
+
+          const trimmed = candidate.trim();
+
+          if (!trimmed || /^data:/i.test(trimmed)) {
+            return;
+          }
+
+          if (trimmed.startsWith('//') && typeof window !== 'undefined' && window.location?.protocol) {
+            urls.add(`${window.location.protocol}${trimmed}`);
+            return;
+          }
+
+          if (/^https?:/i.test(trimmed)) {
+            urls.add(trimmed);
+          }
+        });
+      });
+
+      return Array.from(urls);
+    } catch (error) {
+      console.error('Error parsing SVG for image asset references:', error);
+      return [];
+    }
+  }, []);
+
+  const prefetchImageAssets = useCallback(
+    async (svgMarkup) => {
+      if (!svgMarkup || typeof svgMarkup !== 'string') {
+        return;
+      }
+
+      const assetUrls = extractImageUrlsFromSvg(svgMarkup);
+      if (!assetUrls.length) {
+        return;
+      }
+
+      const tasks = assetUrls
+        .map((url) => {
+          if (imageAssetCacheRef.current.has(url)) {
+            return null;
+          }
+
+          if (imageInFlightRef.current.has(url)) {
+            return imageInFlightRef.current.get(url);
+          }
+
+          const request = axios
+            .get(url, { responseType: 'blob' })
+            .then(() => {
+              imageAssetCacheRef.current.add(url);
+            })
+            .catch((error) => {
+              console.error('Error prefetching image asset:', url, error);
+            })
+            .finally(() => {
+              imageInFlightRef.current.delete(url);
+            });
+
+          imageInFlightRef.current.set(url, request);
+          return request;
+        })
+        .filter(Boolean);
+
+      if (tasks.length > 0) {
+        await Promise.allSettled(tasks);
+      }
+    },
+    [extractImageUrlsFromSvg]
+  );
+
+  const fetchSvgForRhyme = useCallback(
+    async (rhymeCode) => {
+      const code = typeof rhymeCode === 'string' ? rhymeCode : rhymeCode?.code;
+
+      if (!code) {
+        return null;
+      }
+
+      if (svgCacheRef.current.has(code)) {
+        const cached = svgCacheRef.current.get(code);
+        if (cached) {
+          await prefetchImageAssets(cached);
+        }
+        return cached;
+      }
+
+      if (svgInFlightRef.current.has(code)) {
+        const pending = await svgInFlightRef.current.get(code);
+        if (pending) {
+          await prefetchImageAssets(pending);
+        }
+        return pending;
+      }
+
+      const requestPromise = axios
+        .get(`${API}/rhymes/svg/${code}`)
+        .then((response) => {
+          const svgContent = sanitizeRhymeSvgContent(response.data, code);
+          svgCacheRef.current.set(code, svgContent);
+          return svgContent;
+        })
+        .catch((error) => {
+          console.error('Error fetching rhyme SVG:', error);
+          return null;
+        })
+        .finally(() => {
+          svgInFlightRef.current.delete(code);
+        });
+
+      svgInFlightRef.current.set(code, requestPromise);
+
+      const svgContent = await requestPromise;
+      if (svgContent) {
+        await prefetchImageAssets(svgContent);
+      }
+
+      return svgContent;
+    },
+    [prefetchImageAssets]
+  );
+
+  const ensurePageAssets = useCallback(
+    async (pageIndex, baseSelections) => {
+      const normalizedPageIndex = Number(pageIndex);
+
+      if (!Number.isFinite(normalizedPageIndex) || normalizedPageIndex < 0) {
+        return;
+      }
+
+      const sourceSelections = Array.isArray(baseSelections) ? baseSelections : selectedRhymesRef.current;
+      if (!Array.isArray(sourceSelections) || sourceSelections.length === 0) {
+        return;
+      }
+
+      const rhymesForPage = sourceSelections.filter(
+        (rhyme) => Number(rhyme?.page_index) === normalizedPageIndex
+      );
+
+      const missingRhymes = rhymesForPage.filter((rhyme) => {
+        const content = typeof rhyme?.svgContent === 'string' ? rhyme.svgContent.trim() : '';
+        return content.length === 0;
+      });
+
+      if (missingRhymes.length === 0) {
+        return;
+      }
+
+      if (pageFetchPromisesRef.current.has(normalizedPageIndex)) {
+        try {
+          await pageFetchPromisesRef.current.get(normalizedPageIndex);
+        } catch (error) {
+          // Ignore errors from previous attempts to allow retries on next navigation.
+        }
+        return;
+      }
+
+      const fetchPromise = (async () => {
+        const results = await Promise.all(
+          missingRhymes.map(async (rhyme) => {
+            const svgContent = await fetchSvgForRhyme(rhyme.code);
+            return { code: rhyme.code, page_index: rhyme.page_index, svgContent };
+          })
+        );
+
+        const successful = results.filter((result) => typeof result.svgContent === 'string' && result.svgContent.trim());
+
+        if (successful.length === 0) {
+          return;
+        }
+
+        setSelectedRhymes((prev) => {
+          const prevArray = Array.isArray(prev) ? prev : [];
+          const updated = prevArray.map((existing) => {
+            if (!existing) {
+              return existing;
+            }
+
+            if (Number(existing.page_index) !== normalizedPageIndex) {
+              return existing;
+            }
+
+            const match = successful.find(
+              (result) =>
+                result.code === existing.code &&
+                Number(result.page_index) === Number(existing.page_index)
+            );
+
+            if (!match) {
+              return existing;
+            }
+
+            return { ...existing, svgContent: match.svgContent };
+          });
+
+          selectedRhymesRef.current = updated;
+          return updated;
+        });
+      })();
+
+      pageFetchPromisesRef.current.set(normalizedPageIndex, fetchPromise);
+
+      try {
+        await fetchPromise;
+      } finally {
+        pageFetchPromisesRef.current.delete(normalizedPageIndex);
+      }
+    },
+    [fetchSvgForRhyme]
+  );
 
   useEffect(() => {
     fetchAvailableRhymes();
@@ -896,19 +1148,20 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
       const gradeSelections = response.data[grade] || [];
 
-      const rhymesWithSvg = await Promise.all(
-        gradeSelections.map(async (rhyme) => {
-          try {
-            const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-            const sanitizedSvg = sanitizeRhymeSvgContent(svgResponse.data, rhyme.code);
-            return { ...rhyme, position: rhyme.position || null, svgContent: sanitizedSvg };
-          } catch (error) {
-            return { ...rhyme, position: rhyme.position || null, svgContent: null };
-          }
-        })
-      );
+      const rhymesWithPlaceholders = gradeSelections.map((rhyme) => {
+        const existingContent =
+          typeof rhyme?.svgContent === 'string' && rhyme.svgContent.trim().length > 0
+            ? sanitizeRhymeSvgContent(rhyme.svgContent, rhyme.code)
+            : null;
 
-      const sortedSelections = sortSelections(rhymesWithSvg);
+        return {
+          ...rhyme,
+          position: rhyme.position || null,
+          svgContent: existingContent
+        };
+      });
+
+      const sortedSelections = sortSelections(rhymesWithPlaceholders);
       const usage = computePageUsage(sortedSelections);
       const nextInfo = computeNextAvailablePageInfoFromUsage(usage);
       const hasExistingSelections = Array.isArray(sortedSelections) && sortedSelections.length > 0;
@@ -917,7 +1170,16 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         : (Number.isFinite(nextInfo.index) ? nextInfo.index : 0);
 
       setSelectedRhymes(sortedSelections);
+      selectedRhymesRef.current = sortedSelections;
       setCurrentPageIndex(initialIndex);
+
+      if (hasExistingSelections) {
+        try {
+          await ensurePageAssets(initialIndex, sortedSelections);
+        } catch (prefetchError) {
+          console.error('Error preloading initial rhyme SVGs:', prefetchError);
+        }
+      }
     } catch (error) {
       console.error('Error fetching selected rhymes:', error);
     } finally {
@@ -1052,34 +1314,39 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       });
 
       setSelectedRhymes(nextArray);
+      selectedRhymesRef.current = nextArray;
 
       try {
-        const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-        const svgContent = sanitizeRhymeSvgContent(svgResponse.data, rhyme.code);
+        const svgContent = await fetchSvgForRhyme(rhyme.code);
 
-        setSelectedRhymes(prev => {
-          const prevArrayInner = Array.isArray(prev) ? prev : [];
+        if (svgContent) {
+          setSelectedRhymes((prev) => {
+            const prevArrayInner = Array.isArray(prev) ? prev : [];
 
-          return prevArrayInner.map(existing => {
-            if (!existing) return existing;
-            if (Number(existing.page_index) !== Number(pageIndex)) {
+            const updated = prevArrayInner.map((existing) => {
+              if (!existing) return existing;
+              if (Number(existing.page_index) !== Number(pageIndex)) {
+                return existing;
+              }
+
+              const candidatePosition = resolveRhymePosition(existing, {
+                rhymesForContext: prevArrayInner
+              });
+
+              if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+                return {
+                  ...existing,
+                  svgContent
+                };
+              }
+
               return existing;
-            }
-
-            const candidatePosition = resolveRhymePosition(existing, {
-              rhymesForContext: prevArrayInner
             });
 
-            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
-              return {
-                ...existing,
-                svgContent
-              };
-            }
-
-            return existing;
+            selectedRhymesRef.current = updated;
+            return updated;
           });
-        });
+        }
       } catch (svgError) {
         console.error('Error fetching rhyme SVG:', svgError);
       }
@@ -1088,9 +1355,20 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       if (isReplacement) {
         setCurrentPageIndex(pageIndex);
+        if (Number.isFinite(pageIndex)) {
+          ensurePageAssets(pageIndex).catch((assetError) => {
+            console.error('Error loading rhyme SVGs for page:', assetError);
+          });
+        }
       } else {
         setTimeout(() => {
-          setCurrentPageIndex(nextInfo.index);
+          const nextIndex = Number.isFinite(nextInfo.index) ? nextInfo.index : pageIndex;
+          setCurrentPageIndex(nextIndex);
+          if (Number.isFinite(nextIndex)) {
+            ensurePageAssets(nextIndex).catch((assetError) => {
+              console.error('Error loading rhyme SVGs for page:', assetError);
+            });
+          }
         }, 400);
       }
 
@@ -1175,14 +1453,18 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       );
       console.log("← Delete response:", res.data);
 
-      setSelectedRhymes(prev => prev.filter(r => {
-        if (Number(r.page_index) !== Number(currentPageIndex)) return true;
-        if (r.code !== rhyme.code) return true;
-        const candidatePosition = resolveRhymePosition(r, {
-          rhymesForContext: prev
+      setSelectedRhymes(prev => {
+        const filtered = prev.filter(r => {
+          if (Number(r.page_index) !== Number(currentPageIndex)) return true;
+          if (r.code !== rhyme.code) return true;
+          const candidatePosition = resolveRhymePosition(r, {
+            rhymesForContext: prev
+          });
+          return candidatePosition !== position;
         });
-        return candidatePosition !== position;
-      }));
+        selectedRhymesRef.current = filtered;
+        return filtered;
+      });
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
     } catch (err) {
@@ -1193,6 +1475,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const handlePageChange = (newPageIndex) => {
     const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_RHYMES_PER_GRADE - 1));
     setCurrentPageIndex(clampedIndex);
+    if (Number.isFinite(clampedIndex)) {
+      ensurePageAssets(clampedIndex).catch((error) => {
+        console.error('Error loading rhyme SVGs for page:', error);
+      });
+    }
   };
 
   const handleToggleReusable = () => {
