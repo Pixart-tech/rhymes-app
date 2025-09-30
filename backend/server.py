@@ -5,31 +5,24 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 
 from motor.motor_asyncio import AsyncIOMotorClient
-import base64
-import json
-import logging
-import mimetypes
 import os
-from dataclasses import dataclass
-from functools import lru_cache
-from io import BytesIO
+import logging
+import json
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
-from urllib.parse import quote, urlparse
+from dataclasses import dataclass
+from pydantic import BaseModel, Field
+from typing import Callable, List, Dict, Optional, Any, Tuple, Literal
+from io import BytesIO
+from functools import lru_cache
+from urllib.parse import quote
 
 import uuid
 from datetime import datetime
-import requests
-import xml.etree.ElementTree as ET
-from pydantic import BaseModel, Field
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 logger = logging.getLogger(__name__)
-
-ET.register_namespace("", "http://www.w3.org/2000/svg")
-ET.register_namespace("xlink", "http://www.w3.org/1999/xlink")
 
 
 def _resolve_svg_base_path() -> Optional[Path]:
@@ -159,234 +152,6 @@ def generate_rhyme_svg(rhyme_code: str) -> str:
     """
 
 
-def _guess_mime_type(reference: str) -> str:
-    """Return the most appropriate MIME type for ``reference``."""
-
-    mime_type, _ = mimetypes.guess_type(reference)
-    if mime_type:
-        return mime_type
-
-    return "application/octet-stream"
-
-
-def _resolve_asset_reference(
-    reference: str,
-    *,
-    search_paths: Optional[List[Path]] = None,
-) -> Optional[Tuple[str, str, str]]:
-    """Resolve ``reference`` to a fetchable target.
-
-    Returns a tuple of ``(target, kind, display_name)`` where ``kind`` is either
-    ``"remote"`` for HTTP(S) URLs or ``"local"`` for filesystem paths.
-    ``display_name`` is used solely for logging.
-    """
-
-    if not reference:
-        return None
-
-    trimmed = reference.strip()
-    if not trimmed or trimmed.startswith("data:"):
-        return None
-
-    if trimmed.startswith("//"):
-        trimmed = f"https:{trimmed}"
-
-    parsed = urlparse(trimmed)
-    if parsed.scheme in {"http", "https"}:
-        return trimmed, "remote", trimmed
-
-    if parsed.scheme == "file":
-        candidate_path = Path(parsed.path)
-        if candidate_path.exists() and candidate_path.is_file():
-            return str(candidate_path), "local", str(candidate_path)
-        return None
-
-    if trimmed.startswith("\\\\"):
-        unc_path = Path(trimmed)
-        if unc_path.exists() and unc_path.is_file():
-            return str(unc_path), "local", trimmed
-
-    candidate_path = Path(trimmed)
-    if candidate_path.is_absolute() and candidate_path.exists() and candidate_path.is_file():
-        return str(candidate_path), "local", str(candidate_path)
-
-    search_roots = [path.resolve() for path in (search_paths or []) if path]
-
-    for base_dir in search_roots:
-        try:
-            candidate = (base_dir / trimmed).resolve()
-        except (OSError, RuntimeError):
-            continue
-
-        if candidate.exists() and candidate.is_file():
-            return str(candidate), "local", str(candidate)
-
-    return None
-
-
-def _inline_external_image_references(
-    svg_markup: str,
-    *,
-    search_paths: Optional[List[Path]] = None,
-) -> str:
-    """Inline external image references inside ``svg_markup``.
-
-    Many SVG rhyme assets reference additional PNG/JPG artwork using ``<image>``
-    tags. PDF renderers struggle to dereference those relative URLs when the
-    binder is generated on the server, resulting in missing artwork. To make
-    the SVGs self-contained we fetch any external image resources and replace
-    the ``href`` with a ``data:`` URI before returning the markup.
-    """
-
-    if not svg_markup:
-        return svg_markup
-
-    try:
-        root = ET.fromstring(svg_markup)
-    except ET.ParseError as exc:
-        logger.warning("Unable to parse SVG for image inlining: %s", exc)
-        return svg_markup
-
-    href_attributes = (
-        "{http://www.w3.org/1999/xlink}href",
-        "href",
-        "xlink:href",
-        "data-href",
-        "src",
-    )
-    image_tag_suffixes = ("}image", "image", "}img", "img")
-
-    resolved_paths = [path.resolve() for path in (search_paths or []) if path]
-    fetched_cache: Dict[str, Optional[str]] = {}
-
-    with requests.Session() as session:
-        for node in root.iter():
-            tag = node.tag
-            if not isinstance(tag, str):
-                continue
-
-            tag_lower = tag.lower()
-            if not any(tag_lower.endswith(suffix) for suffix in image_tag_suffixes):
-                continue
-
-            for attribute in href_attributes:
-                raw_value = node.get(attribute)
-                if not isinstance(raw_value, str):
-                    continue
-
-                candidate = raw_value.strip()
-                if not candidate or candidate.startswith("data:"):
-                    continue
-
-                resolved = _resolve_asset_reference(candidate, search_paths=resolved_paths)
-                if resolved is None:
-                    continue
-
-                target, kind, display_name = resolved
-                cache_key = f"{kind}:{target}"
-
-                cache_hit = fetched_cache.get(cache_key)
-                if cache_key in fetched_cache and cache_hit is None:
-                    # We already attempted (and failed) to inline this asset.
-                    continue
-
-                if cache_hit is None:
-                    try:
-                        if kind == "remote":
-                            response = session.get(target, timeout=15)
-                            response.raise_for_status()
-                            content_bytes = response.content
-                            content_type_header = response.headers.get("content-type", "")
-                            mime_type = (
-                                content_type_header.split(";")[0].strip()
-                                if content_type_header
-                                else ""
-                            ) or _guess_mime_type(urlparse(target).path)
-                        else:
-                            local_path = Path(target)
-                            content_bytes = local_path.read_bytes()
-                            mime_type = _guess_mime_type(local_path.name)
-                    except Exception as exc:
-                        logger.warning(
-                            "Unable to inline SVG image asset '%s': %s",
-                            display_name,
-                            exc,
-                        )
-                        fetched_cache[cache_key] = None
-                        continue
-
-                    if not mime_type:
-                        mime_type = "application/octet-stream"
-
-                    data_uri = "data:{};base64,{}".format(
-                        mime_type,
-                        base64.b64encode(content_bytes).decode("ascii"),
-                    )
-                    fetched_cache[cache_key] = data_uri
-                else:
-                    data_uri = cache_hit
-
-                if not data_uri:
-                    continue
-
-                node.set(attribute, data_uri)
-                node.set("href", data_uri)
-                node.set("{http://www.w3.org/1999/xlink}href", data_uri)
-                break
-
-    try:
-        return ET.tostring(root, encoding="unicode")
-    except Exception as exc:
-        logger.warning("Failed to serialise SVG after inlining images: %s", exc)
-        return svg_markup
-
-
-def _load_rhyme_svg_markup(rhyme_code: str) -> str:
-    """Return SVG markup for ``rhyme_code`` with embedded image assets."""
-
-    svg_content: Optional[str] = None
-    search_paths: List[Path] = []
-
-    if RHYME_SVG_BASE_PATH is not None:
-        try:
-            base_dir = RHYME_SVG_BASE_PATH.resolve()
-        except OSError as exc:
-            logger.error(
-                "Unable to resolve RHYME_SVG_BASE_PATH '%s': %s",
-                RHYME_SVG_BASE_PATH,
-                exc,
-            )
-        else:
-            candidate_path = base_dir / f"{rhyme_code}.svg"
-            try:
-                candidate_path = candidate_path.resolve()
-            except OSError as exc:
-                logger.error(
-                    "Unable to resolve SVG path for rhyme %s: %s",
-                    rhyme_code,
-                    exc,
-                )
-            else:
-                if candidate_path.exists() and candidate_path.is_file():
-                    try:
-                        svg_content = candidate_path.read_text(encoding="utf-8")
-                    except OSError as read_exc:
-                        logger.error(
-                            "Unable to read SVG for rhyme %s at %s: %s",
-                            rhyme_code,
-                            candidate_path,
-                            read_exc,
-                        )
-                    else:
-                        search_paths.append(candidate_path.parent)
-            search_paths.append(base_dir)
-
-    if svg_content is None:
-        svg_content = generate_rhyme_svg(rhyme_code)
-
-    return _inline_external_image_references(svg_content, search_paths=search_paths)
-
-
 def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> List[str]:
     """Return a normalized list from a comma separated string."""
 
@@ -412,7 +177,7 @@ app.add_middleware(
 
 
 class PDFDependencyUnavailableError(RuntimeError):
-    """Raised when the core PDF toolchain cannot be imported at runtime."""
+      """Raised when the core PDF toolchain cannot be imported at runtime."""
     
 
 
@@ -981,10 +746,25 @@ async def get_rhyme_svg(rhyme_code: str):
     the frontend continues to work for missing assets.
     """
 
-    try:
-        svg_content = _load_rhyme_svg_markup(rhyme_code)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Rhyme not found")
+    svg_content: Optional[str] = None
+
+    if RHYME_SVG_BASE_PATH is not None:
+        # svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
+        svg_path= Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs") / f"{rhyme_code}.svg"
+        print(svg_path)
+        try:
+            svg_content = svg_path.read_text(encoding="utf-8")
+            
+        except FileNotFoundError:
+            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
+        except OSError as exc:
+            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
+
+    if svg_content is None:
+        try:
+            svg_content = generate_rhyme_svg(rhyme_code)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Rhyme not found")
 
     return Response(content=svg_content, media_type="image/svg+xml")
 
@@ -1238,7 +1018,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
         if full_page_entry:
             try:
-                svg_markup = _load_rhyme_svg_markup(full_page_entry["rhyme_code"])
+                svg_markup = generate_rhyme_svg(full_page_entry["rhyme_code"])
             except KeyError:
                 svg_markup = None
 
@@ -1276,7 +1056,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
                 svg_rendered = False
 
                 try:
-                    svg_markup = _load_rhyme_svg_markup(entry["rhyme_code"])
+                    svg_markup = generate_rhyme_svg(entry["rhyme_code"])
                 except KeyError:
                     svg_markup = None
 
