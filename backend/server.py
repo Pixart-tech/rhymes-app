@@ -53,6 +53,37 @@ def _resolve_svg_base_path() -> Optional[Path]:
 RHYME_SVG_BASE_PATH = _resolve_svg_base_path()
 
 
+def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]:
+    """Return the authored SVG path for ``rhyme_code`` if it exists."""
+
+    base_path = RHYME_SVG_BASE_PATH
+    if base_path is None:
+        return None
+
+    candidate = base_path / f"{rhyme_code}.svg"
+
+    try:
+        if candidate.is_file():
+            return candidate
+
+        if candidate.exists():
+            logger.warning(
+                "Authored SVG for rhyme %s exists at %s but is not a file.",
+                rhyme_code,
+                candidate,
+            )
+        else:
+            logger.warning(
+                "SVG file not found for rhyme %s at %s", rhyme_code, candidate
+            )
+    except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+        logger.error(
+            "Unable to access SVG for rhyme %s at %s: %s", rhyme_code, candidate, exc
+        )
+
+    return None
+
+
 def _resolve_cover_svg_base_path() -> Optional[Path]:
     """Return the configured base path for cover SVG assets, if any."""
 
@@ -311,10 +342,11 @@ def _load_rhyme_svg_markup(rhyme_code: str) -> str:
     :func:`generate_rhyme_svg`.
     """
 
-    if RHYME_SVG_BASE_PATH is not None:
-        svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
+    svg_path = _resolve_rhyme_svg_path(rhyme_code)
 
+    if svg_path is not None:
         try:
+
             svg_text = svg_path.read_text(encoding="utf-8")
         except FileNotFoundError:
             logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
@@ -322,6 +354,8 @@ def _load_rhyme_svg_markup(rhyme_code: str) -> str:
             logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
         else:
             return _localize_svg_image_assets(svg_text, svg_path, rhyme_code)
+
+        
 
     return generate_rhyme_svg(rhyme_code)
 
@@ -922,18 +956,15 @@ async def get_rhyme_svg(rhyme_code: str):
 
     svg_content: Optional[str] = None
 
-    if RHYME_SVG_BASE_PATH is not None:
-        # svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
-        
-        svg_path= Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs") / f"{rhyme_code}.svg"
-        print(svg_path)
+    svg_path = _resolve_rhyme_svg_path(rhyme_code)
+
+    if svg_path is not None:
         try:
             svg_content = svg_path.read_text(encoding="utf-8")
-            
-        except FileNotFoundError:
-            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
         except OSError as exc:
-            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
+            logger.error(
+                "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc
+            )
 
     if svg_content is None:
         try:
