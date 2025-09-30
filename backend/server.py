@@ -152,6 +152,13 @@ def generate_rhyme_svg(rhyme_code: str) -> str:
 
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class PDFDependencyUnavailableError(RuntimeError):
@@ -729,10 +736,10 @@ async def get_rhyme_svg(rhyme_code: str):
     if RHYME_SVG_BASE_PATH is not None:
         # svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
         svg_path= Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs") / f"{rhyme_code}.svg"
-        
+        print(svg_path)
         try:
             svg_content = svg_path.read_text(encoding="utf-8")
-            
+            print(svg_content)
             # svg_content=r"\\pixartnas\\home\\RHYMES & STORIES\\NEW\\Rhymes\\SVGs"+"\\"+rhyme_code+".svg"
             
         except FileNotFoundError:
@@ -1076,13 +1083,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
 # Include the router in the main app
 app.include_router(api_router)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 # Configure logging
 logging.basicConfig(
