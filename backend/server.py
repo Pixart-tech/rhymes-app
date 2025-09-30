@@ -4,7 +4,6 @@ from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 
-
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -174,6 +173,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 class PDFDependencyUnavailableError(RuntimeError):
