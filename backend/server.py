@@ -3,7 +3,8 @@ from fastapi.responses import Response
 
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
+
+
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -172,12 +173,6 @@ app.add_middleware(
     allow_origins=_parse_csv(os.environ.get("CORS_ORIGINS"), default=["*"]),
     allow_methods=["*"],
     allow_headers=["*"],
-)
-app.add_middleware(
-    ProxyHeadersMiddleware,
-    trusted_hosts=_parse_csv(
-        os.environ.get("TRUSTED_PROXY_HOSTS"), default=["*"]
-    ),
 )
 
 
