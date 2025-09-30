@@ -14,12 +14,23 @@ from pydantic import BaseModel, Field
 from typing import Callable, List, Dict, Optional, Any, Tuple, Literal
 from io import BytesIO
 from functools import lru_cache
-from urllib.parse import quote
+from shutil import copy2
+from urllib.parse import quote, unquote, urlparse
+from xml.etree import ElementTree as ET
 
 import uuid
 from datetime import datetime
 
 ROOT_DIR = Path(__file__).parent
+
+
+SVG_NS = "http://www.w3.org/2000/svg"
+XLINK_NS = "http://www.w3.org/1999/xlink"
+
+ET.register_namespace("", SVG_NS)
+ET.register_namespace("xlink", XLINK_NS)
+
+_IMAGE_CACHE_DIR = ROOT_DIR / "images"
 load_dotenv(ROOT_DIR / ".env")
 
 logger = logging.getLogger(__name__)
@@ -183,6 +194,145 @@ def generate_rhyme_svg(rhyme_code: str) -> str:
     """
 
 
+def _ensure_image_cache_dir() -> Path:
+    """Return the local image cache directory, creating it if needed."""
+
+    try:
+        _IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:  # pragma: no cover - filesystem permissions errors
+        logger.error("Unable to create image cache directory %s: %s", _IMAGE_CACHE_DIR, exc)
+        raise
+
+    return _IMAGE_CACHE_DIR
+
+
+def _localize_svg_image_assets(svg_text: str, svg_path: Path, rhyme_code: str) -> str:
+    """Copy referenced raster assets locally and rewrite their URIs."""
+
+    try:
+        root = ET.fromstring(svg_text)
+    except ET.ParseError as exc:
+        logger.warning(
+            "Failed to parse SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc
+        )
+        return svg_text
+
+    images = list(root.findall(f".//{{{SVG_NS}}}image"))
+    if not images:
+        return svg_text
+
+    try:
+        cache_dir = _ensure_image_cache_dir()
+    except OSError:
+        # Directory creation failure already logged in _ensure_image_cache_dir.
+        return svg_text
+
+    modified = False
+
+    for image in images:
+        href_value = image.get(f"{{{XLINK_NS}}}href") or image.get("href")
+        if not href_value:
+            continue
+
+        href_value = href_value.strip()
+        if href_value.startswith("data:"):
+            continue
+
+        parsed = urlparse(href_value)
+        if parsed.scheme and parsed.scheme != "file":
+            logger.debug(
+                "Skipping non-file image reference '%s' in %s", href_value, svg_path
+            )
+            continue
+
+        raw_path = unquote(parsed.path or href_value)
+        if not raw_path:
+            logger.debug("Skipping empty image reference in %s", svg_path)
+            continue
+        if parsed.scheme == "file" and parsed.netloc:
+            logger.warning(
+                "Skipping network file reference '%s' in %s", href_value, svg_path
+            )
+            continue
+
+        if parsed.scheme == "file":
+            asset_path = Path(raw_path)
+        else:
+            candidate = Path(raw_path)
+            if candidate.is_absolute():
+                asset_path = candidate
+            else:
+                asset_path = (svg_path.parent / candidate).resolve()
+
+        try:
+            src_stat = asset_path.stat()
+        except FileNotFoundError:
+            logger.warning(
+                "Bitmap asset '%s' for rhyme %s not found at %s", href_value, rhyme_code, asset_path
+            )
+            continue
+        except OSError as exc:  # pragma: no cover - unexpected filesystem error
+            logger.warning(
+                "Unable to access bitmap asset '%s' for rhyme %s at %s: %s",
+                href_value,
+                rhyme_code,
+                asset_path,
+                exc,
+            )
+            continue
+
+        destination = cache_dir / f"{rhyme_code}_{asset_path.name}"
+
+        copy_required = True
+        try:
+            dest_stat = destination.stat()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:  # pragma: no cover - unexpected filesystem error
+            logger.warning(
+                "Unable to access cached bitmap for rhyme %s at %s: %s",
+                rhyme_code,
+                destination,
+                exc,
+            )
+        else:
+            if dest_stat.st_mtime >= src_stat.st_mtime and dest_stat.st_size == src_stat.st_size:
+                copy_required = False
+
+        if copy_required:
+            try:
+                copy2(asset_path, destination)
+            except OSError as exc:
+                logger.warning(
+                    "Unable to copy bitmap asset '%s' for rhyme %s to %s: %s",
+                    href_value,
+                    rhyme_code,
+                    destination,
+                    exc,
+                )
+                continue
+
+        try:
+            new_href = destination.resolve().as_uri()
+        except OSError as exc:  # pragma: no cover - resolution errors unexpected
+            logger.warning(
+                "Unable to resolve cached bitmap URI for rhyme %s at %s: %s",
+                rhyme_code,
+                destination,
+                exc,
+            )
+            continue
+
+        image.set(f"{{{XLINK_NS}}}href", new_href)
+        image.set("href", new_href)
+        modified = True
+
+    if not modified:
+        return svg_text
+
+    return ET.tostring(root, encoding="unicode")
+
+
 def _load_rhyme_svg_markup(rhyme_code: str) -> str:
     """Return SVG markup for ``rhyme_code``.
 
@@ -196,11 +346,16 @@ def _load_rhyme_svg_markup(rhyme_code: str) -> str:
 
     if svg_path is not None:
         try:
-            return svg_path.read_text(encoding="utf-8")
+
+            svg_text = svg_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
         except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
-            logger.error(
-                "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc
-            )
+            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
+        else:
+            return _localize_svg_image_assets(svg_text, svg_path, rhyme_code)
+
+        
 
     return generate_rhyme_svg(rhyme_code)
 
