@@ -152,6 +152,28 @@ def generate_rhyme_svg(rhyme_code: str) -> str:
     """
 
 
+def _load_rhyme_svg_markup(rhyme_code: str) -> str:
+    """Return SVG markup for ``rhyme_code``.
+
+    When a filesystem base path is configured the function prefers loading the
+    authored SVG asset so the generated PDF binder can embed the authentic
+    artwork. If the asset is missing the helper falls back to
+    :func:`generate_rhyme_svg`.
+    """
+
+    if RHYME_SVG_BASE_PATH is not None:
+        svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
+
+        try:
+            return svg_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
+        except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
+
+    return generate_rhyme_svg(rhyme_code)
+
+
 def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> List[str]:
     """Return a normalized list from a comma separated string."""
 
@@ -1022,7 +1044,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
         if full_page_entry:
             try:
-                svg_markup = generate_rhyme_svg(full_page_entry["rhyme_code"])
+                svg_markup = _load_rhyme_svg_markup(full_page_entry["rhyme_code"])
             except KeyError:
                 svg_markup = None
 
@@ -1060,7 +1082,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
                 svg_rendered = False
 
                 try:
-                    svg_markup = generate_rhyme_svg(entry["rhyme_code"])
+                    svg_markup = _load_rhyme_svg_markup(entry["rhyme_code"])
                 except KeyError:
                     svg_markup = None
 
