@@ -979,6 +979,9 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
     try:
         pdf_resources = _load_pdf_dependencies()
+         
+        
+        
     except PDFDependencyUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
