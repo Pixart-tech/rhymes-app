@@ -14,6 +14,7 @@ The FastAPI service is defined in [`backend/server.py`](backend/server.py) and e
    - `MONGO_URL` – connection string to your MongoDB deployment.
    - `DB_NAME` – database name used by the application.
    - `CORS_ORIGINS` – optional comma-separated list of allowed origins for cross-origin requests.
+   - `TRUSTED_PROXY_HOSTS` – optional comma-separated list of proxy hostnames/IPs that are allowed to forward headers such as `X-Forwarded-For`. Defaults to `*`, which trusts all proxies (useful for VS Code and similar port forwarding solutions).
 2. **Create and activate a virtual environment** (recommended):
    ```bash
    python -m venv backend/.venv

@@ -3,6 +3,7 @@ from fastapi.responses import Response
 
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -151,13 +152,32 @@ def generate_rhyme_svg(rhyme_code: str) -> str:
     """
 
 
+def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> List[str]:
+    """Return a normalized list from a comma separated string."""
+
+    if value is None:
+        return list(default or [])
+
+    entries = [item.strip() for item in value.split(",") if item.strip()]
+    if entries:
+        return entries
+
+    return list(default or [])
+
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=_parse_csv(os.environ.get("CORS_ORIGINS"), default=["*"]),
     allow_methods=["*"],
     allow_headers=["*"],
+)
+app.add_middleware(
+    ProxyHeadersMiddleware,
+    trusted_hosts=_parse_csv(
+        os.environ.get("TRUSTED_PROXY_HOSTS"), default=["*"]
+    ),
 )
 
 
