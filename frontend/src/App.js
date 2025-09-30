@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
@@ -193,6 +193,35 @@ const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
     console.error('Error sanitizing rhyme SVG:', error);
     return svgContent;
   }
+};
+
+const normalizeCachePosition = (value) => {
+  if (value === null || value === undefined) {
+    return 'top';
+  }
+
+  const normalized = value.toString().trim().toLowerCase();
+  return normalized === 'bottom' ? 'bottom' : 'top';
+};
+
+const buildSvgCacheKey = (entry) => {
+  if (!entry) {
+    return null;
+  }
+
+  const code = entry.code || entry.rhyme_code;
+  if (!code) {
+    return null;
+  }
+
+  const rawPageIndex = entry.page_index ?? entry.pageIndex;
+  const pageIndex = Number(rawPageIndex);
+  if (!Number.isFinite(pageIndex) || pageIndex < 0) {
+    return null;
+  }
+
+  const position = normalizeCachePosition(entry.position);
+  return `${code}|${pageIndex}|${position}`;
 };
 
 // Authentication Page
@@ -803,6 +832,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  const svgFetchStatusRef = useRef(new Map());
+
   const MAX_RHYMES_PER_GRADE = 25;
 
   useEffect(() => {
@@ -896,19 +927,15 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
       const gradeSelections = response.data[grade] || [];
 
-      const rhymesWithSvg = await Promise.all(
-        gradeSelections.map(async (rhyme) => {
-          try {
-            const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-            const sanitizedSvg = sanitizeRhymeSvgContent(svgResponse.data, rhyme.code);
-            return { ...rhyme, position: rhyme.position || null, svgContent: sanitizedSvg };
-          } catch (error) {
-            return { ...rhyme, position: rhyme.position || null, svgContent: null };
-          }
-        })
-      );
+      svgFetchStatusRef.current.clear();
 
-      const sortedSelections = sortSelections(rhymesWithSvg);
+      const rhymesWithPlaceholders = gradeSelections.map((rhyme) => ({
+        ...rhyme,
+        position: rhyme.position || null,
+        svgContent: null
+      }));
+
+      const sortedSelections = sortSelections(rhymesWithPlaceholders);
       const usage = computePageUsage(sortedSelections);
       const nextInfo = computeNextAvailablePageInfoFromUsage(usage);
       const hasExistingSelections = Array.isArray(sortedSelections) && sortedSelections.length > 0;
@@ -1043,6 +1070,18 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         return;
       }
 
+      removals.forEach((selection) => {
+        const removalKey = buildSvgCacheKey(selection);
+        if (removalKey) {
+          svgFetchStatusRef.current.delete(removalKey);
+        }
+      });
+
+      const cacheKey = buildSvgCacheKey(baseRhyme);
+      if (cacheKey) {
+        svgFetchStatusRef.current.set(cacheKey, 'loading');
+      }
+
       await axios.post(`${API}/rhymes/select`, {
         school_id: school.school_id,
         grade: grade,
@@ -1056,6 +1095,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       try {
         const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
         const svgContent = sanitizeRhymeSvgContent(svgResponse.data, rhyme.code);
+
+        if (cacheKey) {
+          svgFetchStatusRef.current.set(cacheKey, 'loaded');
+        }
 
         setSelectedRhymes(prev => {
           const prevArrayInner = Array.isArray(prev) ? prev : [];
@@ -1082,6 +1125,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         });
       } catch (svgError) {
         console.error('Error fetching rhyme SVG:', svgError);
+        if (cacheKey) {
+          svgFetchStatusRef.current.delete(cacheKey);
+        }
       }
 
       const nextInfo = computeNextAvailablePageInfo(nextArray);
@@ -1162,6 +1208,15 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
     const position = resolveRhymePosition(rhyme, { explicitPosition });
 
+    const cacheKey = buildSvgCacheKey({
+      ...rhyme,
+      page_index: rhyme?.page_index ?? currentPageIndex,
+      position
+    });
+    if (cacheKey) {
+      svgFetchStatusRef.current.delete(cacheKey);
+    }
+
     console.log("→ Deleting rhyme (request):", {
       code: rhyme.code,
       position,
@@ -1204,6 +1259,103 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const nextAvailablePageIndex = nextPageInfo.index;
   const hasNextPageCapacity = nextPageInfo.hasCapacity;
   const highestFilledIndex = nextPageInfo.highestIndex;
+
+  useEffect(() => {
+    const activeKeys = new Set(
+      (selectedRhymes || [])
+        .map((entry) => buildSvgCacheKey(entry))
+        .filter(Boolean)
+    );
+
+    const cache = svgFetchStatusRef.current;
+    for (const key of Array.from(cache.keys())) {
+      if (!activeKeys.has(key)) {
+        cache.delete(key);
+      }
+    }
+  }, [selectedRhymes]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadSvgForPage = async () => {
+      const normalizedIndex = Number(currentPageIndex);
+      if (!Number.isFinite(normalizedIndex) || normalizedIndex < 0) {
+        return;
+      }
+
+      const rhymesOnPage = (selectedRhymes || []).filter(
+        (selection) => Number(selection?.page_index) === normalizedIndex
+      );
+
+      if (rhymesOnPage.length === 0) {
+        return;
+      }
+
+      const fetchPromises = rhymesOnPage
+        .map((selection) => {
+          if (!selection || typeof selection.code !== 'string') {
+            return null;
+          }
+
+          if (
+            typeof selection.svgContent === 'string' &&
+            selection.svgContent.trim().length > 0
+          ) {
+            return null;
+          }
+
+          const cacheKey = buildSvgCacheKey(selection);
+          if (!cacheKey) {
+            return null;
+          }
+
+          const status = svgFetchStatusRef.current.get(cacheKey);
+          if (status === 'loading' || status === 'loaded') {
+            return null;
+          }
+
+          svgFetchStatusRef.current.set(cacheKey, 'loading');
+
+          return axios
+            .get(`${API}/rhymes/svg/${selection.code}`)
+            .then((response) => sanitizeRhymeSvgContent(response.data, selection.code))
+            .then((svgContent) => {
+              svgFetchStatusRef.current.set(cacheKey, 'loaded');
+
+              if (isCancelled) {
+                return;
+              }
+
+              setSelectedRhymes((prev) =>
+                prev.map((item) => {
+                  if (!item) return item;
+                  if (item.code !== selection.code) return item;
+                  if (Number(item.page_index) !== Number(selection.page_index)) return item;
+                  return { ...item, svgContent };
+                })
+              );
+            })
+            .catch((error) => {
+              if (!isCancelled) {
+                console.error('Error fetching rhyme SVG:', error);
+              }
+              svgFetchStatusRef.current.delete(cacheKey);
+            });
+        })
+        .filter(Boolean);
+
+      if (fetchPromises.length > 0) {
+        await Promise.allSettled(fetchPromises);
+      }
+    };
+
+    void loadSvgForPage();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentPageIndex, selectedRhymes]);
 
   // Calculate total pages
   const calculateTotalPages = () => {
