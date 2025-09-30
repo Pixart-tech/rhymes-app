@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 from pydantic import BaseModel, Field
-from typing import Callable, List, Dict, Optional, Any, Tuple, Literal, Set
+from typing import Callable, List, Dict, Optional, Any, Tuple, Literal
 from io import BytesIO
 from functools import lru_cache
 from urllib.parse import quote
@@ -40,13 +40,6 @@ def _resolve_svg_base_path() -> Optional[Path]:
 
 
 RHYME_SVG_BASE_PATH = _resolve_svg_base_path()
-
-# Some environments mount the rhyme SVG artwork from a legacy network share
-# instead of configuring ``RHYME_SVG_BASE_PATH``. Keeping the location here
-# ensures the API and the binder export can share the same loading logic.
-LEGACY_NETWORK_SVG_BASE_PATH = Path(
-    r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs"
-)
 
 
 def _resolve_cover_svg_base_path() -> Optional[Path]:
@@ -123,40 +116,6 @@ db = client[os.environ["DB_NAME"]]
 # Load rhymes data
 with open(ROOT_DIR / "rhymes.json", "r") as f:
     RHYMES_DATA = json.load(f)
-
-
-def _load_rhyme_svg_markup(rhyme_code: str) -> Optional[str]:
-    """Return the real SVG artwork for ``rhyme_code`` when available."""
-
-    svg_directories: List[Path] = []
-    seen_paths: Set[Path] = set()
-
-    for base_path in (RHYME_SVG_BASE_PATH, LEGACY_NETWORK_SVG_BASE_PATH):
-        if base_path and base_path not in seen_paths:
-            seen_paths.add(base_path)
-
-            try:
-                if not base_path.exists():
-                    continue
-            except OSError as exc:
-                logger.error(
-                    "Unable to access SVG base path %s: %s", base_path, exc
-                )
-                continue
-
-            svg_directories.append(base_path)
-
-    for base_path in svg_directories:
-        svg_path = base_path / f"{rhyme_code}.svg"
-
-        try:
-            return svg_path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
-        except OSError as exc:
-            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
-
-    return None
 
 
 def generate_rhyme_svg(rhyme_code: str) -> str:
@@ -787,7 +746,19 @@ async def get_rhyme_svg(rhyme_code: str):
     the frontend continues to work for missing assets.
     """
 
-    svg_content = _load_rhyme_svg_markup(rhyme_code)
+    svg_content: Optional[str] = None
+
+    if RHYME_SVG_BASE_PATH is not None:
+        # svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
+        svg_path= Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs") / f"{rhyme_code}.svg"
+        print(svg_path)
+        try:
+            svg_content = svg_path.read_text(encoding="utf-8")
+            
+        except FileNotFoundError:
+            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
+        except OSError as exc:
+            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
 
     if svg_content is None:
         try:
@@ -1049,13 +1020,10 @@ async def download_rhyme_binder(school_id: str, grade: str):
         )
 
         if full_page_entry:
-            svg_markup = _load_rhyme_svg_markup(full_page_entry["rhyme_code"])
-
-            if svg_markup is None:
-                try:
-                    svg_markup = generate_rhyme_svg(full_page_entry["rhyme_code"])
-                except KeyError:
-                    svg_markup = None
+            try:
+                svg_markup = generate_rhyme_svg(full_page_entry["rhyme_code"])
+            except KeyError:
+                svg_markup = None
 
             if svg_markup and _render_svg_on_canvas(
                 pdf_canvas,
@@ -1090,13 +1058,10 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
                 svg_rendered = False
 
-                svg_markup = _load_rhyme_svg_markup(entry["rhyme_code"])
-
-                if svg_markup is None:
-                    try:
-                        svg_markup = generate_rhyme_svg(entry["rhyme_code"])
-                    except KeyError:
-                        svg_markup = None
+                try:
+                    svg_markup = generate_rhyme_svg(entry["rhyme_code"])
+                except KeyError:
+                    svg_markup = None
 
                 if svg_markup:
                     svg_rendered = _render_svg_on_canvas(
