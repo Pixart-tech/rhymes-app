@@ -727,9 +727,14 @@ async def get_rhyme_svg(rhyme_code: str):
     svg_content: Optional[str] = None
 
     if RHYME_SVG_BASE_PATH is not None:
-        svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
+        # svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
+        svg_path= Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs") / f"{rhyme_code}.svg"
+        
         try:
             svg_content = svg_path.read_text(encoding="utf-8")
+            
+            # svg_content=r"\\pixartnas\\home\\RHYMES & STORIES\\NEW\\Rhymes\\SVGs"+"\\"+rhyme_code+".svg"
+            
         except FileNotFoundError:
             logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
         except OSError as exc:
