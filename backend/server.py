@@ -1212,6 +1212,22 @@ async def download_rhyme_binder(school_id: str, grade: str):
     page_width, page_height = pdf_resources.page_size
     svg_backend = pdf_resources.svg_backend
 
+    svg_markup_cache: Dict[str, Optional[str]] = {}
+
+    def _get_svg_markup(rhyme_code: str) -> Optional[str]:
+        """Return cached SVG markup for ``rhyme_code`` within this request."""
+
+        if rhyme_code in svg_markup_cache:
+            return svg_markup_cache[rhyme_code]
+
+        try:
+            markup = _load_rhyme_svg_markup(rhyme_code)
+        except KeyError:
+            markup = None
+
+        svg_markup_cache[rhyme_code] = markup
+        return markup
+
     for page_index in sorted(pages_map.keys()):
         entries = pages_map[page_index]
         # Sort so that "top" entries are rendered before "bottom"
@@ -1226,10 +1242,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
         )
 
         if full_page_entry:
-            try:
-                svg_markup = _load_rhyme_svg_markup(full_page_entry["rhyme_code"])
-            except KeyError:
-                svg_markup = None
+            svg_markup = _get_svg_markup(full_page_entry["rhyme_code"])
 
             if svg_markup and _render_svg_on_canvas(
                 pdf_canvas,
@@ -1264,10 +1277,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
                 svg_rendered = False
 
-                try:
-                    svg_markup = _load_rhyme_svg_markup(entry["rhyme_code"])
-                except KeyError:
-                    svg_markup = None
+                svg_markup = _get_svg_markup(entry["rhyme_code"])
 
                 if svg_markup:
                     svg_rendered = _render_svg_on_canvas(
@@ -1296,6 +1306,8 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
     filename = f"{grade}_rhyme_binder.pdf"
     headers = {"Content-Disposition": f"attachment; filename={filename}"}
+
+    svg_markup_cache.clear()
 
     return Response(
         content=buffer.getvalue(), media_type="application/pdf", headers=headers
