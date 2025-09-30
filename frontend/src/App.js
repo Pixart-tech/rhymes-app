@@ -1472,14 +1472,18 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     }
   };
 
-  const handlePageChange = (newPageIndex) => {
+  const handlePageChange = async (newPageIndex) => {
     const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_RHYMES_PER_GRADE - 1));
-    setCurrentPageIndex(clampedIndex);
+
     if (Number.isFinite(clampedIndex)) {
-      ensurePageAssets(clampedIndex).catch((error) => {
+      try {
+        await ensurePageAssets(clampedIndex);
+      } catch (error) {
         console.error('Error loading rhyme SVGs for page:', error);
-      });
+      }
     }
+
+    setCurrentPageIndex(clampedIndex);
   };
 
   const handleToggleReusable = () => {
@@ -1657,7 +1661,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 <div className="flex-shrink-0 space-y-6">
                   <div className="flex items-center justify-between">
                     <Button
-                      onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
+                      onClick={() => void handlePageChange(Math.max(0, currentPageIndex - 1))}
                       disabled={currentPageIndex === 0}
                       variant="outline"
                       size="sm"
@@ -1671,7 +1675,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                     </div>
 
                     <Button
-                      onClick={() => handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
+                      onClick={() => void handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
                       disabled={currentPageIndex >= totalPages - 1}
                       variant="outline"
                       size="sm"
