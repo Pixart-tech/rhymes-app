@@ -8,6 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import json
+import sys
 from pathlib import Path
 from dataclasses import dataclass
 from pydantic import BaseModel, Field
@@ -25,6 +26,60 @@ load_dotenv(ROOT_DIR / ".env")
 logger = logging.getLogger(__name__)
 
 
+def _extend_virtualenv_site_packages() -> None:
+    """Ensure site-packages from a virtual environment are on ``sys.path``.
+
+    Some deployment environments install optional dependencies such as
+    ``svglib`` inside a virtual environment but start the application with the
+    system Python interpreter. When this happens ``sys.path`` does not include
+    the virtualenv's ``site-packages`` directory which results in ``ImportError``
+    even though the package is installed. By explicitly appending common
+    virtualenv locations we make the import logic for PDF generation more
+    robust without affecting environments that are already configured
+    correctly.
+    """
+
+    virtual_env = os.environ.get("VIRTUAL_ENV")
+    extra_paths = os.environ.get("BACKEND_EXTRA_SITE_PACKAGES")
+
+    candidate_paths: List[Path] = []
+
+    if virtual_env:
+        venv_path = Path(virtual_env)
+        version_tag = f"python{sys.version_info.major}.{sys.version_info.minor}"
+        candidate_paths.extend(
+            [
+                venv_path / "lib" / version_tag / "site-packages",
+                venv_path / "local" / "lib" / version_tag / "site-packages",
+                venv_path / "Lib" / "site-packages",
+                venv_path / "lib" / "site-packages",
+            ]
+        )
+
+    if extra_paths:
+        for chunk in extra_paths.split(os.pathsep):
+            stripped = chunk.strip()
+            if not stripped:
+                continue
+            candidate_paths.append(Path(stripped))
+
+    for candidate in candidate_paths:
+        try:
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError):
+            continue
+
+        if not resolved.exists():
+            continue
+
+        path_str = str(resolved)
+        if path_str not in sys.path:
+            sys.path.append(path_str)
+
+
+_extend_virtualenv_site_packages()
+
+
 def _resolve_svg_base_path() -> Optional[Path]:
     """Return the configured base path for rhyme SVG assets, if any."""
 
@@ -40,6 +95,29 @@ def _resolve_svg_base_path() -> Optional[Path]:
 
 
 RHYME_SVG_BASE_PATH = _resolve_svg_base_path()
+
+
+def _resolve_svg_additional_paths() -> List[Path]:
+    """Return additional SVG search paths configured via the environment."""
+
+    raw_value = os.environ.get("RHYME_SVG_ADDITIONAL_PATHS", "")
+    if not raw_value:
+        return []
+
+    paths: List[Path] = []
+    for chunk in raw_value.split(os.pathsep):
+        candidate = chunk.strip()
+        if not candidate:
+            continue
+        try:
+            paths.append(Path(candidate).expanduser())
+        except (OSError, RuntimeError) as exc:
+            logger.warning("Invalid RHYME_SVG_ADDITIONAL_PATHS entry '%s': %s", candidate, exc)
+
+    return paths
+
+
+RHYME_SVG_ADDITIONAL_PATHS = _resolve_svg_additional_paths()
 
 
 def _resolve_cover_svg_base_path() -> Optional[Path]:
@@ -752,20 +830,36 @@ async def get_rhyme_svg(rhyme_code: str):
     """
 
     svg_content: Optional[str] = None
+    attempted_paths: List[Path] = []
 
+    svg_base_candidates: List[Path] = []
     if RHYME_SVG_BASE_PATH is not None:
-        # svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
-        svg_path= Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs") / f"{rhyme_code}.svg"
-        print(svg_path)
+        svg_base_candidates.append(RHYME_SVG_BASE_PATH)
+    svg_base_candidates.extend(RHYME_SVG_ADDITIONAL_PATHS)
+
+    for base_path in svg_base_candidates:
+        svg_path = base_path / f"{rhyme_code}.svg"
+        attempted_paths.append(svg_path)
+
         try:
             svg_content = svg_path.read_text(encoding="utf-8")
-            print(svg_content)
-            # svg_content=r"\\pixartnas\\home\\RHYMES & STORIES\\NEW\\Rhymes\\SVGs"+"\\"+rhyme_code+".svg"
-            
         except FileNotFoundError:
-            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
+            logger.debug(
+                "SVG file not found for rhyme %s at %s", rhyme_code, svg_path
+            )
         except OSError as exc:
-            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
+            logger.warning(
+                "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc
+            )
+        else:
+            break
+
+    if svg_content is None and attempted_paths:
+        logger.warning(
+            "Unable to locate SVG for rhyme %s in configured paths: %s",
+            rhyme_code,
+            ", ".join(str(path) for path in attempted_paths),
+        )
 
     if svg_content is None:
         try:
