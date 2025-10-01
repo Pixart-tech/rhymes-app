@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 SVG_NS = "http://www.w3.org/2000/svg"
 _GRADIENT_URL_RE = re.compile(r"^url\(#(?P<id>[^)]+)\)$")
+_CSS_GRADIENT_DECLARATION_RE = re.compile(
+    r"(?P<prop>\b(?:fill|stroke)\s*:\s*)url\(#(?P<id>[^)]+)\)", re.IGNORECASE
+)
 
 
 def _resolve_svg_base_path() -> Optional[Path]:
@@ -221,6 +224,26 @@ def _replace_gradient_references(element: ET.Element, gradient_colors: Dict[str,
     return updated
 
 
+def _replace_gradient_references_in_css(
+    css_text: str, gradient_colors: Dict[str, str]
+) -> Tuple[str, bool]:
+    """Replace ``fill``/``stroke`` gradient references inside inline CSS blocks."""
+
+    updated = False
+
+    def _replace(match: re.Match[str]) -> str:
+        gradient_id = match.group("id")
+        fallback = gradient_colors.get(gradient_id)
+        if not fallback:
+            return match.group(0)
+
+        nonlocal updated
+        updated = True
+        return f"{match.group('prop')}{fallback}"
+
+    return _CSS_GRADIENT_DECLARATION_RE.sub(_replace, css_text), updated
+
+
 def _sanitize_svg_for_svglib(svg_markup: str) -> str:
     """Replace unsupported gradient colour references with solid colours."""
 
@@ -237,6 +260,15 @@ def _sanitize_svg_for_svglib(svg_markup: str) -> str:
     for element in root.iter():
         if _replace_gradient_references(element, gradient_colors):
             updated = True
+            continue
+
+        if element.tag == f"{{{SVG_NS}}}style" and element.text:
+            replaced_text, css_updated = _replace_gradient_references_in_css(
+                element.text, gradient_colors
+            )
+            if css_updated:
+                element.text = replaced_text
+                updated = True
 
     if not updated:
         return svg_markup
