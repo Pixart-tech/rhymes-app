@@ -222,8 +222,9 @@ def test_binder_uses_external_svg(tmp_path, monkeypatch, stub_pdf_resources, stu
 
     captured = {}
 
-    def fake_render(pdf_canvas, backend, svg_markup, width, height, *, x=0, y=0):
-        captured["markup"] = svg_markup
+    def fake_render(pdf_canvas, backend, svg_document, width, height, *, x=0, y=0):
+        captured["markup"] = svg_document.markup
+        captured["source_path"] = svg_document.source_path
         captured["size"] = (width, height)
         captured["position"] = (x, y)
         return True
@@ -240,6 +241,7 @@ def test_binder_uses_external_svg(tmp_path, monkeypatch, stub_pdf_resources, stu
 
     assert response.media_type == "application/pdf"
     assert captured["markup"] == svg_content
+    assert captured["source_path"] == tmp_path / f"{rhyme_code}.svg"
     assert draw_calls == []
 
 
@@ -270,8 +272,8 @@ def test_binder_falls_back_to_generated_svg(tmp_path, monkeypatch, stub_pdf_reso
 
     captured = {"markups": []}
 
-    def fake_render(pdf_canvas, backend, svg_markup, width, height, *, x=0, y=0):
-        captured["markups"].append(svg_markup)
+    def fake_render(pdf_canvas, backend, svg_document, width, height, *, x=0, y=0):
+        captured["markups"].append(svg_document.markup)
         return False
 
     draw_calls = []
