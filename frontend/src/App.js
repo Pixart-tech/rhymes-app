@@ -91,9 +91,7 @@ const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
       }
     }
 
-    if (!svgElement.getAttribute('preserveAspectRatio')) {
-      svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-    }
+    svgElement.setAttribute('preserveAspectRatio', 'xMidYMid slice');
 
     const viewBoxAttr = svgElement.getAttribute('viewBox');
     let viewBoxWidth;
