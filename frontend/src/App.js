@@ -969,89 +969,119 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   );
 
   const ensurePageAssets = useCallback(
-    async (pageIndex, baseSelections) => {
-      const normalizedPageIndex = Number(pageIndex);
-
-      if (!Number.isFinite(normalizedPageIndex) || normalizedPageIndex < 0) {
-        return;
-      }
-
+    async (pageIndex, baseSelections, options = {}) => {
       const sourceSelections = Array.isArray(baseSelections) ? baseSelections : selectedRhymesRef.current;
+
       if (!Array.isArray(sourceSelections) || sourceSelections.length === 0) {
         return;
       }
 
-      const rhymesForPage = sourceSelections.filter(
-        (rhyme) => Number(rhyme?.page_index) === normalizedPageIndex
-      );
+      const indicesToProcess = new Set();
+      const normalizedPageIndex = Number(pageIndex);
 
-      const missingRhymes = rhymesForPage.filter((rhyme) => {
-        const content = typeof rhyme?.svgContent === 'string' ? rhyme.svgContent.trim() : '';
-        return content.length === 0;
+      if (Number.isFinite(normalizedPageIndex) && normalizedPageIndex >= 0) {
+        indicesToProcess.add(normalizedPageIndex);
+      }
+
+      const additionalPageIndexes = Array.isArray(options.additionalPageIndexes)
+        ? options.additionalPageIndexes
+        : [];
+
+      additionalPageIndexes.forEach((value) => {
+        const numericValue = Number(value);
+        if (Number.isFinite(numericValue) && numericValue >= 0) {
+          indicesToProcess.add(numericValue);
+        }
       });
 
-      if (missingRhymes.length === 0) {
-        return;
-      }
-
-      if (pageFetchPromisesRef.current.has(normalizedPageIndex)) {
-        try {
-          await pageFetchPromisesRef.current.get(normalizedPageIndex);
-        } catch (error) {
-          // Ignore errors from previous attempts to allow retries on next navigation.
+      if (options.prefetchNext && Number.isFinite(normalizedPageIndex) && normalizedPageIndex >= 0) {
+        const nextIndex = normalizedPageIndex + 1;
+        if (nextIndex >= 0) {
+          indicesToProcess.add(nextIndex);
         }
+      }
+
+      if (indicesToProcess.size === 0) {
         return;
       }
 
-      const fetchPromise = (async () => {
-        const results = await Promise.all(
-          missingRhymes.map(async (rhyme) => {
-            const svgContent = await fetchSvgForRhyme(rhyme.code);
-            return { code: rhyme.code, page_index: rhyme.page_index, svgContent };
-          })
+      const loadPageAssets = async (targetIndex) => {
+        const rhymesForPage = sourceSelections.filter(
+          (rhyme) => Number(rhyme?.page_index) === targetIndex
         );
 
-        const successful = results.filter((result) => typeof result.svgContent === 'string' && result.svgContent.trim());
+        const missingRhymes = rhymesForPage.filter((rhyme) => {
+          const content = typeof rhyme?.svgContent === 'string' ? rhyme.svgContent.trim() : '';
+          return content.length === 0;
+        });
 
-        if (successful.length === 0) {
+        if (missingRhymes.length === 0) {
           return;
         }
 
-        setSelectedRhymes((prev) => {
-          const prevArray = Array.isArray(prev) ? prev : [];
-          const updated = prevArray.map((existing) => {
-            if (!existing) {
-              return existing;
-            }
+        if (pageFetchPromisesRef.current.has(targetIndex)) {
+          try {
+            await pageFetchPromisesRef.current.get(targetIndex);
+          } catch (error) {
+            // Ignore errors from previous attempts to allow retries on next navigation.
+          }
+          return;
+        }
 
-            if (Number(existing.page_index) !== normalizedPageIndex) {
-              return existing;
-            }
+        const fetchPromise = (async () => {
+          const results = await Promise.all(
+            missingRhymes.map(async (rhyme) => {
+              const svgContent = await fetchSvgForRhyme(rhyme.code);
+              return { code: rhyme.code, page_index: rhyme.page_index, svgContent };
+            })
+          );
 
-            const match = successful.find(
-              (result) =>
-                result.code === existing.code &&
-                Number(result.page_index) === Number(existing.page_index)
-            );
+          const successful = results.filter((result) => typeof result.svgContent === 'string' && result.svgContent.trim());
 
-            if (!match) {
-              return existing;
-            }
+          if (successful.length === 0) {
+            return;
+          }
 
-            return { ...existing, svgContent: match.svgContent };
+          setSelectedRhymes((prev) => {
+            const prevArray = Array.isArray(prev) ? prev : [];
+            const updated = prevArray.map((existing) => {
+              if (!existing) {
+                return existing;
+              }
+
+              if (Number(existing.page_index) !== targetIndex) {
+                return existing;
+              }
+
+              const match = successful.find(
+                (result) =>
+                  result.code === existing.code &&
+                  Number(result.page_index) === Number(existing.page_index)
+              );
+
+              if (!match) {
+                return existing;
+              }
+
+              return { ...existing, svgContent: match.svgContent };
+            });
+
+            selectedRhymesRef.current = updated;
+            return updated;
           });
+        })();
 
-          selectedRhymesRef.current = updated;
-          return updated;
-        });
-      })();
+        pageFetchPromisesRef.current.set(targetIndex, fetchPromise);
 
-      pageFetchPromisesRef.current.set(normalizedPageIndex, fetchPromise);
+        try {
+          await fetchPromise;
+        } finally {
+          pageFetchPromisesRef.current.delete(targetIndex);
+        }
+      };
 
-      try {
-        await fetchPromise;
-      } finally {
-        pageFetchPromisesRef.current.delete(normalizedPageIndex);
+      for (const index of indicesToProcess) {
+        await loadPageAssets(index);
       }
     },
     [fetchSvgForRhyme]
@@ -1175,7 +1205,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       if (hasExistingSelections) {
         try {
-          await ensurePageAssets(initialIndex, sortedSelections);
+          await ensurePageAssets(initialIndex, sortedSelections, { prefetchNext: true });
         } catch (prefetchError) {
           console.error('Error preloading initial rhyme SVGs:', prefetchError);
         }
@@ -1356,7 +1386,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       if (isReplacement) {
         setCurrentPageIndex(pageIndex);
         if (Number.isFinite(pageIndex)) {
-          ensurePageAssets(pageIndex).catch((assetError) => {
+          ensurePageAssets(pageIndex, undefined, { prefetchNext: true }).catch((assetError) => {
             console.error('Error loading rhyme SVGs for page:', assetError);
           });
         }
@@ -1365,7 +1395,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
           const nextIndex = Number.isFinite(nextInfo.index) ? nextInfo.index : pageIndex;
           setCurrentPageIndex(nextIndex);
           if (Number.isFinite(nextIndex)) {
-            ensurePageAssets(nextIndex).catch((assetError) => {
+            ensurePageAssets(nextIndex, undefined, { prefetchNext: true }).catch((assetError) => {
               console.error('Error loading rhyme SVGs for page:', assetError);
             });
           }
@@ -1477,7 +1507,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
     if (Number.isFinite(clampedIndex)) {
       try {
-        await ensurePageAssets(clampedIndex);
+        await ensurePageAssets(clampedIndex, undefined, { prefetchNext: true });
       } catch (error) {
         console.error('Error loading rhyme SVGs for page:', error);
       }
