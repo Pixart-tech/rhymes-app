@@ -34,75 +34,38 @@ _IMAGE_CACHE_DIR = ROOT_DIR / "images"
 load_dotenv(ROOT_DIR / ".env")
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_svg_base_path() -> Optional[Path]:
-    """Return the configured base path for rhyme SVG assets, if any."""
-
-    base_path = os.environ.get("RHYME_SVG_BASE_PATH")
-    if not base_path:
-        return None
-
-    try:
-        return Path(base_path).expanduser()
-    except (OSError, RuntimeError) as exc:
-        logger.warning("Invalid RHYME_SVG_BASE_PATH '%s': %s", base_path, exc)
-        return None
-
-
-RHYME_SVG_BASE_PATH = _resolve_svg_base_path()
+RHYME_SVG_BASE_PATH = Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs")
 
 
 def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]:
-    """Return the authored SVG path for ``rhyme_code`` if it exists.
+    """Return the network SVG path for ``rhyme_code`` if it exists."""
 
-    The lookup prefers ``RHYME_SVG_BASE_PATH`` when set so deployments can
-    reference a network share or mounted volume. When the environment variable
-    is unset the function falls back to the repository-local ``images``
-    directory to support development defaults.
-    """
+    candidate = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
 
-    search_paths: List[Path] = []
+    try:
+        if candidate.is_file():
+            return candidate
 
-    if RHYME_SVG_BASE_PATH is not None:
-        search_paths.append(RHYME_SVG_BASE_PATH)
-
-    fallback_base = ROOT_DIR / "images"
-
-    if not search_paths:
-        search_paths.append(fallback_base)
-    else:
-        # Retain the repo-local assets as a secondary option so development
-        # environments with a misconfigured share still have artwork.
-        search_paths.append(fallback_base)
-
-    for base_path in search_paths:
-        candidate = base_path / f"{rhyme_code}.svg"
-
-        try:
-            if candidate.is_file():
-                return candidate
-
-            if candidate.exists():
-                logger.warning(
-                    "Authored SVG for rhyme %s exists at %s but is not a file.",
-                    rhyme_code,
-                    candidate,
-                )
-            else:
-                logger.warning(
-                    "SVG file not found for rhyme %s in %s (expected %s)",
-                    rhyme_code,
-                    base_path,
-                    candidate,
-                )
-        except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
-            logger.error(
-                "Unable to access SVG for rhyme %s at %s: %s",
+        if candidate.exists():
+            logger.warning(
+                "Authored SVG for rhyme %s exists at %s but is not a file.",
                 rhyme_code,
                 candidate,
-                exc,
             )
+        else:
+            logger.warning(
+                "SVG file not found for rhyme %s in %s (expected %s)",
+                rhyme_code,
+                RHYME_SVG_BASE_PATH,
+                candidate,
+            )
+    except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+        logger.error(
+            "Unable to access SVG for rhyme %s at %s: %s",
+            rhyme_code,
+            candidate,
+            exc,
+        )
 
     return None
 
