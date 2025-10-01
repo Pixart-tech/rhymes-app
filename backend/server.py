@@ -422,7 +422,7 @@ class PDFDependencyUnavailableError(RuntimeError):
 class _SvgBackend:
     """Container describing how SVG assets should be rendered on the PDF canvas."""
 
-    mode: Literal["cairosvg", "svglib", "none"]
+    mode: Literal["cairosvg", "svglib", "hybrid", "none"]
     svg2png: Optional[Callable[..., Any]]
     image_reader: Optional[Any]
     svg2rlg: Optional[Callable[..., Any]]
@@ -470,28 +470,38 @@ def _load_pdf_dependencies() -> _PdfResources:
 
     svg_backend = _SvgBackend("none", None, None, None, None)
 
+    svg2rlg: Optional[Callable[..., Any]] = None
+    render_pdf: Optional[Any] = None
+
+    try:
+        from svglib.svglib import svg2rlg as _svg2rlg  # type: ignore
+        from reportlab.graphics import renderPDF as _renderPDF
+    except (ImportError, OSError) as svg_exc:
+        logging.getLogger(__name__).warning(
+            "svglib could not be imported. Binder PDFs will fall back to raster rendering when necessary. "
+            "Error: %s",
+            svg_exc,
+        )
+    else:
+        svg2rlg = _svg2rlg
+        render_pdf = _renderPDF
+        svg_backend = _SvgBackend("svglib", None, None, svg2rlg, render_pdf)
+
     try:
         from cairosvg import svg2png as _svg2png  # type: ignore
         from reportlab.lib.utils import ImageReader as _ImageReader
     except (ImportError, OSError) as exc:
-        logging.getLogger(__name__).warning(
-            "CairoSVG is not available. Attempting svglib fallback. Error: %s",
-            exc,
-        )
-
-        try:
-            from svglib.svglib import svg2rlg as _svg2rlg  # type: ignore
-            from reportlab.graphics import renderPDF as _renderPDF
-        except (ImportError, OSError) as svg_exc:
+        if svg2rlg is None:
             logging.getLogger(__name__).warning(
-                "svglib fallback is not available. Binder PDFs will use the text-only layout. "
+                "CairoSVG is not available and svglib is missing. Binder PDFs will use the text-only layout. "
                 "Error: %s",
-                svg_exc,
+                exc,
             )
-        else:
-            svg_backend = _SvgBackend("svglib", None, None, _svg2rlg, _renderPDF)
     else:
-        svg_backend = _SvgBackend("cairosvg", _svg2png, _ImageReader, None, None)
+        if svg2rlg and render_pdf:
+            svg_backend = _SvgBackend("hybrid", _svg2png, _ImageReader, svg2rlg, render_pdf)
+        else:
+            svg_backend = _SvgBackend("cairosvg", _svg2png, _ImageReader, None, None)
 
     return _PdfResources(pdf_canvas.Canvas, letter, svg_backend)
 
@@ -1158,15 +1168,38 @@ def _render_svg_on_canvas(
     """Render ``svg_markup`` onto ``pdf_canvas`` using the available backend.
 
     Returns ``True`` when the SVG could be rendered, ``False`` otherwise. The
-    function attempts CairoSVG first (when available) and falls back to svglib
-    before signalling failure.
+    function prefers drawing vector content via svglib when available before
+    falling back to rasterising the SVG with CairoSVG.
     """
 
     logger = logging.getLogger(__name__)
 
+    vector_backend_available = backend.svg2rlg and backend.render_pdf
+
+    if vector_backend_available:
+        try:
+            drawing = backend.svg2rlg(BytesIO(svg_markup.encode("utf-8")))
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to parse SVG using svglib: %s", exc)
+            drawing = None
+
+        if drawing and getattr(drawing, "width", None) and getattr(drawing, "height", None):
+            try:
+                scale_x = width / float(drawing.width)
+                scale_y = height / float(drawing.height)
+                drawing.scale(scale_x, scale_y)
+                drawing.translate(-drawing.minX, -drawing.minY)
+                backend.render_pdf.draw(drawing, pdf_canvas, x, y)
+                return True
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning("Failed to render SVG using svglib: %s", exc)
+        else:
+            logger.debug(
+                "svglib was unable to determine geometry for SVG; falling back to raster rendering"
+            )
+
     if (
-        backend.mode == "cairosvg"
-        and backend.svg2png
+        backend.svg2png
         and backend.image_reader
     ):
         try:
@@ -1184,30 +1217,11 @@ def _render_svg_on_canvas(
                 y,
                 width=width,
                 height=height,
+                mask="auto",
             )
             return True
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to render SVG using CairoSVG: %s", exc)
-
-    if backend.mode == "svglib" and backend.svg2rlg and backend.render_pdf:
-        try:
-            drawing = backend.svg2rlg(BytesIO(svg_markup.encode("utf-8")))
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Failed to parse SVG using svglib: %s", exc)
-            return False
-
-        if not drawing or not getattr(drawing, "width", None) or not getattr(drawing, "height", None):
-            return False
-
-        try:
-            scale_x = width / float(drawing.width)
-            scale_y = height / float(drawing.height)
-            drawing.scale(scale_x, scale_y)
-            drawing.translate(-drawing.minX, -drawing.minY)
-            backend.render_pdf.draw(drawing, pdf_canvas, x, y)
-            return True
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Failed to render SVG using svglib: %s", exc)
 
     return False
 
