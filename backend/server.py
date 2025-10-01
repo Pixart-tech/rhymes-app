@@ -15,6 +15,8 @@ from typing import Callable, List, Dict, Optional, Any, Tuple, Literal
 from io import BytesIO
 from functools import lru_cache
 from shutil import copy2
+import base64
+import mimetypes
 from urllib.parse import quote, unquote, urlparse
 from xml.etree import ElementTree as ET
 
@@ -34,75 +36,38 @@ _IMAGE_CACHE_DIR = ROOT_DIR / "images"
 load_dotenv(ROOT_DIR / ".env")
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_svg_base_path() -> Optional[Path]:
-    """Return the configured base path for rhyme SVG assets, if any."""
-
-    base_path = os.environ.get("RHYME_SVG_BASE_PATH")
-    if not base_path:
-        return None
-
-    try:
-        return Path(base_path).expanduser()
-    except (OSError, RuntimeError) as exc:
-        logger.warning("Invalid RHYME_SVG_BASE_PATH '%s': %s", base_path, exc)
-        return None
-
-
-RHYME_SVG_BASE_PATH = _resolve_svg_base_path()
+RHYME_SVG_BASE_PATH = Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs")
 
 
 def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]:
-    """Return the authored SVG path for ``rhyme_code`` if it exists.
+    """Return the network SVG path for ``rhyme_code`` if it exists."""
 
-    The lookup prefers ``RHYME_SVG_BASE_PATH`` when set so deployments can
-    reference a network share or mounted volume. When the environment variable
-    is unset the function falls back to the repository-local ``images``
-    directory to support development defaults.
-    """
+    candidate = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
 
-    search_paths: List[Path] = []
+    try:
+        if candidate.is_file():
+            return candidate
 
-    if RHYME_SVG_BASE_PATH is not None:
-        search_paths.append(RHYME_SVG_BASE_PATH)
-
-    fallback_base = ROOT_DIR / "images"
-
-    if not search_paths:
-        search_paths.append(fallback_base)
-    else:
-        # Retain the repo-local assets as a secondary option so development
-        # environments with a misconfigured share still have artwork.
-        search_paths.append(fallback_base)
-
-    for base_path in search_paths:
-        candidate = base_path / f"{rhyme_code}.svg"
-
-        try:
-            if candidate.is_file():
-                return candidate
-
-            if candidate.exists():
-                logger.warning(
-                    "Authored SVG for rhyme %s exists at %s but is not a file.",
-                    rhyme_code,
-                    candidate,
-                )
-            else:
-                logger.warning(
-                    "SVG file not found for rhyme %s in %s (expected %s)",
-                    rhyme_code,
-                    base_path,
-                    candidate,
-                )
-        except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
-            logger.error(
-                "Unable to access SVG for rhyme %s at %s: %s",
+        if candidate.exists():
+            logger.warning(
+                "Authored SVG for rhyme %s exists at %s but is not a file.",
                 rhyme_code,
                 candidate,
-                exc,
             )
+        else:
+            logger.warning(
+                "SVG file not found for rhyme %s in %s (expected %s)",
+                rhyme_code,
+                RHYME_SVG_BASE_PATH,
+                candidate,
+            )
+    except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+        logger.error(
+            "Unable to access SVG for rhyme %s at %s: %s",
+            rhyme_code,
+            candidate,
+            exc,
+        )
 
     return None
 
@@ -229,8 +194,22 @@ def _ensure_image_cache_dir() -> Path:
     return _IMAGE_CACHE_DIR
 
 
-def _localize_svg_image_assets(svg_text: str, svg_path: Path, rhyme_code: str) -> str:
-    """Copy referenced raster assets locally and rewrite their URIs."""
+def _localize_svg_image_assets(
+    svg_text: str,
+    svg_path: Path,
+    rhyme_code: str,
+    *,
+    inline_mode: bool = False,
+) -> str:
+    """Rewrite referenced raster asset URIs so downstream consumers can load them.
+
+    When ``inline_mode`` is ``False`` the function mirrors bitmap dependencies into a
+    local cache directory and rewrites their references to ``file://`` URIs. This is
+    primarily used while generating PDFs where the renderer can dereference files on
+    disk. When ``inline_mode`` is ``True`` the helper instead embeds the images as
+    ``data:`` URIs which can be displayed directly in browsers without additional
+    HTTP endpoints.
+    """
 
     try:
         root = ET.fromstring(svg_text)
@@ -244,11 +223,13 @@ def _localize_svg_image_assets(svg_text: str, svg_path: Path, rhyme_code: str) -
     if not images:
         return svg_text
 
-    try:
-        cache_dir = _ensure_image_cache_dir()
-    except OSError:
-        # Directory creation failure already logged in _ensure_image_cache_dir.
-        return svg_text
+    cache_dir: Optional[Path] = None
+    if not inline_mode:
+        try:
+            cache_dir = _ensure_image_cache_dir()
+        except OSError:
+            # Directory creation failure already logged in _ensure_image_cache_dir.
+            return svg_text
 
     modified = False
 
@@ -304,47 +285,71 @@ def _localize_svg_image_assets(svg_text: str, svg_path: Path, rhyme_code: str) -
             )
             continue
 
-        destination = cache_dir / f"{rhyme_code}_{asset_path.name}"
-
-        copy_required = True
-        try:
-            dest_stat = destination.stat()
-        except FileNotFoundError:
-            pass
-        except OSError as exc:  # pragma: no cover - unexpected filesystem error
-            logger.warning(
-                "Unable to access cached bitmap for rhyme %s at %s: %s",
-                rhyme_code,
-                destination,
-                exc,
-            )
-        else:
-            if dest_stat.st_mtime >= src_stat.st_mtime and dest_stat.st_size == src_stat.st_size:
-                copy_required = False
-
-        if copy_required:
+        if inline_mode:
             try:
-                copy2(asset_path, destination)
+                raw_bytes = asset_path.read_bytes()
             except OSError as exc:
                 logger.warning(
-                    "Unable to copy bitmap asset '%s' for rhyme %s to %s: %s",
+                    "Unable to read bitmap asset '%s' for rhyme %s at %s: %s",
                     href_value,
+                    rhyme_code,
+                    asset_path,
+                    exc,
+                )
+                continue
+
+            mime_type, _ = mimetypes.guess_type(asset_path.name)
+            if not mime_type:
+                mime_type = "application/octet-stream"
+
+            data64 = base64.b64encode(raw_bytes).decode("ascii")
+            new_href = f"data:{mime_type};base64,{data64}"
+        else:
+            assert cache_dir is not None
+            destination = cache_dir / f"{rhyme_code}_{asset_path.name}"
+
+            copy_required = True
+            try:
+                dest_stat = destination.stat()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:  # pragma: no cover - unexpected filesystem error
+                logger.warning(
+                    "Unable to access cached bitmap for rhyme %s at %s: %s",
+                    rhyme_code,
+                    destination,
+                    exc,
+                )
+            else:
+                if (
+                    dest_stat.st_mtime >= src_stat.st_mtime
+                    and dest_stat.st_size == src_stat.st_size
+                ):
+                    copy_required = False
+
+            if copy_required:
+                try:
+                    copy2(asset_path, destination)
+                except OSError as exc:
+                    logger.warning(
+                        "Unable to copy bitmap asset '%s' for rhyme %s to %s: %s",
+                        href_value,
+                        rhyme_code,
+                        destination,
+                        exc,
+                    )
+                    continue
+
+            try:
+                new_href = destination.resolve().as_uri()
+            except OSError as exc:  # pragma: no cover - resolution errors unexpected
+                logger.warning(
+                    "Unable to resolve cached bitmap URI for rhyme %s at %s: %s",
                     rhyme_code,
                     destination,
                     exc,
                 )
                 continue
-
-        try:
-            new_href = destination.resolve().as_uri()
-        except OSError as exc:  # pragma: no cover - resolution errors unexpected
-            logger.warning(
-                "Unable to resolve cached bitmap URI for rhyme %s at %s: %s",
-                rhyme_code,
-                destination,
-                exc,
-            )
-            continue
 
         image.set(f"{{{XLINK_NS}}}href", new_href)
         image.set("href", new_href)
@@ -995,6 +1000,10 @@ async def get_rhyme_svg(rhyme_code: str):
             svg_content = generate_rhyme_svg(rhyme_code)
         except KeyError:
             raise HTTPException(status_code=404, detail="Rhyme not found")
+    else:
+        svg_content = _localize_svg_image_assets(
+            svg_content, svg_path, rhyme_code, inline_mode=True
+        )
 
     return Response(content=svg_content, media_type="image/svg+xml")
 
