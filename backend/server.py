@@ -39,6 +39,14 @@ logger = logging.getLogger(__name__)
 RHYME_SVG_BASE_PATH = Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs")
 
 
+@dataclass(frozen=True)
+class _SvgDocument:
+    """Container describing SVG markup and, optionally, its source path."""
+
+    markup: str
+    source_path: Optional[Path]
+
+
 def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]:
     """Return the network SVG path for ``rhyme_code`` if it exists."""
 
@@ -361,12 +369,14 @@ def _localize_svg_image_assets(
     return ET.tostring(root, encoding="unicode")
 
 
-def _load_rhyme_svg_markup(rhyme_code: str) -> str:
-    """Return SVG markup for ``rhyme_code``.
+def _load_rhyme_svg_markup(rhyme_code: str) -> _SvgDocument:
+    """Return SVG markup and optional source path for ``rhyme_code``.
 
     When a filesystem base path is configured the function prefers loading the
     authored SVG asset so the generated PDF binder can embed the authentic
-    artwork. If the asset is missing the helper falls back to
+    artwork. The markup is returned alongside its originating path so downstream
+    renderers can resolve relative bitmap references without rewriting ``href``
+    attributes. If the asset is missing the helper falls back to
     :func:`generate_rhyme_svg`.
     """
 
@@ -381,11 +391,11 @@ def _load_rhyme_svg_markup(rhyme_code: str) -> str:
         except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
             logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
         else:
-            return _localize_svg_image_assets(svg_text, svg_path, rhyme_code)
+            return _SvgDocument(svg_text, svg_path)
 
-        
 
-    return generate_rhyme_svg(rhyme_code)
+
+    return _SvgDocument(generate_rhyme_svg(rhyme_code), None)
 
 
 def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> List[str]:
@@ -1158,7 +1168,7 @@ def _draw_text_only_rhyme(
 def _render_svg_on_canvas(
     pdf_canvas: Any,
     backend: _SvgBackend,
-    svg_markup: str,
+    svg_document: _SvgDocument,
     width: float,
     height: float,
     *,
@@ -1175,10 +1185,18 @@ def _render_svg_on_canvas(
     logger = logging.getLogger(__name__)
 
     vector_backend_available = backend.svg2rlg and backend.render_pdf
+    svg_markup = svg_document.markup
+    source_path = svg_document.source_path
 
     if vector_backend_available:
         try:
-            drawing = backend.svg2rlg(BytesIO(svg_markup.encode("utf-8")))
+            svg_input: Any
+            if source_path is not None:
+                svg_input = str(source_path)
+            else:
+                svg_input = BytesIO(svg_markup.encode("utf-8"))
+
+            drawing = backend.svg2rlg(svg_input)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to parse SVG using svglib: %s", exc)
             drawing = None
@@ -1188,7 +1206,9 @@ def _render_svg_on_canvas(
                 scale_x = width / float(drawing.width)
                 scale_y = height / float(drawing.height)
                 drawing.scale(scale_x, scale_y)
-                drawing.translate(-drawing.minX, -drawing.minY)
+                min_x = getattr(drawing, "minX", 0) or 0
+                min_y = getattr(drawing, "minY", 0) or 0
+                drawing.translate(-min_x, -min_y)
                 backend.render_pdf.draw(drawing, pdf_canvas, x, y)
                 return True
             except Exception as exc:  # pragma: no cover - defensive logging
@@ -1259,21 +1279,21 @@ async def download_rhyme_binder(school_id: str, grade: str):
     page_width, page_height = pdf_resources.page_size
     svg_backend = pdf_resources.svg_backend
 
-    svg_markup_cache: Dict[str, Optional[str]] = {}
+    svg_document_cache: Dict[str, Optional[_SvgDocument]] = {}
 
-    def _get_svg_markup(rhyme_code: str) -> Optional[str]:
-        """Return cached SVG markup for ``rhyme_code`` within this request."""
+    def _get_svg_document(rhyme_code: str) -> Optional[_SvgDocument]:
+        """Return cached SVG metadata for ``rhyme_code`` within this request."""
 
-        if rhyme_code in svg_markup_cache:
-            return svg_markup_cache[rhyme_code]
+        if rhyme_code in svg_document_cache:
+            return svg_document_cache[rhyme_code]
 
         try:
-            markup = _load_rhyme_svg_markup(rhyme_code)
+            document = _load_rhyme_svg_markup(rhyme_code)
         except KeyError:
-            markup = None
+            document = None
 
-        svg_markup_cache[rhyme_code] = markup
-        return markup
+        svg_document_cache[rhyme_code] = document
+        return document
 
     for page_index in sorted(pages_map.keys()):
         entries = pages_map[page_index]
@@ -1289,12 +1309,12 @@ async def download_rhyme_binder(school_id: str, grade: str):
         )
 
         if full_page_entry:
-            svg_markup = _get_svg_markup(full_page_entry["rhyme_code"])
+            svg_document = _get_svg_document(full_page_entry["rhyme_code"])
 
-            if svg_markup and _render_svg_on_canvas(
+            if svg_document and _render_svg_on_canvas(
                 pdf_canvas,
                 svg_backend,
-                svg_markup,
+                svg_document,
                 page_width,
                 page_height,
             ):
@@ -1324,13 +1344,13 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
                 svg_rendered = False
 
-                svg_markup = _get_svg_markup(entry["rhyme_code"])
+                svg_document = _get_svg_document(entry["rhyme_code"])
 
-                if svg_markup:
+                if svg_document:
                     svg_rendered = _render_svg_on_canvas(
                         pdf_canvas,
                         svg_backend,
-                        svg_markup,
+                        svg_document,
                         page_width,
                         slot_height,
                         x=0,
@@ -1354,7 +1374,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
     filename = f"{grade}_rhyme_binder.pdf"
     headers = {"Content-Disposition": f"attachment; filename={filename}"}
 
-    svg_markup_cache.clear()
+    svg_document_cache.clear()
 
     return Response(
         content=buffer.getvalue(), media_type="application/pdf", headers=headers
