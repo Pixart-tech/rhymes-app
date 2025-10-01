@@ -321,6 +321,36 @@ def test_sanitize_svg_for_svglib_rewrites_gradient_fill():
     assert "#123456" in circle.attrib.get("style", "")
 
 
+def test_sanitize_svg_for_svglib_rewrites_gradient_in_style_block():
+    gradient_svg = """
+    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+        <defs>
+            <linearGradient id="grad2">
+                <stop offset="0%" stop-color="#654321" />
+            </linearGradient>
+        </defs>
+        <style>
+            .cls-1 { fill: url(#grad2); stroke: #000; }
+            .cls-2 { stroke:url(#grad2); fill:none; }
+            .cls-3 { filter:url(#unrelated); }
+        </style>
+        <rect class="cls-1" width="10" height="10" />
+        <circle class="cls-2" cx="5" cy="5" r="2" />
+        <path class="cls-3" d="M0 0" />
+    </svg>
+    """
+
+    sanitized = server._sanitize_svg_for_svglib(gradient_svg)
+    assert "url(#grad2)" not in sanitized
+    assert "url(#unrelated)" in sanitized
+
+    root = ET.fromstring(sanitized)
+    style = root.find(".//{http://www.w3.org/2000/svg}style")
+
+    assert style is not None
+    assert "fill: #654321" in style.text or "fill:#654321" in style.text
+    assert "stroke: #654321" in style.text or "stroke:#654321" in style.text
+
 def test_sanitize_svg_for_svglib_returns_original_on_parse_error():
     malformed_svg = "<svg><"
     assert server._sanitize_svg_for_svglib(malformed_svg) == malformed_svg
