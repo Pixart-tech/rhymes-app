@@ -4,6 +4,7 @@ import sys
 import types
 from io import BytesIO
 from types import SimpleNamespace
+from xml.etree import ElementTree as ET
 
 import pytest
 
@@ -291,3 +292,35 @@ def test_binder_falls_back_to_generated_svg(tmp_path, monkeypatch, stub_pdf_reso
     assert captured["markups"] == [sentinel_svg]
     assert len(draw_calls) == 1
     assert draw_calls[0]["entry"]["rhyme_code"] == rhyme_code
+
+
+def test_sanitize_svg_for_svglib_rewrites_gradient_fill():
+    gradient_svg = """
+    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+        <defs>
+            <linearGradient id="grad1">
+                <stop offset="0%" style="stop-color:#123456;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#abcdef;stop-opacity:1" />
+            </linearGradient>
+        </defs>
+        <rect id="rect" width="10" height="10" fill="url(#grad1)" />
+        <circle id="circle" cx="5" cy="5" r="2" style="stroke:url(#grad1);fill:none" />
+    </svg>
+    """
+
+    sanitized = server._sanitize_svg_for_svglib(gradient_svg)
+    assert "url(#grad1)" not in sanitized
+
+    root = ET.fromstring(sanitized)
+    rect = root.find(".//{http://www.w3.org/2000/svg}rect")
+    circle = root.find(".//{http://www.w3.org/2000/svg}circle")
+
+    assert rect is not None and rect.attrib.get("fill") == "#123456"
+    assert circle is not None
+    assert "url(#grad1)" not in circle.attrib.get("style", "")
+    assert "#123456" in circle.attrib.get("style", "")
+
+
+def test_sanitize_svg_for_svglib_returns_original_on_parse_error():
+    malformed_svg = "<svg><"
+    assert server._sanitize_svg_for_svglib(malformed_svg) == malformed_svg
