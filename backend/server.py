@@ -24,6 +24,8 @@ import re
 import uuid
 from datetime import datetime
 
+from PIL import Image
+
 ROOT_DIR = Path(__file__).parent
 
 
@@ -336,12 +338,69 @@ def _ensure_image_cache_dir() -> Path:
     return _IMAGE_CACHE_DIR
 
 
+def _prepare_inline_image_asset(
+    asset_path: Path,
+    rhyme_code: str,
+    *,
+    preprocess_for_pdf: bool = False,
+) -> Optional[Tuple[bytes, str]]:
+    """Return image bytes and mime type for embedding in SVG."""
+
+    if preprocess_for_pdf:
+        suffix = asset_path.suffix.lower()
+        try:
+            if suffix in {".png", ".apng"}:
+                with Image.open(asset_path) as image:
+                    prepared = image.convert("RGBA")
+                    buffer = BytesIO()
+                    prepared.save(buffer, format="PNG")
+                    return buffer.getvalue(), "image/png"
+            if suffix in {".jpg", ".jpeg"}:
+                with Image.open(asset_path) as image:
+                    rgba_image = image.convert("RGBA")
+                    background = Image.new("RGBA", rgba_image.size, (255, 255, 255, 255))
+                    background.alpha_composite(rgba_image)
+                    buffer = BytesIO()
+                    background.save(buffer, format="PNG")
+                    return buffer.getvalue(), "image/png"
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "Failed to preprocess bitmap asset '%s' for rhyme %s at %s: %s",
+                asset_path.name,
+                rhyme_code,
+                asset_path,
+                exc,
+            )
+
+    try:
+        raw_bytes = asset_path.read_bytes()
+    except OSError as exc:
+        logger.warning(
+            "Unable to read bitmap asset '%s' for rhyme %s at %s: %s",
+            asset_path.name,
+            rhyme_code,
+            asset_path,
+            exc,
+        )
+        return None
+
+    mime_type, _ = mimetypes.guess_type(asset_path.name)
+    if preprocess_for_pdf and mime_type is None:
+        # Default to PNG when preprocessing failed to determine the type.
+        mime_type = "image/png"
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    return raw_bytes, mime_type
+
+
 def _localize_svg_image_assets(
     svg_text: str,
     svg_path: Path,
     rhyme_code: str,
     *,
     inline_mode: bool = False,
+    preprocess_for_pdf: bool = False,
 ) -> str:
     """Rewrite referenced raster asset URIs so downstream consumers can load them.
 
@@ -350,7 +409,10 @@ def _localize_svg_image_assets(
     primarily used while generating PDFs where the renderer can dereference files on
     disk. When ``inline_mode`` is ``True`` the helper instead embeds the images as
     ``data:`` URIs which can be displayed directly in browsers without additional
-    HTTP endpoints.
+    HTTP endpoints. When ``preprocess_for_pdf`` is enabled the routine normalizes
+    referenced PNG assets to preserve their alpha channels and converts JPEG images
+    to PNG with a white background so that CairoSVG renders them without opaque
+    artefacts when generating PDFs.
     """
 
     try:
@@ -428,22 +490,15 @@ def _localize_svg_image_assets(
             continue
 
         if inline_mode:
-            try:
-                raw_bytes = asset_path.read_bytes()
-            except OSError as exc:
-                logger.warning(
-                    "Unable to read bitmap asset '%s' for rhyme %s at %s: %s",
-                    href_value,
-                    rhyme_code,
-                    asset_path,
-                    exc,
-                )
+            prepared = _prepare_inline_image_asset(
+                asset_path,
+                rhyme_code,
+                preprocess_for_pdf=preprocess_for_pdf,
+            )
+            if not prepared:
                 continue
 
-            mime_type, _ = mimetypes.guess_type(asset_path.name)
-            if not mime_type:
-                mime_type = "application/octet-stream"
-
+            raw_bytes, mime_type = prepared
             data64 = base64.b64encode(raw_bytes).decode("ascii")
             new_href = f"data:{mime_type};base64,{data64}"
         else:
@@ -1308,6 +1363,7 @@ def _render_svg_on_canvas(
     *,
     x: float = 0,
     y: float = 0,
+    rhyme_code: Optional[str] = None,
 ) -> bool:
     """Render ``svg_markup`` onto ``pdf_canvas`` using the available backend.
 
@@ -1359,8 +1415,17 @@ def _render_svg_on_canvas(
     ):
         try:
             image_buffer = BytesIO()
+            cairosvg_markup = svg_markup
+            if svg_document.source_path is not None:
+                cairosvg_markup = _localize_svg_image_assets(
+                    svg_markup,
+                    svg_document.source_path,
+                    rhyme_code or "unknown",
+                    inline_mode=True,
+                    preprocess_for_pdf=True,
+                )
             backend.svg2png(
-                bytestring=svg_markup.encode("utf-8"),
+                bytestring=cairosvg_markup.encode("utf-8"),
                 write_to=image_buffer,
                 output_width=int(width),
                 output_height=int(height),
@@ -1452,6 +1517,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
                 svg_document,
                 page_width,
                 page_height,
+                rhyme_code=full_page_entry["rhyme_code"],
             ):
                 pdf_canvas.showPage()
                 continue
@@ -1490,6 +1556,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
                         slot_height,
                         x=0,
                         y=y_position,
+                        rhyme_code=entry["rhyme_code"],
                     )
 
                 if not svg_rendered:
