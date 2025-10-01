@@ -69,6 +69,22 @@ const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
     svgElement.removeAttribute('width');
     svgElement.removeAttribute('height');
 
+    const inlineStyleAttr = svgElement.getAttribute('style');
+    if (typeof inlineStyleAttr === 'string' && inlineStyleAttr.trim().length > 0) {
+      const filteredStyleRules = inlineStyleAttr
+        .split(';')
+        .map((rule) => rule.trim())
+        .filter((rule) =>
+          rule.length > 0 && !/^width\s*:/i.test(rule) && !/^height\s*:/i.test(rule)
+        );
+
+      if (filteredStyleRules.length > 0) {
+        svgElement.setAttribute('style', `${filteredStyleRules.join('; ')};`);
+      } else {
+        svgElement.removeAttribute('style');
+      }
+    }
+
     if (!svgElement.getAttribute('viewBox')) {
       if (Number.isFinite(widthValue) && Number.isFinite(heightValue) && widthValue > 0 && heightValue > 0) {
         svgElement.setAttribute('viewBox', `0 0 ${widthValue} ${heightValue}`);
