@@ -15,6 +15,8 @@ from typing import Callable, List, Dict, Optional, Any, Tuple, Literal
 from io import BytesIO
 from functools import lru_cache
 from urllib.parse import quote
+from xml.etree import ElementTree as ET
+import re
 
 import uuid
 from datetime import datetime
@@ -23,6 +25,9 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 logger = logging.getLogger(__name__)
+
+SVG_NS = "http://www.w3.org/2000/svg"
+_GRADIENT_URL_RE = re.compile(r"^url\(#(?P<id>[^)]+)\)$")
 
 
 def _resolve_svg_base_path() -> Optional[Path]:
@@ -107,6 +112,137 @@ def _build_cover_asset_manifest(base_path: Path) -> List[Dict[str, str]]:
         )
 
     return assets
+
+
+def _parse_style_declarations(style: str) -> List[Tuple[str, str]]:
+    """Return the CSS declarations contained in ``style`` preserving order."""
+
+    declarations: List[Tuple[str, str]] = []
+    for raw_entry in style.split(";"):
+        if not raw_entry.strip():
+            continue
+
+        if ":" not in raw_entry:
+            continue
+
+        property_name, value = raw_entry.split(":", 1)
+        declarations.append((property_name.strip(), value.strip()))
+
+    return declarations
+
+
+def _serialize_style_declarations(declarations: List[Tuple[str, str]]) -> str:
+    """Serialize ``declarations`` back into an inline CSS string."""
+
+    return ";".join(f"{name}:{value}" for name, value in declarations)
+
+
+def _collect_gradient_fallback_colors(root: ET.Element) -> Dict[str, str]:
+    """Return a mapping of gradient ids to representative stop colours."""
+
+    gradient_colors: Dict[str, str] = {}
+    stop_xpath = f".//{{{SVG_NS}}}stop"
+
+    for gradient_tag in (
+        f".//{{{SVG_NS}}}linearGradient",
+        f".//{{{SVG_NS}}}radialGradient",
+    ):
+        for gradient in root.findall(gradient_tag):
+            gradient_id = gradient.attrib.get("id")
+            if not gradient_id or gradient_id in gradient_colors:
+                continue
+
+            representative_color: Optional[str] = None
+
+            for stop in gradient.findall(stop_xpath):
+                style = stop.attrib.get("style")
+                color: Optional[str] = None
+
+                if style:
+                    for name, value in _parse_style_declarations(style):
+                        if name == "stop-color" and value:
+                            color = value
+                            break
+
+                if color is None:
+                    color = stop.attrib.get("stop-color")
+
+                if color:
+                    representative_color = color
+                    break
+
+            if representative_color:
+                gradient_colors[gradient_id] = representative_color
+
+    return gradient_colors
+
+
+def _replace_gradient_references(element: ET.Element, gradient_colors: Dict[str, str]) -> bool:
+    """Replace gradient ``url(#id)`` colour references on ``element`` when possible."""
+
+    updated = False
+
+    for attribute in ("fill", "stroke"):
+        raw_value = element.attrib.get(attribute)
+        if not raw_value:
+            continue
+
+        match = _GRADIENT_URL_RE.match(raw_value.strip())
+        if not match:
+            continue
+
+        gradient_id = match.group("id")
+        fallback = gradient_colors.get(gradient_id)
+        if not fallback:
+            continue
+
+        element.set(attribute, fallback)
+        updated = True
+
+    style_value = element.attrib.get("style")
+    if style_value:
+        declarations = _parse_style_declarations(style_value)
+        new_declarations: List[Tuple[str, str]] = []
+        style_updated = False
+
+        for name, value in declarations:
+            match = _GRADIENT_URL_RE.match(value)
+            if match and name in {"fill", "stroke"}:
+                fallback = gradient_colors.get(match.group("id"))
+                if fallback:
+                    value = fallback
+                    style_updated = True
+            new_declarations.append((name, value))
+
+        if style_updated:
+            element.set("style", _serialize_style_declarations(new_declarations))
+            updated = True
+
+    return updated
+
+
+def _sanitize_svg_for_svglib(svg_markup: str) -> str:
+    """Replace unsupported gradient colour references with solid colours."""
+
+    try:
+        root = ET.fromstring(svg_markup)
+    except ET.ParseError:
+        return svg_markup
+
+    gradient_colors = _collect_gradient_fallback_colors(root)
+    if not gradient_colors:
+        return svg_markup
+
+    updated = False
+    for element in root.iter():
+        if _replace_gradient_references(element, gradient_colors):
+            updated = True
+
+    if not updated:
+        return svg_markup
+
+    return ET.tostring(root, encoding="unicode")
+
 
 # MongoDB connection
 mongo_url = os.environ["MONGO_URL"]
@@ -950,7 +1086,8 @@ def _render_svg_on_canvas(
 
     if backend.mode == "svglib" and backend.svg2rlg and backend.render_pdf:
         try:
-            drawing = backend.svg2rlg(BytesIO(svg_markup.encode("utf-8")))
+            sanitized_markup = _sanitize_svg_for_svglib(svg_markup)
+            drawing = backend.svg2rlg(BytesIO(sanitized_markup.encode("utf-8")))
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to parse SVG using svglib: %s", exc)
             return False
