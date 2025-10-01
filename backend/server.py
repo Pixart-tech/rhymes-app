@@ -14,12 +14,23 @@ from pydantic import BaseModel, Field
 from typing import Callable, List, Dict, Optional, Any, Tuple, Literal
 from io import BytesIO
 from functools import lru_cache
-from urllib.parse import quote
+from shutil import copy2
+from urllib.parse import quote, unquote, urlparse
+from xml.etree import ElementTree as ET
 
 import uuid
 from datetime import datetime
 
 ROOT_DIR = Path(__file__).parent
+
+
+SVG_NS = "http://www.w3.org/2000/svg"
+XLINK_NS = "http://www.w3.org/1999/xlink"
+
+ET.register_namespace("", SVG_NS)
+ET.register_namespace("xlink", XLINK_NS)
+
+_IMAGE_CACHE_DIR = ROOT_DIR / "images"
 load_dotenv(ROOT_DIR / ".env")
 
 logger = logging.getLogger(__name__)
@@ -40,6 +51,60 @@ def _resolve_svg_base_path() -> Optional[Path]:
 
 
 RHYME_SVG_BASE_PATH = _resolve_svg_base_path()
+
+
+def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]:
+    """Return the authored SVG path for ``rhyme_code`` if it exists.
+
+    The lookup prefers ``RHYME_SVG_BASE_PATH`` when set so deployments can
+    reference a network share or mounted volume. When the environment variable
+    is unset the function falls back to the repository-local ``images``
+    directory to support development defaults.
+    """
+
+    search_paths: List[Path] = []
+
+    if RHYME_SVG_BASE_PATH is not None:
+        search_paths.append(RHYME_SVG_BASE_PATH)
+
+    fallback_base = ROOT_DIR / "images"
+
+    if not search_paths:
+        search_paths.append(fallback_base)
+    else:
+        # Retain the repo-local assets as a secondary option so development
+        # environments with a misconfigured share still have artwork.
+        search_paths.append(fallback_base)
+
+    for base_path in search_paths:
+        candidate = base_path / f"{rhyme_code}.svg"
+
+        try:
+            if candidate.is_file():
+                return candidate
+
+            if candidate.exists():
+                logger.warning(
+                    "Authored SVG for rhyme %s exists at %s but is not a file.",
+                    rhyme_code,
+                    candidate,
+                )
+            else:
+                logger.warning(
+                    "SVG file not found for rhyme %s in %s (expected %s)",
+                    rhyme_code,
+                    base_path,
+                    candidate,
+                )
+        except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+            logger.error(
+                "Unable to access SVG for rhyme %s at %s: %s",
+                rhyme_code,
+                candidate,
+                exc,
+            )
+
+    return None
 
 
 def _resolve_cover_svg_base_path() -> Optional[Path]:
@@ -150,6 +215,172 @@ def generate_rhyme_svg(rhyme_code: str) -> str:
               text-anchor="middle" fill="white">♪</text>
     </svg>
     """
+
+
+def _ensure_image_cache_dir() -> Path:
+    """Return the local image cache directory, creating it if needed."""
+
+    try:
+        _IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:  # pragma: no cover - filesystem permissions errors
+        logger.error("Unable to create image cache directory %s: %s", _IMAGE_CACHE_DIR, exc)
+        raise
+
+    return _IMAGE_CACHE_DIR
+
+
+def _localize_svg_image_assets(svg_text: str, svg_path: Path, rhyme_code: str) -> str:
+    """Copy referenced raster assets locally and rewrite their URIs."""
+
+    try:
+        root = ET.fromstring(svg_text)
+    except ET.ParseError as exc:
+        logger.warning(
+            "Failed to parse SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc
+        )
+        return svg_text
+
+    images = list(root.findall(f".//{{{SVG_NS}}}image"))
+    if not images:
+        return svg_text
+
+    try:
+        cache_dir = _ensure_image_cache_dir()
+    except OSError:
+        # Directory creation failure already logged in _ensure_image_cache_dir.
+        return svg_text
+
+    modified = False
+
+    for image in images:
+        href_value = image.get(f"{{{XLINK_NS}}}href") or image.get("href")
+        if not href_value:
+            continue
+
+        href_value = href_value.strip()
+        if href_value.startswith("data:"):
+            continue
+
+        parsed = urlparse(href_value)
+        if parsed.scheme and parsed.scheme != "file":
+            logger.debug(
+                "Skipping non-file image reference '%s' in %s", href_value, svg_path
+            )
+            continue
+
+        raw_path = unquote(parsed.path or href_value)
+        if not raw_path:
+            logger.debug("Skipping empty image reference in %s", svg_path)
+            continue
+        if parsed.scheme == "file" and parsed.netloc:
+            logger.warning(
+                "Skipping network file reference '%s' in %s", href_value, svg_path
+            )
+            continue
+
+        if parsed.scheme == "file":
+            asset_path = Path(raw_path)
+        else:
+            candidate = Path(raw_path)
+            if candidate.is_absolute():
+                asset_path = candidate
+            else:
+                asset_path = (svg_path.parent / candidate).resolve()
+
+        try:
+            src_stat = asset_path.stat()
+        except FileNotFoundError:
+            logger.warning(
+                "Bitmap asset '%s' for rhyme %s not found at %s", href_value, rhyme_code, asset_path
+            )
+            continue
+        except OSError as exc:  # pragma: no cover - unexpected filesystem error
+            logger.warning(
+                "Unable to access bitmap asset '%s' for rhyme %s at %s: %s",
+                href_value,
+                rhyme_code,
+                asset_path,
+                exc,
+            )
+            continue
+
+        destination = cache_dir / f"{rhyme_code}_{asset_path.name}"
+
+        copy_required = True
+        try:
+            dest_stat = destination.stat()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:  # pragma: no cover - unexpected filesystem error
+            logger.warning(
+                "Unable to access cached bitmap for rhyme %s at %s: %s",
+                rhyme_code,
+                destination,
+                exc,
+            )
+        else:
+            if dest_stat.st_mtime >= src_stat.st_mtime and dest_stat.st_size == src_stat.st_size:
+                copy_required = False
+
+        if copy_required:
+            try:
+                copy2(asset_path, destination)
+            except OSError as exc:
+                logger.warning(
+                    "Unable to copy bitmap asset '%s' for rhyme %s to %s: %s",
+                    href_value,
+                    rhyme_code,
+                    destination,
+                    exc,
+                )
+                continue
+
+        try:
+            new_href = destination.resolve().as_uri()
+        except OSError as exc:  # pragma: no cover - resolution errors unexpected
+            logger.warning(
+                "Unable to resolve cached bitmap URI for rhyme %s at %s: %s",
+                rhyme_code,
+                destination,
+                exc,
+            )
+            continue
+
+        image.set(f"{{{XLINK_NS}}}href", new_href)
+        image.set("href", new_href)
+        modified = True
+
+    if not modified:
+        return svg_text
+
+    return ET.tostring(root, encoding="unicode")
+
+
+def _load_rhyme_svg_markup(rhyme_code: str) -> str:
+    """Return SVG markup for ``rhyme_code``.
+
+    When a filesystem base path is configured the function prefers loading the
+    authored SVG asset so the generated PDF binder can embed the authentic
+    artwork. If the asset is missing the helper falls back to
+    :func:`generate_rhyme_svg`.
+    """
+
+    svg_path = _resolve_rhyme_svg_path(rhyme_code)
+
+    if svg_path is not None:
+        try:
+
+            svg_text = svg_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
+        except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
+        else:
+            return _localize_svg_image_assets(svg_text, svg_path, rhyme_code)
+
+        
+
+    return generate_rhyme_svg(rhyme_code)
 
 
 def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> List[str]:
@@ -739,26 +970,25 @@ async def delete_school(school_id: str):
 async def get_rhyme_svg(rhyme_code: str):
     """Return SVG markup for the requested rhyme.
 
-    When ``RHYME_SVG_BASE_PATH`` is configured the endpoint will attempt to
+    When ``RHYME_SVG_BASE_PATH`` is configured the endpoint first attempts to
     resolve ``<rhyme_code>.svg`` within that directory so real artwork from a
-    network share or local folder can be exercised in development. If the file
-    cannot be found the function falls back to the generated placeholder SVG so
-    the frontend continues to work for missing assets.
+    network share or mounted volume can be exercised. If the environment
+    variable is unset or the file is missing, the lookup falls back to the
+    repository ``images`` directory before ultimately generating the placeholder
+    SVG so the frontend continues to work for missing assets.
     """
 
     svg_content: Optional[str] = None
 
-    if RHYME_SVG_BASE_PATH is not None:
-        # svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
-        svg_path= Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs") / f"{rhyme_code}.svg"
-        print(svg_path)
+    svg_path = _resolve_rhyme_svg_path(rhyme_code)
+
+    if svg_path is not None:
         try:
             svg_content = svg_path.read_text(encoding="utf-8")
-            
-        except FileNotFoundError:
-            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
         except OSError as exc:
-            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
+            logger.error(
+                "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc
+            )
 
     if svg_content is None:
         try:
@@ -1006,6 +1236,22 @@ async def download_rhyme_binder(school_id: str, grade: str):
     page_width, page_height = pdf_resources.page_size
     svg_backend = pdf_resources.svg_backend
 
+    svg_markup_cache: Dict[str, Optional[str]] = {}
+
+    def _get_svg_markup(rhyme_code: str) -> Optional[str]:
+        """Return cached SVG markup for ``rhyme_code`` within this request."""
+
+        if rhyme_code in svg_markup_cache:
+            return svg_markup_cache[rhyme_code]
+
+        try:
+            markup = _load_rhyme_svg_markup(rhyme_code)
+        except KeyError:
+            markup = None
+
+        svg_markup_cache[rhyme_code] = markup
+        return markup
+
     for page_index in sorted(pages_map.keys()):
         entries = pages_map[page_index]
         # Sort so that "top" entries are rendered before "bottom"
@@ -1020,10 +1266,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
         )
 
         if full_page_entry:
-            try:
-                svg_markup = generate_rhyme_svg(full_page_entry["rhyme_code"])
-            except KeyError:
-                svg_markup = None
+            svg_markup = _get_svg_markup(full_page_entry["rhyme_code"])
 
             if svg_markup and _render_svg_on_canvas(
                 pdf_canvas,
@@ -1058,10 +1301,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
                 svg_rendered = False
 
-                try:
-                    svg_markup = generate_rhyme_svg(entry["rhyme_code"])
-                except KeyError:
-                    svg_markup = None
+                svg_markup = _get_svg_markup(entry["rhyme_code"])
 
                 if svg_markup:
                     svg_rendered = _render_svg_on_canvas(
@@ -1090,6 +1330,8 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
     filename = f"{grade}_rhyme_binder.pdf"
     headers = {"Content-Disposition": f"attachment; filename={filename}"}
+
+    svg_markup_cache.clear()
 
     return Response(
         content=buffer.getvalue(), media_type="application/pdf", headers=headers
