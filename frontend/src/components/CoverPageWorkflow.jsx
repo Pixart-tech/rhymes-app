@@ -271,12 +271,17 @@ const updateNodeImage = (nodes, value) => {
       }
 
       if (node.tagName?.toLowerCase() === 'image') {
-        node.setAttribute('preserveAspectRatio', node.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+        node.setAttribute('preserveAspectRatio', 'xMidYMid slice');
       }
 
       const imgChild = node.tagName?.toLowerCase() === 'image' ? null : node.querySelector('img');
       if (imgChild) {
         imgChild.setAttribute('src', imageValue);
+        if (imgChild.style) {
+          imgChild.style.objectFit = imgChild.style.objectFit || 'cover';
+          imgChild.style.width = imgChild.style.width || '100%';
+          imgChild.style.height = imgChild.style.height || '100%';
+        }
       }
     } else {
       node.removeAttribute('href');
