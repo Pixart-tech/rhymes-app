@@ -1369,7 +1369,7 @@ async def get_rhyme_svg(rhyme_code: str):
 
 @api_router.get("/cover-assets/manifest")
 async def get_cover_assets_manifest():
-    print("Iam called")
+    
     """Return a manifest describing all available cover SVG assets."""
 
     base_path = _ensure_cover_assets_base_path()
@@ -1381,10 +1381,11 @@ async def get_cover_assets_manifest():
 @api_router.get("/cover-assets/svg/{relative_path:path}")
 async def get_cover_asset(relative_path: str):
     """Return the raw SVG bytes for the cover asset ``relative_path``."""
-
+    print("Iam called")
     base_path = _ensure_cover_assets_base_path()
 
     candidate_path = (base_path / Path(relative_path)).resolve()
+    print(candidate_path)
 
     try:
         candidate_path.relative_to(base_path)
