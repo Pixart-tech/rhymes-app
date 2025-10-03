@@ -361,6 +361,52 @@ def _sanitize_svg_for_svglib(svg_markup: str) -> str:
     return ET.tostring(root, encoding="unicode")
 
 
+def _svg_requires_raster_backend(svg_document: _SvgDocument) -> bool:
+    """Return ``True`` when the SVG should be rasterised for PDF output.
+
+    ReportLab's PDF canvas (used through ``svglib``) cannot represent alpha
+    channels for embedded PNG images which results in black rectangles around
+    artwork. The helper inspects the markup to detect common PNG usage (file
+    paths, data URIs or explicit ``type`` attributes) and signals that the
+    raster CairoSVG fallback should be preferred instead. The routine is also
+    leveraged to bypass vector rendering when transparency would be lost.
+    """
+
+    try:
+        root = ET.fromstring(svg_document.markup)
+    except ET.ParseError:
+        return False
+
+    image_xpath = f".//{{{SVG_NS}}}image"
+
+    for image in root.findall(image_xpath):
+        href_value = (
+            image.get(f"{{{XLINK_NS}}}href")
+            or image.get("href")
+            or ""
+        ).strip()
+        if not href_value:
+            continue
+
+        href_lower = href_value.lower()
+        if href_lower.startswith("data:"):
+            if href_lower.startswith("data:image/png") or href_lower.startswith(
+                "data:image/apng"
+            ):
+                return True
+        else:
+            parsed = urlparse(href_value)
+            candidate = (parsed.path or href_value).lower()
+            if candidate.endswith((".png", ".apng")):
+                return True
+
+        type_attr = (image.get("type") or "").lower()
+        if type_attr in {"image/png", "image/apng"}:
+            return True
+
+    return False
+
+
 # MongoDB connection
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -1479,10 +1525,19 @@ def _render_svg_on_canvas(
 
     logger = logging.getLogger(__name__)
 
-    vector_backend_available = backend.svg2rlg and backend.render_pdf
     svg_markup = svg_document.markup
     source_path = svg_document.source_path
     sanitized_markup = _sanitize_svg_for_svglib(svg_markup)
+    raster_only = _svg_requires_raster_backend(svg_document)
+
+    if sanitized_markup != svg_markup:
+        raster_only = True
+
+    vector_backend_available = (
+        backend.svg2rlg
+        and backend.render_pdf
+        and not raster_only
+    )
 
     if source_path is not None:
         localized_markup = _localize_svg_image_assets(
