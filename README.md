@@ -33,9 +33,10 @@ The FastAPI service is defined in [`backend/server.py`](backend/server.py) and e
 Before starting the FastAPI service, make sure a MongoDB server is available. You can run it locally at `mongodb://localhost:27017` or supply a hosted MongoDB URL via `MONGO_URL`.
 
 ## Frontend Setup
-The React client reads its backend URL from `frontend/src/App.js`. Configure and start it by following these steps:
+The React client automatically targets the same origin as the page serving it. When you need to talk to a backend hosted at a
+different URL, provide an override through `frontend/.env`:
 
-1. Create `frontend/.env` with the lines:
+1. (Optional) Create `frontend/.env` with the following entry to point the UI at a different backend host:
    ```env
    REACT_APP_BACKEND_URL=http://localhost:8000
    ```
