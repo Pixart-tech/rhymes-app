@@ -157,6 +157,33 @@ const collectNodes = (doc, selectors = []) => {
   return results;
 };
 
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    if (!file) {
+      resolve('');
+      return;
+    }
+
+    if (typeof FileReader === 'undefined') {
+      reject(new Error('FileReader is not supported in this environment.'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      resolve(result);
+    };
+    reader.onerror = () => {
+      reject(reader.error || new Error('Unable to read file.'));
+    };
+    reader.onabort = () => {
+      reject(new Error('File reading was aborted.'));
+    };
+
+    reader.readAsDataURL(file);
+  });
+
 const updateNodeText = (nodes, value) => {
   const textValue = value ?? '';
   nodes.forEach((node) => {
@@ -306,6 +333,8 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     tagLine3: ''
   });
   const [gradeNameDirty, setGradeNameDirty] = useState(false);
+  const [schoolLogoFileName, setSchoolLogoFileName] = useState('');
+  const [schoolLogoError, setSchoolLogoError] = useState('');
 
   const [currentStep, setCurrentStep] = useState(1);
   const [hasSubmittedDetails, setHasSubmittedDetails] = useState(false);
@@ -505,7 +534,43 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   }, [activeIndex, previewCount]);
 
   const handlePersonalisationChange = useCallback(
-    (field) => (event) => {
+    (field) => async (event) => {
+      if (field === 'schoolLogo') {
+        const input = event?.target;
+        const file = input?.files?.[0] || null;
+
+        if (!file) {
+          setPersonalisation((current) => ({ ...current, schoolLogo: '' }));
+          setSchoolLogoFileName('');
+          setSchoolLogoError('');
+        } else if (file.type && !file.type.startsWith('image/')) {
+          setPersonalisation((current) => ({ ...current, schoolLogo: '' }));
+          setSchoolLogoFileName('');
+          setSchoolLogoError('Please upload an image file for the school logo.');
+        } else {
+          try {
+            const dataUrl = await readFileAsDataUrl(file);
+            setPersonalisation((current) => ({ ...current, schoolLogo: dataUrl.trim() }));
+            setSchoolLogoFileName(file.name);
+            setSchoolLogoError('');
+          } catch (error) {
+            setPersonalisation((current) => ({ ...current, schoolLogo: '' }));
+            setSchoolLogoFileName('');
+            setSchoolLogoError('We could not read that image. Please try a different file.');
+          }
+        }
+
+        if (hasSubmittedDetails) {
+          setHasSubmittedDetails(false);
+        }
+
+        if (input) {
+          input.value = '';
+        }
+
+        return;
+      }
+
       const value = event?.target?.value ?? '';
       setPersonalisation((current) => ({
         ...current,
@@ -695,15 +760,19 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
               <CardContent className="space-y-4">
                 <div className="cover-personalisation-grid two-column">
                   <div className="cover-form-field">
-                    <Label htmlFor="cover-school-logo">Upload School logo </Label>
+                    <Label htmlFor="cover-school-logo">Upload school logo image</Label>
                     <Input
                       id="cover-school-logo"
                       type="file"
-                      inputMode="url"
-                      placeholder="https://example.com/logo.png"
-                      value={personalisation.schoolLogo}
+                      accept="image/*"
                       onChange={handlePersonalisationChange('schoolLogo')}
                     />
+                    {schoolLogoFileName && !schoolLogoError && (
+                      <p className="mt-1 text-xs text-slate-500">Selected file: {schoolLogoFileName}</p>
+                    )}
+                    {schoolLogoError && (
+                      <p className="mt-1 text-xs text-red-600">{schoolLogoError}</p>
+                    )}
                   </div>
                   <div className="cover-form-field">
                     <Label htmlFor="cover-grade-name">Grade name</Label>
