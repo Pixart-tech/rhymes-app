@@ -1484,6 +1484,17 @@ def _render_svg_on_canvas(
     source_path = svg_document.source_path
     sanitized_markup = _sanitize_svg_for_svglib(svg_markup)
 
+    if source_path is not None:
+        localized_markup = _localize_svg_image_assets(
+            sanitized_markup,
+            source_path,
+            rhyme_code or "unknown",
+            inline_mode=True,
+            preprocess_for_pdf=True,
+        )
+        if localized_markup != sanitized_markup:
+            sanitized_markup = localized_markup
+
     temp_svg_path: Optional[Path] = None
 
     if vector_backend_available:
