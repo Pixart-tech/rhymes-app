@@ -48,6 +48,7 @@ RHYME_SVG_BASE_PATH = Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs")
 DEFAULT_COVER_SVG_BASE_PATH = Path(
     r"\\pixartnas\home\Project ABC\Project ABC Cover\background\Sample"
 )
+PACKAGED_COVER_SVG_BASE_PATH = ROOT_DIR / "sample_cover_assets"
 
 
 @dataclass(frozen=True)
@@ -94,17 +95,29 @@ def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]:
 def _resolve_cover_svg_base_path() -> Optional[Path]:
     """Return the configured base path for cover SVG assets, if any."""
 
-    base_path = os.environ.get("COVER_SVG_BASE_PATH")
-    if not base_path:
-        # Default to the shared network location for cover assets when no override
-        # is provided via environment variables.
-        return DEFAULT_COVER_SVG_BASE_PATH
+    candidate_paths: List[Optional[Path]] = []
 
-    try:
-        return Path(base_path).expanduser()
-    except (OSError, RuntimeError) as exc:
-        logger.warning("Invalid COVER_SVG_BASE_PATH '%s': %s", base_path, exc)
-        return None
+    base_path = os.environ.get("COVER_SVG_BASE_PATH")
+    if base_path:
+        try:
+            candidate_paths.append(Path(base_path).expanduser())
+        except (OSError, RuntimeError) as exc:
+            logger.warning("Invalid COVER_SVG_BASE_PATH '%s': %s", base_path, exc)
+
+    candidate_paths.append(DEFAULT_COVER_SVG_BASE_PATH)
+    candidate_paths.append(PACKAGED_COVER_SVG_BASE_PATH)
+
+    for candidate in candidate_paths:
+        if not candidate:
+            continue
+
+        try:
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+        except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+            logger.warning("Unable to access cover SVG directory %s: %s", candidate, exc)
+
+    return None
 
 
 COVER_SVG_BASE_PATH = _resolve_cover_svg_base_path()
