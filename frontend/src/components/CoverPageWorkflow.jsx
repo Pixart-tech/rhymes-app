@@ -886,8 +886,24 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
             {hasSubmittedDetails && (
               <Alert className="border-emerald-200 bg-emerald-50 text-emerald-800">
                 <AlertTitle>Displaying preview</AlertTitle>
-                <AlertDescription>
-                  Your personalised covers are ready. Use the carousel below to review each design.
+                <AlertDescription className="space-y-4">
+                  <p>Your personalised covers are ready. Use the carousel below to review each design.</p>
+                  {activeAsset && (
+                    <div className="overflow-hidden rounded-md border border-emerald-100 bg-white/70">
+                      <div className="flex items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs font-medium uppercase tracking-wide text-emerald-700">
+                        <span>Preview loaded</span>
+                        <span className="truncate">{activeAsset.fileName}</span>
+                      </div>
+                      <div className="max-h-80 overflow-auto bg-white px-3 py-4">
+                        <div
+                          className="mx-auto max-h-72 min-h-[180px] w-full overflow-hidden rounded border border-emerald-100 bg-white shadow-sm"
+                          dangerouslySetInnerHTML={{
+                            __html: activeAsset.personalisedMarkup || activeAsset.svgMarkup
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </AlertDescription>
               </Alert>
             )}
