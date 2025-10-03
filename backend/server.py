@@ -146,10 +146,24 @@ def _ensure_cover_assets_base_path() -> Path:
     return COVER_SVG_BASE_PATH
 
 
-def _build_cover_asset_manifest(base_path: Path) -> List[Dict[str, str]]:
-    """Build a manifest describing all SVG cover assets under ``base_path``."""
+def _build_cover_asset_manifest(base_path: Path, *, include_markup: bool = False) -> List[Dict[str, Any]]:
+    """Build a manifest describing all SVG cover assets under ``base_path``.
 
-    assets: List[Dict[str, str]] = []
+    Parameters
+    ----------
+    base_path:
+        Root directory that contains the cover SVG files.
+    include_markup:
+        When ``True`` the SVG markup for each asset is embedded directly in the
+        manifest. The existing API contract – file metadata and relative URLs –
+        remains unchanged so the frontend continues to function without
+        modification. This flag is enabled for the manifest endpoint so callers
+        that expect the raw SVG (e.g. when the files are hosted on a network
+        share) receive it without needing to perform an additional request per
+        asset.
+    """
+
+    assets: List[Dict[str, Any]] = []
 
     for svg_path in sorted(base_path.rglob("*.svg")):
         if not svg_path.is_file():
@@ -162,13 +176,26 @@ def _build_cover_asset_manifest(base_path: Path) -> List[Dict[str, str]]:
             continue
 
         relative_posix = relative_path.as_posix()
-        assets.append(
-            {
-                "fileName": svg_path.name,
-                "path": relative_posix,
-                "url": f"/api/cover-assets/svg/{quote(relative_posix, safe='/')}",
-            }
-        )
+        manifest_entry: Dict[str, Any] = {
+            "fileName": svg_path.name,
+            "path": relative_posix,
+            "url": f"/api/cover-assets/svg/{quote(relative_posix, safe='/')}",
+        }
+
+        if include_markup:
+            try:
+                svg_text = svg_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                # Fall back to decoding with replacement characters so a single
+                # mis-encoded file does not break the entire manifest.
+                svg_text = svg_path.read_bytes().decode("utf-8", errors="replace")
+            except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+                logger.error("Unable to read cover SVG '%s': %s", svg_path, exc)
+                svg_text = ""
+
+            manifest_entry["svg"] = svg_text
+
+        assets.append(manifest_entry)
 
     return assets
 
@@ -1297,7 +1324,7 @@ async def get_cover_assets_manifest():
     """Return a manifest describing all available cover SVG assets."""
 
     base_path = _ensure_cover_assets_base_path()
-    assets = _build_cover_asset_manifest(base_path)
+    assets = _build_cover_asset_manifest(base_path, include_markup=True)
 
     return {"assets": assets}
 
