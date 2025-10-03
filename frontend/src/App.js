@@ -1674,7 +1674,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
               <div className="flex h-full w-full flex-col">
 
                 {/* Navigation Controls */}
-                <div className="flex-shrink-0 space-y-6">
+                <div className="flex-shrink-0 space-y-4">
                   <div className="flex items-center justify-between">
                     <Button
                       onClick={() => void handlePageChange(Math.max(0, currentPageIndex - 1))}
@@ -1703,8 +1703,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 </div>
 
                 <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex-1 min-h-0 py-4">
-                    <div className="flex h-full items-center justify-center">
+                  <div className="flex-1 min-h-0 py-2">
+                    <div className="flex h-full items-start justify-center">
 
                       <div className="relative flex w-full justify-center transition-all duration-300 ease-out">
 
