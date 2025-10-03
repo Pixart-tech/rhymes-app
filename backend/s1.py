@@ -495,6 +495,8 @@ async def login_school(input: SchoolCreate):
     existing_school = await db.schools.find_one({"school_id": input.school_id})
 
     if existing_school:
+        existing_school = existing_school.copy()
+        existing_school.pop("_id", None)
         return School(**existing_school)
 
     # Create new school entry
