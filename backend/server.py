@@ -45,6 +45,9 @@ load_dotenv(ROOT_DIR / ".env")
 
 logger = logging.getLogger(__name__)
 RHYME_SVG_BASE_PATH = Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs")
+DEFAULT_COVER_SVG_BASE_PATH = Path(
+    r"\\pixartnas\home\Project ABC\Project ABC Cover\background\Sample"
+)
 
 
 @dataclass(frozen=True)
@@ -93,7 +96,9 @@ def _resolve_cover_svg_base_path() -> Optional[Path]:
 
     base_path = os.environ.get("COVER_SVG_BASE_PATH")
     if not base_path:
-        return None
+        # Default to the shared network location for cover assets when no override
+        # is provided via environment variables.
+        return DEFAULT_COVER_SVG_BASE_PATH
 
     try:
         return Path(base_path).expanduser()
