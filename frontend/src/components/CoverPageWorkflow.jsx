@@ -81,6 +81,27 @@ const joinUrl = (baseUrl, path) => {
   return `${trimmedBase}/${trimmedPath}`;
 };
 
+const extractSvgMarkupFromEntry = (entry) => {
+  if (!entry) {
+    return '';
+  }
+
+  if (typeof entry === 'object') {
+    const candidates = ['svg', 'markup', 'svgMarkup', 'content'];
+    for (const field of candidates) {
+      const value = entry[field];
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed.length > 0) {
+          return trimmed;
+        }
+      }
+    }
+  }
+
+  return '';
+};
+
 const extractFileName = (entry) => {
   if (!entry) {
     return '';
@@ -173,6 +194,7 @@ const normaliseManifest = (payload, baseUrl) => {
     }
 
     let url = '';
+    let svgMarkup = '';
 
     if (typeof entry === 'string') {
       const clean = entry.trim();
@@ -182,6 +204,7 @@ const normaliseManifest = (payload, baseUrl) => {
         url = baseUrl ? joinUrl(baseUrl, clean) : '';
       }
     } else if (typeof entry === 'object') {
+      svgMarkup = extractSvgMarkupFromEntry(entry);
       if (typeof entry.url === 'string' && entry.url.trim().length > 0) {
         url = entry.url.trim();
       } else if (typeof entry.href === 'string' && entry.href.trim().length > 0) {
@@ -199,11 +222,23 @@ const normaliseManifest = (payload, baseUrl) => {
     }
 
     seen.add(key);
-    normalised.push({ fileName, url, selectionKey });
+    normalised.push({ fileName, url, selectionKey, svgMarkup });
   });
 
   normalised.sort((a, b) => a.fileName.localeCompare(b.fileName));
   return normalised;
+};
+
+const buildAssetCacheKey = (asset) => {
+  if (!asset) {
+    return '';
+  }
+
+  const parts = [asset.selectionKey, asset.fileName, asset.url]
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter((part) => part.length > 0);
+
+  return parts.join('|');
 };
 
 const resolveErrorMessage = (error) => {
@@ -535,25 +570,39 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
               );
             }
 
-            if (!asset.url) {
-              throw new Error(`No download URL configured for “${asset.fileName}”.`);
+            const cacheKey = buildAssetCacheKey(asset);
+
+            if (cacheKey && assetCacheRef.current.has(cacheKey)) {
+              return assetCacheRef.current.get(cacheKey);
             }
 
-            if (assetCacheRef.current.has(asset.url)) {
-              return assetCacheRef.current.get(asset.url);
+            let svgMarkup = typeof asset.svgMarkup === 'string' ? asset.svgMarkup.trim() : '';
+
+            if (!svgMarkup) {
+              if (!asset.url) {
+                throw new Error(
+                  `No SVG markup or download URL configured for “${asset.fileName}”.`
+                );
+              }
+
+              const response = await axios.get(asset.url, { responseType: 'text' });
+              svgMarkup = typeof response.data === 'string' ? response.data.trim() : '';
             }
 
-            const response = await axios.get(asset.url, { responseType: 'text' });
-            const svgMarkup = typeof response.data === 'string' ? response.data : '';
+            if (!svgMarkup) {
+              throw new Error(`The SVG for “${asset.fileName}” could not be loaded.`);
+            }
 
             const record = {
               fileName: asset.fileName,
-              url: asset.url,
+              url: asset.url || '',
               selectionKey: asset.selectionKey,
               svgMarkup
             };
 
-            assetCacheRef.current.set(asset.url, record);
+            if (cacheKey) {
+              assetCacheRef.current.set(cacheKey, record);
+            }
             return record;
           })
         );
