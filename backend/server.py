@@ -684,10 +684,6 @@ async def get_rhyme_svg(rhyme_code: str):
 
 @api_router.get("/cover-assets/manifest")
 async def get_cover_assets_manifest():
-<<<<<<< HEAD
-    
-=======
->>>>>>> 2238948bf04678e1c57e3d5957b44eb215f0792a
     """Return a manifest describing all available cover SVG assets."""
 
     base_path = _ensure_cover_assets_base_path()
