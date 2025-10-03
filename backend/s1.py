@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 from pydantic import BaseModel, Field
-from typing import Callable, List, Dict, Optional, Any, Tuple, Literal
+from typing import Callable, List, Dict, Optional, Any, Tuple, Literal, Iterable, Set
 from io import BytesIO
 from functools import lru_cache
 from urllib.parse import quote
@@ -320,17 +320,42 @@ def generate_rhyme_svg(rhyme_code: str) -> str:
     """
 
 
+def _normalize_cors_origin(origin: str) -> Optional[str]:
+    """Return a sanitized representation of a configured CORS origin."""
+
+    trimmed = origin.strip()
+    if not trimmed:
+        return None
+
+    if trimmed == "*":
+        return trimmed
+
+    return trimmed.rstrip("/")
+
+
 def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> List[str]:
     """Return a normalized list from a comma separated string."""
 
-    if value is None:
-        return list(default or [])
+    def _collect(entries: Iterable[str]) -> List[str]:
+        normalized: List[str] = []
+        seen: Set[str] = set()
 
-    entries = [item.strip() for item in value.split(",") if item.strip()]
-    if entries:
-        return entries
+        for raw_entry in entries:
+            normalized_entry = _normalize_cors_origin(raw_entry)
+            if not normalized_entry or normalized_entry in seen:
+                continue
 
-    return list(default or [])
+            normalized.append(normalized_entry)
+            seen.add(normalized_entry)
+
+        return normalized
+
+    if value is not None:
+        parsed = _collect(value.split(","))
+        if parsed:
+            return parsed
+
+    return _collect(default or [])
 
 
 app = FastAPI()
@@ -495,6 +520,8 @@ async def login_school(input: SchoolCreate):
     existing_school = await db.schools.find_one({"school_id": input.school_id})
 
     if existing_school:
+        existing_school = existing_school.copy()
+        existing_school.pop("_id", None)
         return School(**existing_school)
 
     # Create new school entry
