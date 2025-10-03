@@ -15,6 +15,7 @@ from typing import Callable, List, Dict, Optional, Any, Tuple, Literal, Iterable
 from io import BytesIO
 from functools import lru_cache
 from shutil import copy2
+import tempfile
 import base64
 import mimetypes
 from urllib.parse import quote, unquote, urlparse
@@ -1481,20 +1482,71 @@ def _render_svg_on_canvas(
     vector_backend_available = backend.svg2rlg and backend.render_pdf
     svg_markup = svg_document.markup
     source_path = svg_document.source_path
+    sanitized_markup = _sanitize_svg_for_svglib(svg_markup)
+
+    temp_svg_path: Optional[Path] = None
 
     if vector_backend_available:
         try:
             svg_input: Any
             if source_path is not None:
-                svg_input = str(source_path)
+                if sanitized_markup != svg_markup:
+                    temp_svg_path = None
+                    candidate_dirs: List[Path] = []
+                    parent_dir = source_path.parent
+                    if parent_dir.exists() and parent_dir.is_dir():
+                        candidate_dirs.append(parent_dir)
+                    try:
+                        cache_dir = _ensure_image_cache_dir()
+                    except OSError:
+                        cache_dir = None
+                    if cache_dir and cache_dir not in candidate_dirs:
+                        candidate_dirs.append(cache_dir)
+
+                    for directory in candidate_dirs:
+                        try:
+                            with tempfile.NamedTemporaryFile(
+                                "w",
+                                encoding="utf-8",
+                                suffix=".svg",
+                                prefix=f"{source_path.stem}_sanitized_",
+                                dir=directory,
+                                delete=False,
+                            ) as temp_file:
+                                temp_file.write(sanitized_markup)
+                            temp_svg_path = Path(temp_file.name)
+                            break
+                        except OSError as exc:
+                            logger.debug(
+                                "Unable to create temporary sanitized SVG in %s: %s",
+                                directory,
+                                exc,
+                            )
+
+                    if temp_svg_path is None:
+                        logger.warning(
+                            "Falling back to in-memory sanitized SVG for %s", source_path
+                        )
+                        svg_input = BytesIO(sanitized_markup.encode("utf-8"))
+                    else:
+                        svg_input = str(temp_svg_path)
+                else:
+                    svg_input = str(source_path)
             else:
-                sanitized_markup = _sanitize_svg_for_svglib(svg_markup)
                 svg_input = BytesIO(sanitized_markup.encode("utf-8"))
 
             drawing = backend.svg2rlg(svg_input)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to parse SVG using svglib: %s", exc)
             drawing = None
+        finally:
+            if temp_svg_path is not None:
+                try:
+                    temp_svg_path.unlink()
+                except OSError as exc:
+                    logger.debug(
+                        "Unable to remove temporary sanitized SVG %s: %s", temp_svg_path, exc
+                    )
 
         if drawing and getattr(drawing, "width", None) and getattr(drawing, "height", None):
             try:

@@ -4,6 +4,7 @@ import sys
 import types
 from io import BytesIO
 from types import SimpleNamespace
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -354,3 +355,57 @@ def test_sanitize_svg_for_svglib_rewrites_gradient_in_style_block():
 def test_sanitize_svg_for_svglib_returns_original_on_parse_error():
     malformed_svg = "<svg><"
     assert server._sanitize_svg_for_svglib(malformed_svg) == malformed_svg
+
+
+def test_render_svg_on_canvas_sanitizes_external_assets(tmp_path):
+    svg_path = tmp_path / "external.svg"
+    gradient_svg = """
+    <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"50\">
+        <defs>
+            <linearGradient id=\"grad1\">
+                <stop offset=\"0%\" style=\"stop-color:#112233;stop-opacity:1\" />
+                <stop offset=\"100%\" style=\"stop-color:#445566;stop-opacity:1\" />
+            </linearGradient>
+        </defs>
+        <rect width=\"100\" height=\"50\" fill=\"url(#grad1)\" />
+    </svg>
+    """
+    svg_path.write_text(gradient_svg, encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def fake_svg2rlg(svg_input):
+        captured["input"] = svg_input
+        if isinstance(svg_input, str):
+            captured["content"] = Path(svg_input).read_text(encoding="utf-8")
+        drawing = SimpleNamespace(
+            width=100.0,
+            height=50.0,
+            minX=0.0,
+            minY=0.0,
+        )
+        drawing.scale = lambda *_: None
+        drawing.translate = lambda *_: None
+        return drawing
+
+    def fake_draw(drawing, pdf_canvas, x, y):  # pragma: no cover - trivial
+        captured["draw_called"] = True
+
+    backend = server._SvgBackend(
+        "svglib",
+        None,
+        None,
+        fake_svg2rlg,
+        SimpleNamespace(draw=fake_draw),
+    )
+
+    svg_document = server._SvgDocument(markup=gradient_svg, source_path=svg_path)
+    pdf_canvas = SimpleNamespace()
+
+    rendered = server._render_svg_on_canvas(pdf_canvas, backend, svg_document, 100.0, 50.0)
+
+    assert rendered is True
+    assert isinstance(captured.get("input"), str)
+    assert captured["input"] != str(svg_path)
+    assert "url(#" not in captured.get("content", "")
+    assert not Path(captured["input"]).exists()
