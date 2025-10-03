@@ -97,7 +97,8 @@ def _resolve_cover_svg_base_path() -> Optional[Path]:
 
     candidate_paths: List[Optional[Path]] = []
 
-    base_path = os.environ.get("COVER_SVG_BASE_PATH")
+    base_path = r"\\pixartnas\home\Project ABC\Project ABC Cover\background\Sample"
+    print(base_path)
     if base_path:
         try:
             candidate_paths.append(Path(base_path).expanduser())
@@ -1321,6 +1322,7 @@ async def get_rhyme_svg(rhyme_code: str):
 
 @api_router.get("/cover-assets/manifest")
 async def get_cover_assets_manifest():
+    print("Iam called")
     """Return a manifest describing all available cover SVG assets."""
 
     base_path = _ensure_cover_assets_base_path()
