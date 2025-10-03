@@ -850,10 +850,6 @@ def _render_svg_on_canvas(
     effective_markup = original_markup
     source_path = svg_document.source_path
 
-    sanitized_markup = _sanitize_svg_for_svglib(effective_markup)
-    if sanitized_markup != effective_markup:
-        effective_markup = sanitized_markup
-
     raster_only = _svg_requires_raster_backend(svg_document)
 
     if source_path is not None:
@@ -867,10 +863,17 @@ def _render_svg_on_canvas(
         if localized_markup != effective_markup:
             effective_markup = localized_markup
 
-    if effective_markup != original_markup:
-        raster_only = _svg_requires_raster_backend(_SvgDocument(effective_markup, source_path))
+    sanitized_markup = _sanitize_svg_for_svglib(effective_markup)
+    gradient_requires_raster = sanitized_markup != effective_markup
+    if gradient_requires_raster:
+        logger.debug(
+            "Gradient sanitization required for %s; falling back to raster rendering",
+            rhyme_code or "unknown",
+        )
 
-    needs_temp_file = source_path is not None and effective_markup != original_markup
+    vector_markup = sanitized_markup if not gradient_requires_raster else effective_markup
+
+    needs_temp_file = source_path is not None and vector_markup != original_markup
 
     vector_backend_available = (
         backend.svg2rlg
@@ -880,7 +883,7 @@ def _render_svg_on_canvas(
 
     temp_svg_path: Optional[Path] = None
 
-    if vector_backend_available:
+    if vector_backend_available and not gradient_requires_raster:
         try:
             svg_input: Any
             if source_path is not None:
@@ -906,7 +909,7 @@ def _render_svg_on_canvas(
                                 dir=directory,
                                 delete=False,
                             ) as temp_file:
-                                temp_file.write(effective_markup)
+                                temp_file.write(vector_markup)
                             temp_svg_path = Path(temp_file.name)
                             break
                         except OSError as exc:
@@ -920,13 +923,13 @@ def _render_svg_on_canvas(
                         logger.warning(
                             "Falling back to in-memory sanitized SVG for %s", source_path
                         )
-                        svg_input = BytesIO(effective_markup.encode("utf-8"))
+                        svg_input = BytesIO(vector_markup.encode("utf-8"))
                     else:
                         svg_input = str(temp_svg_path)
                 else:
                     svg_input = str(source_path)
             else:
-                svg_input = BytesIO(effective_markup.encode("utf-8"))
+                svg_input = BytesIO(vector_markup.encode("utf-8"))
 
             drawing = backend.svg2rlg(svg_input)
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -978,6 +981,7 @@ def _render_svg_on_canvas(
                 write_to=image_buffer,
                 output_width=int(width),
                 output_height=int(height),
+                background_color="transparent",
             )
             image_buffer.seek(0)
             pdf_canvas.drawImage(
