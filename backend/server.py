@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 from pydantic import BaseModel, Field
-from typing import Callable, List, Dict, Optional, Any, Tuple, Literal
+from typing import Callable, List, Dict, Optional, Any, Tuple, Literal, Iterable, Set
 from io import BytesIO
 from functools import lru_cache
 from shutil import copy2
@@ -619,17 +619,63 @@ def _load_rhyme_svg_markup(rhyme_code: str) -> _SvgDocument:
     return _SvgDocument(generate_rhyme_svg(rhyme_code), None)
 
 
+def _normalize_cors_origin(origin: str) -> Optional[str]:
+    """Return a sanitized representation of a configured CORS origin."""
+
+    trimmed = origin.strip()
+    if not trimmed:
+        return None
+
+    if trimmed == "*":
+        return trimmed
+
+    return trimmed.rstrip("/")
+
+
 def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> List[str]:
-    """Return a normalized list from a comma separated string."""
+    """Return a normalized list from a delimited or JSON encoded string."""
 
-    if value is None:
-        return list(default or [])
+    def _collect(entries: Iterable[str]) -> List[str]:
+        normalized: List[str] = []
+        seen: Set[str] = set()
 
-    entries = [item.strip() for item in value.split(",") if item.strip()]
-    if entries:
-        return entries
+        for raw_entry in entries:
+            normalized_entry = _normalize_cors_origin(raw_entry)
+            if not normalized_entry or normalized_entry in seen:
+                continue
 
-    return list(default or [])
+            normalized.append(normalized_entry)
+            seen.add(normalized_entry)
+
+        return normalized
+
+    if value is not None:
+        stripped = value.strip()
+        if stripped:
+            json_entries: Optional[List[str]] = None
+
+            try:
+                loaded = json.loads(stripped)
+            except json.JSONDecodeError:
+                pass
+            else:
+                if isinstance(loaded, str):
+                    json_entries = [loaded]
+                elif isinstance(loaded, list):
+                    json_entries = [str(item) for item in loaded]
+                else:
+                    json_entries = [str(loaded)]
+
+            if json_entries is not None:
+                parsed = _collect(json_entries)
+                if parsed:
+                    return parsed
+
+        parsed = _collect(re.split(r"[,\n]", value))
+        if parsed:
+            return parsed
+
+    return _collect(default or [])
 
 
 app = FastAPI()
