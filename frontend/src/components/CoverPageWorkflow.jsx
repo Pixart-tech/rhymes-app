@@ -45,12 +45,30 @@ const normalizeToken = (value) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '');
 
-const buildSelectionKey = (themeId, colourId) => {
-  if (!themeId || !colourId) {
+const extractSelectionToken = (value) => {
+  if (value == null) {
     return '';
   }
 
-  return `${normalizeToken(themeId)}.${normalizeToken(colourId)}`;
+  const stringValue = value.toString();
+  const numericMatches = stringValue.match(/\d+/g);
+
+  if (numericMatches && numericMatches.length > 0) {
+    return numericMatches.join('');
+  }
+
+  return normalizeToken(stringValue);
+};
+
+const buildSelectionKey = (themeId, colourId) => {
+  const themeToken = extractSelectionToken(themeId);
+  const colourToken = extractSelectionToken(colourId);
+
+  if (!themeToken || !colourToken) {
+    return '';
+  }
+
+  return `${themeToken}.${colourToken}`;
 
 };
 const joinUrl = (baseUrl, path) => {
@@ -106,8 +124,8 @@ const parseSelectionKeyFromFileName = (fileName) => {
     return '';
   }
 
-  const themeToken = normalizeToken(parts[0]);
-  const colourToken = normalizeToken(parts[1]);
+  const themeToken = extractSelectionToken(parts[0]);
+  const colourToken = extractSelectionToken(parts[1]);
 
   if (!themeToken || !colourToken) {
     return '';
