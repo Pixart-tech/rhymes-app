@@ -97,7 +97,7 @@ def _resolve_cover_svg_base_path() -> Optional[Path]:
 
     candidate_paths: List[Optional[Path]] = []
 
-    base_path = r"\\pixartnas\home\Project ABC\Project ABC Cover\background\Sample"
+    base_path = r"pixartnas\home\Project ABC\Project ABC Cover\background\Sample\1 Theme\Theme 1 Test\SVGs"
     print(base_path)
     if base_path:
         try:
