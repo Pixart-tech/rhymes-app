@@ -14,6 +14,7 @@ import { Separator } from './components/ui/separator';
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
 import CoverPageWorkflow from './components/CoverPageWorkflow';
+import { API_BASE_URL } from './lib/utils';
 
 
 // Icons
@@ -33,8 +34,7 @@ import {
   Clock
 } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
-const API = `${BACKEND_URL}/api`;
+const API = API_BASE_URL || '/api';
 
 const GRADE_OPTIONS = [
   { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
