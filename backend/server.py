@@ -678,13 +678,38 @@ def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> 
     return _collect(default or [])
 
 
+def _prepare_cors_settings(origins: Iterable[str]) -> Tuple[List[str], Optional[str]]:
+    """Return sanitized origins and a regex that mirrors wildcard entries."""
+
+    allow_all = False
+    sanitized: List[str] = []
+
+    for origin in origins:
+        if origin == "*":
+            allow_all = True
+            continue
+
+        sanitized.append(origin)
+
+    return sanitized, ".*" if allow_all else None
+
+
 app = FastAPI()
+_cors_origins = _parse_csv(os.environ.get("CORS_ORIGINS"), default=["*"])
+_sanitized_origins, _allow_origin_regex = _prepare_cors_settings(_cors_origins)
+_cors_kwargs = {
+    "allow_credentials": True,
+    "allow_origins": _sanitized_origins,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+
+if _allow_origin_regex is not None:
+    _cors_kwargs["allow_origin_regex"] = _allow_origin_regex
+
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=_parse_csv(os.environ.get("CORS_ORIGINS"), default=["*"]),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    **_cors_kwargs,
 )
 
 
