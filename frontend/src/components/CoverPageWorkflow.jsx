@@ -81,166 +81,6 @@ const joinUrl = (baseUrl, path) => {
   return `${trimmedBase}/${trimmedPath}`;
 };
 
-const extractSvgMarkupFromEntry = (entry) => {
-  if (!entry) {
-    return '';
-  }
-
-  if (typeof entry === 'object') {
-    const candidates = ['svg', 'markup', 'svgMarkup', 'content'];
-    for (const field of candidates) {
-      const value = entry[field];
-      if (typeof value === 'string') {
-        const trimmed = value.trim();
-        if (trimmed.length > 0) {
-          return trimmed;
-        }
-      }
-    }
-  }
-
-  return '';
-};
-
-const extractFileName = (entry) => {
-  if (!entry) {
-    return '';
-  }
-
-
-
-
-  if (typeof entry === 'string') {
-    const clean = entry.trim();
-    if (!clean) {
-      return '';
-    }
-    const segments = clean.split(/[\\/]/);
-    return segments[segments.length - 1] || '';
-  }
-
-  if (typeof entry === 'object') {
-    const fields = ['fileName', 'filename', 'name', 'path', 'key'];
-    for (const field of fields) {
-      const value = entry[field];
-      if (typeof value === 'string' && value.trim().length > 0) {
-        const segments = value.trim().split(/[\\/]/);
-        return segments[segments.length - 1] || '';
-      }
-    }
-  }
-
-  return '';
-};
-
-const parseSelectionKeyFromFileName = (fileName) => {
-  if (!fileName || typeof fileName !== 'string') {
-    return '';
-  }
-
-  const withoutExt = fileName.replace(/\.svg$/i, '');
-  const parts = withoutExt.split('.');
-
-  if (parts.length < 2) {
-    return '';
-  }
-
-  const themeToken = extractSelectionToken(parts[0]);
-  const colourToken = extractSelectionToken(parts[1]);
-
-  if (!themeToken || !colourToken) {
-    return '';
-  }
-
-  return `${themeToken}.${colourToken}`;
-};
-
-const extractManifestEntries = (payload) => {
-  if (!payload) {
-    return [];
-  }
-
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (typeof payload === 'object') {
-    const candidateKeys = ['assets', 'files', 'items', 'data', 'results'];
-    for (const key of candidateKeys) {
-      const value = payload[key];
-      if (Array.isArray(value)) {
-        return value;
-      }
-    }
-  }
-
-  return [];
-};
-
-const normaliseManifest = (payload, baseUrl) => {
-  const rawEntries = extractManifestEntries(payload);
-  const seen = new Set();
-  const normalised = [];
-
-  rawEntries.forEach((entry) => {
-    const fileName = extractFileName(entry);
-    if (!fileName) {
-      return;
-    }
-
-    const selectionKey = parseSelectionKeyFromFileName(fileName);
-    if (!selectionKey) {
-      return;
-    }
-
-    let url = '';
-    let svgMarkup = '';
-
-    if (typeof entry === 'string') {
-      const clean = entry.trim();
-      if (/^https?:/i.test(clean)) {
-        url = clean;
-      } else {
-        url = baseUrl ? joinUrl(baseUrl, clean) : '';
-      }
-    } else if (typeof entry === 'object') {
-      svgMarkup = extractSvgMarkupFromEntry(entry);
-      if (typeof entry.url === 'string' && entry.url.trim().length > 0) {
-        url = entry.url.trim();
-      } else if (typeof entry.href === 'string' && entry.href.trim().length > 0) {
-        url = entry.href.trim();
-      } else if (typeof entry.path === 'string' && entry.path.trim().length > 0 && baseUrl) {
-        url = joinUrl(baseUrl, entry.path.trim());
-      } else if (baseUrl) {
-        url = joinUrl(baseUrl, fileName);
-      }
-    }
-
-    const key = `${fileName}|${url}`;
-    if (seen.has(key)) {
-      return;
-    }
-
-    seen.add(key);
-    normalised.push({ fileName, url, selectionKey, svgMarkup });
-  });
-
-  normalised.sort((a, b) => a.fileName.localeCompare(b.fileName));
-  return normalised;
-};
-
-const buildAssetCacheKey = (asset) => {
-  if (!asset) {
-    return '';
-  }
-
-  const parts = [asset.selectionKey, asset.fileName, asset.url]
-    .map((part) => (typeof part === 'string' ? part.trim() : ''))
-    .filter((part) => part.length > 0);
-
-  return parts.join('|');
-};
-
 const resolveErrorMessage = (error) => {
   if (!error) {
     return 'An unexpected error occurred.';
@@ -436,14 +276,8 @@ const applyPersonalisationToSvg = (svgMarkup, personalisation) => {
  }
    
 const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogout }) => {
-  const manifestUrl =
-    process.env.REACT_APP_COVER_ASSETS_MANIFEST_URL || '/api/cover-assets/manifest';
-  const baseAssetsUrl =
+  const coverAssetsBaseUrl =
     process.env.REACT_APP_COVER_ASSETS_BASE_URL || '/api/cover-assets/svg';
-
-  const [manifestLoading, setManifestLoading] = useState(false);
-  const [manifestError, setManifestError] = useState('');
-  const [availableAssets, setAvailableAssets] = useState([]);
 
   const [selectedThemeId, setSelectedThemeId] = useState(null);
   const [selectedColourId, setSelectedColourId] = useState(null);
@@ -530,48 +364,6 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     [resetPreviewState]
   );
 
-  useEffect(() => {
-    if (!manifestUrl) {
-      setManifestError('Cover assets manifest URL is not configured.');
-      setAvailableAssets([]);
-      return;
-    }
-
-    let isCancelled = false;
-
-    const loadManifest = async () => {
-      setManifestLoading(true);
-      setManifestError('');
-
-      try {
-        const response = await axios.get(manifestUrl);
-        if (isCancelled) {
-          return;
-        }
-
-        const data = normaliseManifest(response.data, baseAssetsUrl);
-        setAvailableAssets(data);
-      } catch (error) {
-        if (isCancelled) {
-          return;
-        }
-
-        setAvailableAssets([]);
-        setManifestError(resolveErrorMessage(error));
-      } finally {
-        if (!isCancelled) {
-          setManifestLoading(false);
-        }
-      }
-    };
-
-    loadManifest();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [manifestUrl, baseAssetsUrl]);
-
   const trimmedPersonalisation = useMemo(
     () => ({
       schoolLogo: personalisation.schoolLogo.trim(),
@@ -589,44 +381,33 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     [personalisation]
   );
 
-  const loadAssetMarkup = useCallback(async (asset) => {
-    if (!asset) {
-      throw new Error('Invalid cover asset requested.');
-    }
-
-    const cacheKey = buildAssetCacheKey(asset);
-    if (cacheKey && assetCacheRef.current.has(cacheKey)) {
-      return assetCacheRef.current.get(cacheKey);
-    }
-
-    let svgMarkup = typeof asset.svgMarkup === 'string' ? asset.svgMarkup.trim() : '';
-
-    if (!svgMarkup) {
-      if (!asset.url) {
-        throw new Error(`No download URL configured for “${asset.fileName}”.`);
+  const fetchCoverAsset = useCallback(
+    async (selectionKey) => {
+      if (!selectionKey) {
+        throw new Error('Invalid cover asset requested.');
       }
 
-      const response = await axios.get(asset.url, { responseType: 'text' });
-      svgMarkup = typeof response.data === 'string' ? response.data.trim() : '';
-    }
+      const fileName = `${selectionKey}.svg`;
+      const url = joinUrl(coverAssetsBaseUrl, fileName);
+      const cacheKey = `${selectionKey}|${url}`;
 
-    if (!svgMarkup) {
-      throw new Error(`The SVG for “${asset.fileName}” could not be loaded.`);
-    }
+      if (assetCacheRef.current.has(cacheKey)) {
+        return assetCacheRef.current.get(cacheKey);
+      }
 
-    const record = {
-      fileName: asset.fileName,
-      url: asset.url || '',
-      selectionKey: asset.selectionKey,
-      svgMarkup
-    };
+      const response = await axios.get(url, { responseType: 'text' });
+      const svgMarkup = typeof response.data === 'string' ? response.data.trim() : '';
 
-    if (cacheKey) {
+      if (!svgMarkup) {
+        throw new Error(`The SVG for “${fileName}” could not be loaded.`);
+      }
+
+      const record = { fileName, url, selectionKey, svgMarkup };
       assetCacheRef.current.set(cacheKey, record);
-    }
-
-    return record;
-  }, []);
+      return record;
+    },
+    [coverAssetsBaseUrl]
+  );
 
   const handlePreviewRequest = useCallback(
     async (event) => {
@@ -649,18 +430,6 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
         return;
       }
 
-      const matchingAssets = availableAssets.filter(
-        (asset) => asset.selectionKey === selectionKey
-      );
-
-      if (matchingAssets.length === 0) {
-        setAssetError('No cover files found for this theme and colour combination yet.');
-        setPreviewAssets([]);
-        setCurrentStep(3);
-        setHasSubmittedDetails(false);
-        return;
-      }
-
       setPreviewAssets([]);
       setActiveIndex(0);
       setHasSubmittedDetails(false);
@@ -669,24 +438,27 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
       setAssetError('');
 
       try {
-        const resolved = await Promise.all(matchingAssets.map(loadAssetMarkup));
-        const personalised = resolved.map((asset) => ({
+        const asset = await fetchCoverAsset(selectionKey);
+        const personalised = {
           ...asset,
           personalisedMarkup: applyPersonalisationToSvg(asset.svgMarkup, trimmedPersonalisation)
-        }));
+        };
 
-        setPreviewAssets(personalised);
+        setPreviewAssets([personalised]);
         setActiveIndex(0);
         setHasSubmittedDetails(true);
-        setCurrentStep(3);
       } catch (error) {
+        const message =
+          error?.response?.status === 404
+            ? 'No cover files found for this theme and colour combination yet.'
+            : resolveErrorMessage(error);
         setPreviewAssets([]);
-        setAssetError(resolveErrorMessage(error));
+        setAssetError(message);
       } finally {
         setIsFetchingAssets(false);
       }
     },
-    [availableAssets, loadAssetMarkup, selectedTheme, selectedColour, trimmedPersonalisation]
+    [fetchCoverAsset, selectedTheme, selectedColour, trimmedPersonalisation]
   );
 
   const isPersonalisationComplete = useMemo(() => {
@@ -835,21 +607,6 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                 </p>
               </CardHeader>
               <CardContent className="space-y-3">
-                {manifestLoading && (
-                  <div className="space-y-2">
-                    <Skeleton className="h-14 w-full rounded-2xl" />
-                    <Skeleton className="h-14 w-full rounded-2xl" />
-                  </div>
-                )}
-
-                {!manifestLoading && manifestError && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Unable to load cover assets</AlertTitle>
-                    <AlertDescription>{manifestError}</AlertDescription>
-                  </Alert>
-                )}
-
                 <div className="cover-theme-grid">
                   {THEME_OPTIONS.map((theme) => {
                     const isSelected = selectedThemeId === theme.id;
