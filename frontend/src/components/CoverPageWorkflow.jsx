@@ -939,7 +939,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                   Browse the personalised artwork using the carousel controls below.
                 </p>
               </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="space-y-6 pt-6">
                 {isFetchingAssets && (
                   <div className="cover-carousel-stage">
                     <Skeleton className="h-full w-full" />
