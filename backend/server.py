@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import tempfile
 import uuid
 from datetime import datetime
@@ -18,8 +19,20 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
 
-from backend.app import config, rhymes, svg_processing
-from backend.app.svg_processing import SvgDocument as _SvgDocument
+
+if __package__ in {None, ""}:
+    # Allow ``python backend/server.py`` to work by ensuring the project root is
+    # on ``sys.path`` before importing the package modules.
+    current_dir = Path(__file__).resolve().parent
+    project_root = current_dir.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
+    from backend.app import config, rhymes, svg_processing  # type: ignore
+    from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
+else:  # pragma: no cover - exercised only during normal package imports
+    from .app import config, rhymes, svg_processing
+    from .app.svg_processing import SvgDocument as _SvgDocument
 
 logger = logging.getLogger(__name__)
 
@@ -684,10 +697,6 @@ async def get_rhyme_svg(rhyme_code: str):
 
 @api_router.get("/cover-assets/manifest")
 async def get_cover_assets_manifest():
-<<<<<<< HEAD
-    
-=======
->>>>>>> 2238948bf04678e1c57e3d5957b44eb215f0792a
     """Return a manifest describing all available cover SVG assets."""
 
     base_path = _ensure_cover_assets_base_path()
@@ -699,11 +708,9 @@ async def get_cover_assets_manifest():
 @api_router.get("/cover-assets/svg/{relative_path:path}")
 async def get_cover_asset(relative_path: str):
     """Return the raw SVG bytes for the cover asset ``relative_path``."""
-    print("Iam called")
     base_path = _ensure_cover_assets_base_path()
 
     candidate_path = (base_path / Path(relative_path)).resolve()
-    print(candidate_path)
 
     try:
         candidate_path.relative_to(base_path)
