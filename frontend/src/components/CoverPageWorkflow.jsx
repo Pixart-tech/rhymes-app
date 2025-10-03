@@ -188,7 +188,7 @@ const updateNodeImage = (nodes, value) => {
       }
 
       if (node.tagName?.toLowerCase() === 'image') {
-        node.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+        node.setAttribute('preserveAspectRatio', 'xMidYMin slice');
       }
 
       const imgChild = node.tagName?.toLowerCase() === 'image' ? null : node.querySelector('img');
@@ -196,8 +196,10 @@ const updateNodeImage = (nodes, value) => {
         imgChild.setAttribute('src', imageValue);
         if (imgChild.style) {
           imgChild.style.objectFit = imgChild.style.objectFit || 'cover';
+          imgChild.style.objectPosition = imgChild.style.objectPosition || '50% 0%';
           imgChild.style.width = imgChild.style.width || '100%';
           imgChild.style.height = imgChild.style.height || '100%';
+          imgChild.style.backgroundColor = imgChild.style.backgroundColor || 'transparent';
         }
       }
     } else {
@@ -214,6 +216,10 @@ const updateNodeImage = (nodes, value) => {
       const imgChild = node.tagName?.toLowerCase() === 'image' ? null : node.querySelector('img');
       if (imgChild) {
         imgChild.removeAttribute('src');
+        if (imgChild.style) {
+          imgChild.style.removeProperty('object-position');
+          imgChild.style.removeProperty('background-color');
+        }
       }
     }
   });
