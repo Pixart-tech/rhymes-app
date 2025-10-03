@@ -420,43 +420,46 @@ def test_render_svg_on_canvas_sanitizes_external_assets(tmp_path):
     """
     svg_path.write_text(gradient_svg, encoding="utf-8")
 
-    captured: dict[str, object] = {}
+    captured: dict[str, object] = {"draw_calls": 0}
 
     def fake_svg2rlg(svg_input):
-        captured["input"] = svg_input
-        if isinstance(svg_input, str):
-            captured["content"] = Path(svg_input).read_text(encoding="utf-8")
-        drawing = SimpleNamespace(
-            width=100.0,
-            height=50.0,
-            minX=0.0,
-            minY=0.0,
-        )
-        drawing.scale = lambda *_: None
-        drawing.translate = lambda *_: None
-        return drawing
+        captured["svg2rlg_called"] = True
+        return SimpleNamespace()
 
-    def fake_draw(drawing, pdf_canvas, x, y):  # pragma: no cover - trivial
-        captured["draw_called"] = True
+    def fake_svg2png(*, bytestring, write_to, output_width, output_height, background_color):
+        captured["svg2png_called"] = True
+        captured["bytestring"] = bytestring.decode("utf-8")
+        captured["background_color"] = background_color
+        write_to.write(b"png")
+
+    def fake_image_reader(buffer):
+        captured["image_reader_called"] = True
+        return object()
+
+    def fake_draw_image(image, x, y, width, height, mask):  # pragma: no cover - trivial
+        captured["draw_calls"] += 1
+        captured["mask"] = mask
 
     backend = server._SvgBackend(
-        "svglib",
-        None,
-        None,
+        "hybrid",
+        fake_svg2png,
+        fake_image_reader,
         fake_svg2rlg,
-        SimpleNamespace(draw=fake_draw),
+        SimpleNamespace(draw=lambda *_: None),
     )
 
     svg_document = server._SvgDocument(markup=gradient_svg, source_path=svg_path)
-    pdf_canvas = SimpleNamespace()
+    pdf_canvas = SimpleNamespace(drawImage=fake_draw_image)
 
     rendered = server._render_svg_on_canvas(pdf_canvas, backend, svg_document, 100.0, 50.0)
 
     assert rendered is True
-    assert isinstance(captured.get("input"), str)
-    assert captured["input"] != str(svg_path)
-    assert "url(#" not in captured.get("content", "")
-    assert not Path(captured["input"]).exists()
+    assert captured.get("svg2rlg_called") is None
+    assert captured.get("svg2png_called") is True
+    assert "url(#grad1)" in captured.get("bytestring", "")
+    assert captured.get("background_color") == "transparent"
+    assert captured["draw_calls"] == 1
+    assert captured.get("mask") == "auto"
 
 
 def test_render_svg_on_canvas_inlines_bitmap_assets_for_svglib(tmp_path):
@@ -478,32 +481,31 @@ def test_render_svg_on_canvas_inlines_bitmap_assets_for_svglib(tmp_path):
     captured: dict[str, object] = {}
 
     def fake_svg2rlg(svg_input):
-        captured["input"] = svg_input
-        if isinstance(svg_input, str):
-            captured["content"] = Path(svg_input).read_text(encoding="utf-8")
-        drawing = SimpleNamespace(
-            width=100.0,
-            height=50.0,
-            minX=0.0,
-            minY=0.0,
-        )
-        drawing.scale = lambda *_: None
-        drawing.translate = lambda *_: None
-        return drawing
+        captured["svg2rlg_called"] = True
+        return SimpleNamespace()
 
-    def fake_draw(drawing, pdf_canvas, x, y):  # pragma: no cover - trivial
-        captured["draw_called"] = True
+    def fake_svg2png(*, bytestring, write_to, output_width, output_height, background_color):
+        captured["bytestring"] = bytestring.decode("utf-8")
+        captured["background_color"] = background_color
+        write_to.write(b"png")
+
+    def fake_image_reader(buffer):
+        captured["image_reader_called"] = True
+        return object()
+
+    def fake_draw_image(image, x, y, width, height, mask):  # pragma: no cover - trivial
+        captured["mask"] = mask
 
     backend = server._SvgBackend(
-        "svglib",
-        None,
-        None,
+        "hybrid",
+        fake_svg2png,
+        fake_image_reader,
         fake_svg2rlg,
-        SimpleNamespace(draw=fake_draw),
+        SimpleNamespace(draw=lambda *_: None),
     )
 
     svg_document = server._SvgDocument(markup=svg_markup, source_path=svg_path)
-    pdf_canvas = SimpleNamespace()
+    pdf_canvas = SimpleNamespace(drawImage=fake_draw_image)
 
     rendered = server._render_svg_on_canvas(
         pdf_canvas,
@@ -515,7 +517,8 @@ def test_render_svg_on_canvas_inlines_bitmap_assets_for_svglib(tmp_path):
     )
 
     assert rendered is True
-    assert isinstance(captured.get("input"), str)
-    assert "data:image/png;base64" in captured.get("content", "")
-    assert "texture.png" not in captured.get("content", "")
-    assert not Path(captured["input"]).exists()
+    assert captured.get("svg2rlg_called") is None
+    assert "data:image/png;base64" in captured.get("bytestring", "")
+    assert "texture.png" not in captured.get("bytestring", "")
+    assert captured.get("background_color") == "transparent"
+    assert captured.get("mask") == "auto"
