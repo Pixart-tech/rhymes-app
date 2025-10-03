@@ -268,7 +268,31 @@ const PERSONALISATION_TARGETS = {
   addressLine1: ['#address-line-1', '[data-cover-binding="address-line-1"]'],
   addressLine2: ['#address-line-2', '[data-cover-binding="address-line-2"]'],
   addressLine3: ['#address-line-3', '[data-cover-binding="address-line-3"]'],
-  contactNumber: ['#contact-number', '[data-cover-binding="contact-number"]']
+  contactNumber: ['#contact-number', '[data-cover-binding="contact-number"]'],
+  website: [
+    '#website',
+    '#website text',
+    '[data-cover-binding="website"]',
+    '[id="Website"] text'
+  ],
+  tagLine1: [
+    '#tag-line-1',
+    '#tag-line-1 text',
+    '[data-cover-binding="tag-line-1"]',
+    '[id="Tag_1"] text'
+  ],
+  tagLine2: [
+    '#tag-line-2',
+    '#tag-line-2 text',
+    '[data-cover-binding="tag-line-2"]',
+    '[id="Tag_2"] text'
+  ],
+  tagLine3: [
+    '#tag-line-3',
+    '#tag-line-3 text',
+    '[data-cover-binding="tag-line-3"]',
+    '[id="Tag_3"] text'
+  ]
 };
 
 const collectNodes = (doc, selectors = []) => {
@@ -373,8 +397,19 @@ const applyPersonalisationToSvg = (svgMarkup, personalisation) => {
       return svgMarkup;
     }
 
-    const { schoolLogo, gradeName, kidName, addressLine1, addressLine2, addressLine3, contactNumber } =
-      personalisation || {};
+    const {
+      schoolLogo,
+      gradeName,
+      kidName,
+      addressLine1,
+      addressLine2,
+      addressLine3,
+      contactNumber,
+      website,
+      tagLine1,
+      tagLine2,
+      tagLine3
+    } = personalisation || {};
 
     updateNodeImage(collectNodes(svgElement, PERSONALISATION_TARGETS.schoolLogo), schoolLogo);
     updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.gradeName), gradeName);
@@ -383,6 +418,10 @@ const applyPersonalisationToSvg = (svgMarkup, personalisation) => {
     updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine2), addressLine2);
     updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine3), addressLine3);
     updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.contactNumber), contactNumber);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.website), website);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.tagLine1), tagLine1);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.tagLine2), tagLine2);
+    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.tagLine3), tagLine3);
 
     if (typeof XMLSerializer === 'undefined') {
       return svgMarkup;
@@ -420,7 +459,11 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     addressLine1: '',
     addressLine2: '',
     addressLine3: '',
-    contactNumber: ''
+    contactNumber: '',
+    website: '',
+    tagLine1: '',
+    tagLine2: '',
+    tagLine3: ''
   });
   const [gradeNameDirty, setGradeNameDirty] = useState(false);
 
@@ -641,7 +684,11 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
       addressLine1: personalisation.addressLine1.trim(),
       addressLine2: personalisation.addressLine2.trim(),
       addressLine3: personalisation.addressLine3.trim(),
-      contactNumber: personalisation.contactNumber.trim()
+      contactNumber: personalisation.contactNumber.trim(),
+      website: personalisation.website.trim(),
+      tagLine1: personalisation.tagLine1.trim(),
+      tagLine2: personalisation.tagLine2.trim(),
+      tagLine3: personalisation.tagLine3.trim()
     }),
     [personalisation]
   );
@@ -970,18 +1017,53 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                       onChange={handlePersonalisationChange('addressLine3')}
                     />
                   </div>
-                </div>
-
-                <div className="cover-form-field">
-                  <Label htmlFor="cover-contact-number">School contact number</Label>
-                  <Input
-                    id="cover-contact-number"
-                    type="tel"
-                    inputMode="tel"
-                    placeholder="Contact number"
-                    value={personalisation.contactNumber}
-                    onChange={handlePersonalisationChange('contactNumber')}
-                  />
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-contact-number">School contact number</Label>
+                    <Input
+                      id="cover-contact-number"
+                      type="tel"
+                      inputMode="tel"
+                      placeholder="Contact number"
+                      value={personalisation.contactNumber}
+                      onChange={handlePersonalisationChange('contactNumber')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-website">Website</Label>
+                    <Input
+                      id="cover-website"
+                      placeholder="e.g. www.edplore.com"
+                      value={personalisation.website}
+                      onChange={handlePersonalisationChange('website')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-tag-line-1">Tag line 1</Label>
+                    <Input
+                      id="cover-tag-line-1"
+                      placeholder="Enter tag line 1"
+                      value={personalisation.tagLine1}
+                      onChange={handlePersonalisationChange('tagLine1')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-tag-line-2">Tag line 2</Label>
+                    <Input
+                      id="cover-tag-line-2"
+                      placeholder="Enter tag line 2"
+                      value={personalisation.tagLine2}
+                      onChange={handlePersonalisationChange('tagLine2')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
+                    <Label htmlFor="cover-tag-line-3">Tag line 3</Label>
+                    <Input
+                      id="cover-tag-line-3"
+                      placeholder="e.g. Playgroup | Nursery | LKG | UKG | Daycare"
+                      value={personalisation.tagLine3}
+                      onChange={handlePersonalisationChange('tagLine3')}
+                    />
+                  </div>
                 </div>
               </CardContent>
             </Card>
