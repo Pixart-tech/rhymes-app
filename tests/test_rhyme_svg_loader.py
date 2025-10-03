@@ -1,5 +1,6 @@
 import asyncio
 import os
+import base64
 import sys
 import types
 from io import BytesIO
@@ -122,6 +123,53 @@ sys.modules.setdefault("motor", motor_module)
 sys.modules.setdefault("motor.motor_asyncio", motor_asyncio_module)
 
 
+pil_module = types.ModuleType("PIL")
+pil_image_module = types.ModuleType("PIL.Image")
+
+
+class _DummyImage:
+    def __init__(self, data: bytes | None = None):
+        self._data = data or b""
+        self.size = (1, 1)
+
+    def convert(self, _mode: str):
+        return self
+
+    def save(self, buffer: BytesIO, format: str = "PNG"):
+        buffer.write(self._data)
+
+    def alpha_composite(self, _other: "_DummyImage"):
+        return self
+
+    def __enter__(self):  # pragma: no cover - context manager protocol
+        return self
+
+    def __exit__(self, *_):  # pragma: no cover - context manager protocol
+        return False
+
+
+def _image_open(path):
+    if isinstance(path, Path):
+        raw = path.read_bytes()
+    else:
+        raw = Path(path).read_bytes()
+    return _DummyImage(raw)
+
+
+def _image_new(_mode: str, size: tuple[int, int], _color):
+    image = _DummyImage()
+    image.size = size
+    return image
+
+
+pil_image_module.open = _image_open
+pil_image_module.new = _image_new
+pil_module.Image = pil_image_module
+
+sys.modules.setdefault("PIL", pil_module)
+sys.modules.setdefault("PIL.Image", pil_image_module)
+
+
 pydantic_module = types.ModuleType("pydantic")
 
 
@@ -224,7 +272,7 @@ def test_binder_uses_external_svg(tmp_path, monkeypatch, stub_pdf_resources, stu
 
     captured = {}
 
-    def fake_render(pdf_canvas, backend, svg_document, width, height, *, x=0, y=0):
+    def fake_render(pdf_canvas, backend, svg_document, width, height, *, x=0, y=0, **_):
         captured["markup"] = svg_document.markup
         captured["source_path"] = svg_document.source_path
         captured["size"] = (width, height)
@@ -274,7 +322,7 @@ def test_binder_falls_back_to_generated_svg(tmp_path, monkeypatch, stub_pdf_reso
 
     captured = {"markups": []}
 
-    def fake_render(pdf_canvas, backend, svg_document, width, height, *, x=0, y=0):
+    def fake_render(pdf_canvas, backend, svg_document, width, height, *, x=0, y=0, **_):
         captured["markups"].append(svg_document.markup)
         return False
 
@@ -408,4 +456,66 @@ def test_render_svg_on_canvas_sanitizes_external_assets(tmp_path):
     assert isinstance(captured.get("input"), str)
     assert captured["input"] != str(svg_path)
     assert "url(#" not in captured.get("content", "")
+    assert not Path(captured["input"]).exists()
+
+
+def test_render_svg_on_canvas_inlines_bitmap_assets_for_svglib(tmp_path):
+    svg_path = tmp_path / "card.svg"
+    asset_path = tmp_path / "texture.png"
+    asset_path.write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z/C/HwAFgwJ/l3tKJwAAAABJRU5ErkJggg=="
+        )
+    )
+
+    svg_markup = """
+    <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"50\">
+        <image href=\"texture.png\" width=\"100\" height=\"50\" />
+    </svg>
+    """
+    svg_path.write_text(svg_markup, encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def fake_svg2rlg(svg_input):
+        captured["input"] = svg_input
+        if isinstance(svg_input, str):
+            captured["content"] = Path(svg_input).read_text(encoding="utf-8")
+        drawing = SimpleNamespace(
+            width=100.0,
+            height=50.0,
+            minX=0.0,
+            minY=0.0,
+        )
+        drawing.scale = lambda *_: None
+        drawing.translate = lambda *_: None
+        return drawing
+
+    def fake_draw(drawing, pdf_canvas, x, y):  # pragma: no cover - trivial
+        captured["draw_called"] = True
+
+    backend = server._SvgBackend(
+        "svglib",
+        None,
+        None,
+        fake_svg2rlg,
+        SimpleNamespace(draw=fake_draw),
+    )
+
+    svg_document = server._SvgDocument(markup=svg_markup, source_path=svg_path)
+    pdf_canvas = SimpleNamespace()
+
+    rendered = server._render_svg_on_canvas(
+        pdf_canvas,
+        backend,
+        svg_document,
+        100.0,
+        50.0,
+        rhyme_code="RX999",
+    )
+
+    assert rendered is True
+    assert isinstance(captured.get("input"), str)
+    assert "data:image/png;base64" in captured.get("content", "")
+    assert "texture.png" not in captured.get("content", "")
     assert not Path(captured["input"]).exists()
