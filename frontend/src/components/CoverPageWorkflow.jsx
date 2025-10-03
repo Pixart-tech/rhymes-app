@@ -449,7 +449,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   const [selectedColourId, setSelectedColourId] = useState(null);
 
   const [isFetchingAssets, setIsFetchingAssets] = useState(false);
-  const [carouselAssets, setCarouselAssets] = useState([]);
+  const [previewAssets, setPreviewAssets] = useState([]);
   const [assetError, setAssetError] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [personalisation, setPersonalisation] = useState({
@@ -471,10 +471,6 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   const [hasSubmittedDetails, setHasSubmittedDetails] = useState(false);
 
   const assetCacheRef = useRef(new Map());
-  const selectionSnapshotRef = useRef({
-    theme: null,
-    colour: null
-  });
 
   const gradeLabel = useMemo(() => {
     return GRADE_LABELS[grade] || grade?.toUpperCase() || 'Grade';
@@ -499,22 +495,6 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     });
   }, [gradeLabel, gradeNameDirty]);
 
-  useEffect(() => {
-    const previous = selectionSnapshotRef.current;
-    if (
-      hasSubmittedDetails &&
-      (selectedThemeId !== previous.theme || selectedColourId !== previous.colour)
-    ) {
-      setHasSubmittedDetails(false);
-      setCurrentStep(1);
-    }
-
-    selectionSnapshotRef.current = {
-      theme: selectedThemeId,
-      colour: selectedColourId
-    };
-  }, [selectedThemeId, selectedColourId, hasSubmittedDetails]);
-
   const selectedTheme = useMemo(
     () => THEME_OPTIONS.find((theme) => theme.id === selectedThemeId) || null,
     [selectedThemeId]
@@ -523,6 +503,31 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   const selectedColour = useMemo(
     () => COLOUR_OPTIONS.find((colour) => colour.id === selectedColourId) || null,
     [selectedColourId]
+  );
+
+  const resetPreviewState = useCallback(() => {
+    setPreviewAssets([]);
+    setAssetError('');
+    setHasSubmittedDetails(false);
+    setActiveIndex(0);
+  }, []);
+
+  const handleThemeSelect = useCallback(
+    (themeId) => {
+      setSelectedThemeId(themeId);
+      resetPreviewState();
+      setCurrentStep(1);
+    },
+    [resetPreviewState]
+  );
+
+  const handleColourSelect = useCallback(
+    (colourId) => {
+      setSelectedColourId(colourId);
+      resetPreviewState();
+      setCurrentStep(1);
+    },
+    [resetPreviewState]
   );
 
   useEffect(() => {
@@ -567,115 +572,6 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     };
   }, [manifestUrl, baseAssetsUrl]);
 
-  useEffect(() => {
-    if (!selectedTheme || !selectedColour) {
-      setCarouselAssets([]);
-      setAssetError('');
-      setActiveIndex(0);
-
-      return;
-    }
-
-    const expectedKey = buildSelectionKey(selectedTheme.id, selectedColour.id);
-    if (!expectedKey) {
-      setCarouselAssets([]);
-      setAssetError('');
-      setActiveIndex(0);
-      return;
-    }
-
-    const matchingAssets = availableAssets.filter((asset) => asset.selectionKey === expectedKey);
-
-    if (matchingAssets.length === 0) {
-      setCarouselAssets([]);
-      setAssetError('No cover files found for this theme and colour combination yet.');
-      setActiveIndex(0);
-      return;
-    }
-
-
-     
-
-
-
-    let isCancelled = false;
-
-    const loadAssets = async () => {
-      setIsFetchingAssets(true);
-      setAssetError('');
-
-      try {
-        const resolved = await Promise.all(
-          matchingAssets.map(async (asset) => {
-            if (asset.selectionKey !== expectedKey) {
-              throw new Error(
-                `Cover file “${asset.fileName}” does not match the selected theme and colour.`
-              );
-            }
-
-            const cacheKey = buildAssetCacheKey(asset);
-
-            if (cacheKey && assetCacheRef.current.has(cacheKey)) {
-              return assetCacheRef.current.get(cacheKey);
-            }
-
-            let svgMarkup = typeof asset.svgMarkup === 'string' ? asset.svgMarkup.trim() : '';
-
-            if (!svgMarkup) {
-              if (!asset.url) {
-                throw new Error(
-                  `No SVG markup or download URL configured for “${asset.fileName}”.`
-                );
-              }
-
-              const response = await axios.get(asset.url, { responseType: 'text' });
-              svgMarkup = typeof response.data === 'string' ? response.data.trim() : '';
-            }
-
-            if (!svgMarkup) {
-              throw new Error(`The SVG for “${asset.fileName}” could not be loaded.`);
-            }
-
-            const record = {
-              fileName: asset.fileName,
-              url: asset.url || '',
-              selectionKey: asset.selectionKey,
-              svgMarkup
-            };
-
-            if (cacheKey) {
-              assetCacheRef.current.set(cacheKey, record);
-            }
-            return record;
-          })
-        );
-
-        if (!isCancelled) {
-          setCarouselAssets(resolved);
-          setActiveIndex(0);
-        }
-      } catch (error) {
-        if (!isCancelled) {
-          setCarouselAssets([]);
-          setAssetError(resolveErrorMessage(error));
-          setActiveIndex(0);
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsFetchingAssets(false);
-        }
-      }
-
-    };
-
-    loadAssets();
-
-    return () => {
-      isCancelled = true;
-
-    };
-  }, [selectedTheme, selectedColour, availableAssets]);
-
   const trimmedPersonalisation = useMemo(
     () => ({
       schoolLogo: personalisation.schoolLogo.trim(),
@@ -693,54 +589,142 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     [personalisation]
   );
 
+  const loadAssetMarkup = useCallback(async (asset) => {
+    if (!asset) {
+      throw new Error('Invalid cover asset requested.');
+    }
+
+    const cacheKey = buildAssetCacheKey(asset);
+    if (cacheKey && assetCacheRef.current.has(cacheKey)) {
+      return assetCacheRef.current.get(cacheKey);
+    }
+
+    let svgMarkup = typeof asset.svgMarkup === 'string' ? asset.svgMarkup.trim() : '';
+
+    if (!svgMarkup) {
+      if (!asset.url) {
+        throw new Error(`No download URL configured for “${asset.fileName}”.`);
+      }
+
+      const response = await axios.get(asset.url, { responseType: 'text' });
+      svgMarkup = typeof response.data === 'string' ? response.data.trim() : '';
+    }
+
+    if (!svgMarkup) {
+      throw new Error(`The SVG for “${asset.fileName}” could not be loaded.`);
+    }
+
+    const record = {
+      fileName: asset.fileName,
+      url: asset.url || '',
+      selectionKey: asset.selectionKey,
+      svgMarkup
+    };
+
+    if (cacheKey) {
+      assetCacheRef.current.set(cacheKey, record);
+    }
+
+    return record;
+  }, []);
+
+  const handlePreviewRequest = useCallback(
+    async (event) => {
+      event.preventDefault();
+
+      if (!selectedTheme || !selectedColour) {
+        return;
+      }
+
+      const selectionKey = buildSelectionKey(selectedTheme.id, selectedColour.id);
+      if (!selectionKey) {
+        setAssetError('Please choose a theme and colour before previewing.');
+        return;
+      }
+
+      const detailsComplete = Object.values(trimmedPersonalisation).every(
+        (value) => value.length > 0
+      );
+      if (!detailsComplete) {
+        return;
+      }
+
+      const matchingAssets = availableAssets.filter(
+        (asset) => asset.selectionKey === selectionKey
+      );
+
+      if (matchingAssets.length === 0) {
+        setAssetError('No cover files found for this theme and colour combination yet.');
+        setPreviewAssets([]);
+        setCurrentStep(3);
+        setHasSubmittedDetails(false);
+        return;
+      }
+
+      setPreviewAssets([]);
+      setActiveIndex(0);
+      setHasSubmittedDetails(false);
+      setCurrentStep(3);
+      setIsFetchingAssets(true);
+      setAssetError('');
+
+      try {
+        const resolved = await Promise.all(matchingAssets.map(loadAssetMarkup));
+        const personalised = resolved.map((asset) => ({
+          ...asset,
+          personalisedMarkup: applyPersonalisationToSvg(asset.svgMarkup, trimmedPersonalisation)
+        }));
+
+        setPreviewAssets(personalised);
+        setActiveIndex(0);
+        setHasSubmittedDetails(true);
+        setCurrentStep(3);
+      } catch (error) {
+        setPreviewAssets([]);
+        setAssetError(resolveErrorMessage(error));
+      } finally {
+        setIsFetchingAssets(false);
+      }
+    },
+    [availableAssets, loadAssetMarkup, selectedTheme, selectedColour, trimmedPersonalisation]
+  );
+
   const isPersonalisationComplete = useMemo(() => {
     return Object.values(trimmedPersonalisation).every((value) => value.length > 0);
   }, [trimmedPersonalisation]);
 
-  const personalisedAssets = useMemo(() => {
-    if (!carouselAssets.length) {
-      return [];
-    }
-
-    return carouselAssets.map((asset) => ({
-      ...asset,
-      personalisedMarkup: applyPersonalisationToSvg(asset.svgMarkup, trimmedPersonalisation)
-    }));
-  }, [carouselAssets, trimmedPersonalisation]);
-
-  const displayedAssets = isPersonalisationComplete ? personalisedAssets : [];
-  const displayedAssetsLength = displayedAssets.length;
+  const previewCount = previewAssets.length;
 
   const handlePrev = useCallback(() => {
     setActiveIndex((current) => {
-      if (displayedAssetsLength === 0) {
+      if (previewCount === 0) {
         return 0;
       }
 
-      return (current - 1 + displayedAssetsLength) % displayedAssetsLength;
+      return (current - 1 + previewCount) % previewCount;
     });
-  }, [displayedAssetsLength]);
+  }, [previewCount]);
 
   const handleNext = useCallback(() => {
     setActiveIndex((current) => {
-      if (displayedAssetsLength === 0) {
+      if (previewCount === 0) {
         return 0;
       }
 
-      return (current + 1) % displayedAssetsLength;
+      return (current + 1) % previewCount;
     });
-  }, [displayedAssetsLength]);
+  }, [previewCount]);
 
   useEffect(() => {
-    if (activeIndex >= displayedAssetsLength && displayedAssetsLength > 0) {
+    if (activeIndex >= previewCount && previewCount > 0) {
       setActiveIndex(0);
       return;
     }
 
-    if (displayedAssetsLength === 0 && activeIndex !== 0) {
+    if (previewCount === 0 && activeIndex !== 0) {
       setActiveIndex(0);
     }
-  }, [activeIndex, displayedAssetsLength]);
+  }, [activeIndex, previewCount]);
 
   const handlePersonalisationChange = useCallback(
     (field) => (event) => {
@@ -761,7 +745,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     [hasSubmittedDetails]
   );
 
-  const activeAsset = displayedAssets[activeIndex] || null;
+  const activeAsset = previewAssets[activeIndex] || null;
 
   const canProceedToDetails = Boolean(selectedTheme && selectedColour);
   const canSubmitDetails = Boolean(isPersonalisationComplete && canProceedToDetails);
@@ -775,28 +759,14 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   }, [canProceedToDetails]);
 
   const handleBackToSelection = useCallback(() => {
+    resetPreviewState();
     setCurrentStep(1);
-    setHasSubmittedDetails(false);
-  }, []);
+  }, [resetPreviewState]);
 
   const handleEditDetails = useCallback(() => {
     setCurrentStep(2);
     setHasSubmittedDetails(false);
   }, []);
-
-  const handlePersonalisationSubmit = useCallback(
-    (event) => {
-      event.preventDefault();
-
-      if (!canSubmitDetails) {
-        return;
-      }
-
-      setHasSubmittedDetails(true);
-      setCurrentStep(3);
-    },
-    [canSubmitDetails]
-  );
 
   const stepLabels = [
     'Select theme & colour',
@@ -887,7 +857,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                       <button
                         key={theme.id}
                         type="button"
-                        onClick={() => setSelectedThemeId(theme.id)}
+                        onClick={() => handleThemeSelect(theme.id)}
                         className={`cover-theme-button${isSelected ? ' is-active' : ''}`}
                       >
                         <div>
@@ -917,7 +887,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                       <button
                         key={colour.id}
                         type="button"
-                        onClick={() => setSelectedColourId(colour.id)}
+                        onClick={() => handleColourSelect(colour.id)}
                         className={`cover-colour-chip${isSelected ? ' is-active' : ''}`}
                         style={{ backgroundColor: colour.hex }}
                         aria-pressed={isSelected}
@@ -941,7 +911,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
         )}
 
         {currentStep === 2 && (
-          <form onSubmit={handlePersonalisationSubmit} className="space-y-6">
+          <form onSubmit={handlePreviewRequest} className="space-y-6">
             <Card className="border-none bg-white/80 shadow-sm shadow-orange-100/40">
               <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm text-slate-600">
                 <p>Complete the school details below to personalise every cover automatically.</p>
@@ -1136,7 +1106,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                   </Alert>
                 )}
 
-                {!isFetchingAssets && !assetError && carouselAssets.length === 0 && (
+                {!isFetchingAssets && !assetError && previewCount === 0 && (
                   <div className="cover-carousel-empty">
                     <p className="text-sm text-slate-500">
                       No cover artwork has been uploaded yet for this combination.
@@ -1144,7 +1114,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                   </div>
                 )}
 
-                {!isFetchingAssets && !assetError && displayedAssetsLength > 0 && activeAsset && (
+                {!isFetchingAssets && !assetError && previewCount > 0 && activeAsset && (
                   <div className="space-y-4">
                     <div className="cover-carousel-stage">
                       <div
@@ -1157,7 +1127,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
 
                     <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
                       <span className="font-medium text-slate-700">{activeAsset.fileName}</span>
-                      {displayedAssetsLength > 1 && (
+                      {previewCount > 1 && (
                         <div className="cover-carousel-controls">
                           <Button
                             type="button"
@@ -1170,7 +1140,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                             <ChevronLeft className="h-5 w-5" />
                           </Button>
                           <span className="text-sm font-medium text-slate-700">
-                            {activeIndex + 1} of {displayedAssetsLength}
+                            {activeIndex + 1} of {previewCount}
                           </span>
                           <Button
                             type="button"
@@ -1186,9 +1156,9 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                       )}
                     </div>
 
-                    {displayedAssetsLength > 1 && (
+                    {previewCount > 1 && (
                       <div className="cover-carousel-indicators">
-                        {displayedAssets.map((asset, index) => (
+                        {previewAssets.map((asset, index) => (
                           <button
                             key={asset.url || asset.fileName || index}
                             type="button"
