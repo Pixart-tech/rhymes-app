@@ -105,8 +105,10 @@ const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
         .filter((part) => Number.isFinite(part));
 
       if (viewBoxParts.length >= 4) {
-        viewBoxWidth = viewBoxParts[2];
-        viewBoxHeight = viewBoxParts[3];
+        const sanitizedParts = viewBoxParts.slice(0, 4);
+        svgElement.setAttribute('viewBox', sanitizedParts.map((value) => `${value}`).join(' '));
+        viewBoxWidth = sanitizedParts[2];
+        viewBoxHeight = sanitizedParts[3];
       }
     }
 
