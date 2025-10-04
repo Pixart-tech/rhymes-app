@@ -336,10 +336,7 @@ const ensureClipAndMaskUnits = (svgElement) => {
 
   svgElement.querySelectorAll('mask').forEach((node) => {
     if (!node.getAttribute('maskUnits')) {
-      // The SVG specification defaults maskUnits to "objectBoundingBox". Respecting this default
-      // keeps artwork that relies on bounding box relative masks (for example polygon-based bodies)
-      // from being clipped away when we normalise markup.
-      node.setAttribute('maskUnits', 'objectBoundingBox');
+      node.setAttribute('maskUnits', 'userSpaceOnUse');
     }
 
     if (!node.getAttribute('maskContentUnits')) {
