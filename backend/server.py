@@ -695,25 +695,29 @@ async def get_rhyme_svg(rhyme_code: str):
     return Response(content=svg_content, media_type="image/svg+xml")
 
 
-@api_router.get("/cover-assets/manifest")
-async def get_cover_assets_manifest():
-    """Return a manifest describing all available cover SVG assets."""
+# @api_router.get("/cover-assets/manifest")
+# async def get_cover_assets_manifest():
+#     """Return a manifest describing all available cover SVG assets."""
 
-    base_path = _ensure_cover_assets_base_path()
-    assets = _build_cover_asset_manifest(base_path, include_markup=True)
+#     base_path = _ensure_cover_assets_base_path()
+#     assets = _build_cover_asset_manifest(base_path, include_markup=True)
 
-    return {"assets": assets}
+#     return {"assets": assets}
 
 
 @api_router.get("/cover-assets/svg/{relative_path:path}")
 async def get_cover_asset(relative_path: str):
     """Return the raw SVG bytes for the cover asset ``relative_path``."""
+    print("Iam running")
     base_path = _ensure_cover_assets_base_path()
+   
 
     candidate_path = (base_path / Path(relative_path)).resolve()
+    
 
     try:
         candidate_path.relative_to(base_path)
+        
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid cover asset path requested.")
 
