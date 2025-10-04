@@ -1,362 +1,97 @@
-from fastapi import FastAPI, APIRouter, HTTPException
-from fastapi.responses import Response
 
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
+from __future__ import annotations
 
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
 import logging
-import json
-from pathlib import Path
-from dataclasses import dataclass
-from pydantic import BaseModel, Field
-from typing import Callable, List, Dict, Optional, Any, Tuple, Literal, Iterable, Set
-from io import BytesIO
-from functools import lru_cache
-from urllib.parse import quote
-from xml.etree import ElementTree as ET
-import re
-
+import os
+import sys
+import tempfile
 import uuid
 from datetime import datetime
+from dataclasses import dataclass
+from functools import lru_cache
+from io import BytesIO
+from pathlib import Path, PureWindowsPath
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.responses import Response
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, Field
+from starlette.middleware.cors import CORSMiddleware
+
+
+if __package__ in {None, ""}:
+    # Allow ``python backend/server.py`` to work by ensuring the project root is
+    # on ``sys.path`` before importing the package modules.
+    current_dir = Path(__file__).resolve().parent
+    project_root = current_dir.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
+    from backend.app import config, rhymes, svg_processing  # type: ignore
+    from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
+else:  # pragma: no cover - exercised only during normal package imports
+    from .app import config, rhymes, svg_processing
+    from .app.svg_processing import SvgDocument as _SvgDocument
 
 logger = logging.getLogger(__name__)
 
-SVG_NS = "http://www.w3.org/2000/svg"
-_GRADIENT_URL_RE = re.compile(r"^url\(#(?P<id>[^)]+)\)$")
-_CSS_GRADIENT_DECLARATION_RE = re.compile(
-    r"(?P<prop>\b(?:fill|stroke)\s*:\s*)url\(#(?P<id>[^)]+)\)", re.IGNORECASE
-)
+ROOT_DIR = config.ROOT_DIR
+RHYME_SVG_BASE_PATH = config.RHYME_SVG_BASE_PATH
+COVER_SVG_BASE_PATH = config.resolve_cover_svg_base_path()
+
+RHYMES_DATA = rhymes.RHYMES_DATA
+generate_rhyme_svg = rhymes.generate_rhyme_svg
+
+_sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
+_svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
+_build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
+_localize_svg_image_assets = svg_processing.localize_svg_image_assets
 
 
-def _resolve_svg_base_path() -> Optional[Path]:
-    """Return the configured base path for rhyme SVG assets, if any."""
-
-    base_path = os.environ.get("RHYME_SVG_BASE_PATH")
-    if not base_path:
-        return None
-
-    try:
-        return Path(base_path).expanduser()
-    except (OSError, RuntimeError) as exc:
-        logger.warning("Invalid RHYME_SVG_BASE_PATH '%s': %s", base_path, exc)
-        return None
+def _ensure_image_cache_dir() -> Path:
+    return svg_processing.ensure_image_cache_dir(config.IMAGE_CACHE_DIR)
 
 
-RHYME_SVG_BASE_PATH = _resolve_svg_base_path()
-
-
-def _resolve_cover_svg_base_path() -> Optional[Path]:
-    """Return the configured base path for cover SVG assets, if any."""
-
-    base_path = os.environ.get("COVER_SVG_BASE_PATH")
-    if not base_path:
-        return None
-
-    try:
-        return Path(base_path).expanduser()
-    except (OSError, RuntimeError) as exc:
-        logger.warning("Invalid COVER_SVG_BASE_PATH '%s': %s", base_path, exc)
-        return None
-
-
-COVER_SVG_BASE_PATH = _resolve_cover_svg_base_path()
+def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]:
+    return svg_processing.resolve_rhyme_svg_path(RHYME_SVG_BASE_PATH, rhyme_code)
 
 
 def _ensure_cover_assets_base_path() -> Path:
-    """Return the configured cover assets directory or raise an HTTP error."""
+    return config.ensure_cover_assets_base_path(COVER_SVG_BASE_PATH)
 
-    if COVER_SVG_BASE_PATH is None:
+
+def _get_cover_assets_unc_base_path() -> PureWindowsPath:
+    try:
+        return config.get_cover_unc_base_path()
+    except ValueError as exc:
+        logger.error("COVER_SVG_BASE_PATH is not configured: %s", exc)
         raise HTTPException(
             status_code=503,
             detail=(
                 "COVER_SVG_BASE_PATH is not configured on the server. "
-                "Please set it to the directory containing the cover SVG files."
+                "Please set it to the network directory containing the cover SVG files."
             ),
-        )
-
-    if not COVER_SVG_BASE_PATH.exists() or not COVER_SVG_BASE_PATH.is_dir():
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "The configured COVER_SVG_BASE_PATH does not exist or is not a directory."
-            ),
-        )
-
-    return COVER_SVG_BASE_PATH
+        ) from exc
 
 
-def _build_cover_asset_manifest(base_path: Path) -> List[Dict[str, str]]:
-    """Build a manifest describing all SVG cover assets under ``base_path``."""
-
-    assets: List[Dict[str, str]] = []
-
-    for svg_path in sorted(base_path.rglob("*.svg")):
-        if not svg_path.is_file():
-            continue
-
-        try:
-            relative_path = svg_path.relative_to(base_path)
-        except ValueError:
-            # Skip files that fall outside the configured base directory.
-            continue
-
-        relative_posix = relative_path.as_posix()
-        assets.append(
-            {
-                "fileName": svg_path.name,
-                "path": relative_posix,
-                "url": f"/api/cover-assets/svg/{quote(relative_posix, safe='/')}",
-            }
-        )
-
-    return assets
+def _load_rhyme_svg_markup(rhyme_code: str) -> _SvgDocument:
+    return svg_processing.load_rhyme_svg_markup(
+        rhyme_code, RHYME_SVG_BASE_PATH, fallback_factory=generate_rhyme_svg
+    )
 
 
-def _parse_style_declarations(style: str) -> List[Tuple[str, str]]:
-    """Return the CSS declarations contained in ``style`` preserving order."""
-
-    declarations: List[Tuple[str, str]] = []
-    for raw_entry in style.split(";"):
-        if not raw_entry.strip():
-            continue
-
-        if ":" not in raw_entry:
-            continue
-
-        property_name, value = raw_entry.split(":", 1)
-        declarations.append((property_name.strip(), value.strip()))
-
-    return declarations
+def _normalize_cors_origin(origin: str) -> Optional[str]:
+    return config._normalize_cors_origin(origin)
 
 
-def _serialize_style_declarations(declarations: List[Tuple[str, str]]) -> str:
-    """Serialize ``declarations`` back into an inline CSS string."""
-
-    return ";".join(f"{name}:{value}" for name, value in declarations)
-
-
-def _collect_gradient_fallback_colors(root: ET.Element) -> Dict[str, str]:
-    """Return a mapping of gradient ids to representative stop colours."""
-
-    gradient_colors: Dict[str, str] = {}
-    stop_xpath = f".//{{{SVG_NS}}}stop"
-
-    for gradient_tag in (
-        f".//{{{SVG_NS}}}linearGradient",
-        f".//{{{SVG_NS}}}radialGradient",
-    ):
-        for gradient in root.findall(gradient_tag):
-            gradient_id = gradient.attrib.get("id")
-            if not gradient_id or gradient_id in gradient_colors:
-                continue
-
-            representative_color: Optional[str] = None
-
-            for stop in gradient.findall(stop_xpath):
-                style = stop.attrib.get("style")
-                color: Optional[str] = None
-
-                if style:
-                    for name, value in _parse_style_declarations(style):
-                        if name == "stop-color" and value:
-                            color = value
-                            break
-
-                if color is None:
-                    color = stop.attrib.get("stop-color")
-
-                if color:
-                    representative_color = color
-                    break
-
-            if representative_color:
-                gradient_colors[gradient_id] = representative_color
-
-    return gradient_colors
-
-
-def _replace_gradient_references(element: ET.Element, gradient_colors: Dict[str, str]) -> bool:
-    """Replace gradient ``url(#id)`` colour references on ``element`` when possible."""
-
-    updated = False
-
-    for attribute in ("fill", "stroke"):
-        raw_value = element.attrib.get(attribute)
-        if not raw_value:
-            continue
-
-        match = _GRADIENT_URL_RE.match(raw_value.strip())
-        if not match:
-            continue
-
-        gradient_id = match.group("id")
-        fallback = gradient_colors.get(gradient_id)
-        if not fallback:
-            continue
-
-        element.set(attribute, fallback)
-        updated = True
-
-    style_value = element.attrib.get("style")
-    if style_value:
-        declarations = _parse_style_declarations(style_value)
-        new_declarations: List[Tuple[str, str]] = []
-        style_updated = False
-
-        for name, value in declarations:
-            match = _GRADIENT_URL_RE.match(value)
-            if match and name in {"fill", "stroke"}:
-                fallback = gradient_colors.get(match.group("id"))
-                if fallback:
-                    value = fallback
-                    style_updated = True
-            new_declarations.append((name, value))
-
-        if style_updated:
-            element.set("style", _serialize_style_declarations(new_declarations))
-            updated = True
-
-    return updated
-
-
-def _replace_gradient_references_in_css(
-    css_text: str, gradient_colors: Dict[str, str]
-) -> Tuple[str, bool]:
-    """Replace ``fill``/``stroke`` gradient references inside inline CSS blocks."""
-
-    updated = False
-
-    def _replace(match: re.Match[str]) -> str:
-        gradient_id = match.group("id")
-        fallback = gradient_colors.get(gradient_id)
-        if not fallback:
-            return match.group(0)
-
-        nonlocal updated
-        updated = True
-        return f"{match.group('prop')}{fallback}"
-
-    return _CSS_GRADIENT_DECLARATION_RE.sub(_replace, css_text), updated
-
-
-def _sanitize_svg_for_svglib(svg_markup: str) -> str:
-    """Replace unsupported gradient colour references with solid colours."""
-
-    try:
-        root = ET.fromstring(svg_markup)
-    except ET.ParseError:
-        return svg_markup
-
-    gradient_colors = _collect_gradient_fallback_colors(root)
-    if not gradient_colors:
-        return svg_markup
-
-    updated = False
-    for element in root.iter():
-        if _replace_gradient_references(element, gradient_colors):
-            updated = True
-            continue
-
-        if element.tag == f"{{{SVG_NS}}}style" and element.text:
-            replaced_text, css_updated = _replace_gradient_references_in_css(
-                element.text, gradient_colors
-            )
-            if css_updated:
-                element.text = replaced_text
-                updated = True
-
-    if not updated:
-        return svg_markup
-
-    return ET.tostring(root, encoding="unicode")
-
+def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> List[str]:
+    return config._parse_csv(value, default=default)
 
 # MongoDB connection
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
-
-# Load rhymes data
-with open(ROOT_DIR / "rhymes.json", "r") as f:
-    RHYMES_DATA = json.load(f)
-
-
-def generate_rhyme_svg(rhyme_code: str) -> str:
-    """Create SVG markup for a rhyme card.
-
-    This helper centralizes the SVG generation so that both the API endpoint
-    returning individual SVGs and the binder export can share the same layout.
-    """
-
-    if rhyme_code not in RHYMES_DATA:
-        raise KeyError("Rhyme not found")
-
-    rhyme_name = RHYMES_DATA[rhyme_code][0]
-
-    return f"""
-    <svg width="400" height="300" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-            <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style="stop-color:#ff6b6b;stop-opacity:1" />
-                <stop offset="100%" style="stop-color:#4ecdc4;stop-opacity:1" />
-            </linearGradient>
-        </defs>
-        <rect width="400" height="300" fill="url(#grad1)" rx="15"/>
-        <text x="200" y="100" font-family="Arial, sans-serif" font-size="16" font-weight="bold"
-              text-anchor="middle" fill="white">{rhyme_name}</text>
-        <text x="200" y="130" font-family="Arial, sans-serif" font-size="12"
-              text-anchor="middle" fill="white">Code: {rhyme_code}</text>
-        <text x="200" y="160" font-family="Arial, sans-serif" font-size="12"
-              text-anchor="middle" fill="white">Pages: {RHYMES_DATA[rhyme_code][1]}</text>
-        <circle cx="200" cy="220" r="30" fill="rgba(255,255,255,0.3)" stroke="white" stroke-width="2"/>
-        <text x="200" y="225" font-family="Arial, sans-serif" font-size="20"
-              text-anchor="middle" fill="white">♪</text>
-    </svg>
-    """
-
-
-def _normalize_cors_origin(origin: str) -> Optional[str]:
-    """Return a sanitized representation of a configured CORS origin."""
-
-    trimmed = origin.strip()
-    if not trimmed:
-        return None
-
-    if trimmed == "*":
-        return trimmed
-
-    return trimmed.rstrip("/")
-
-
-def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> List[str]:
-    """Return a normalized list from a comma separated string."""
-
-    def _collect(entries: Iterable[str]) -> List[str]:
-        normalized: List[str] = []
-        seen: Set[str] = set()
-
-        for raw_entry in entries:
-            normalized_entry = _normalize_cors_origin(raw_entry)
-            if not normalized_entry or normalized_entry in seen:
-                continue
-
-            normalized.append(normalized_entry)
-            seen.add(normalized_entry)
-
-        return normalized
-
-    if value is not None:
-        parsed = _collect(value.split(","))
-        if parsed:
-            return parsed
-
-    return _collect(default or [])
-
 
 app = FastAPI()
 app.add_middleware(
@@ -366,7 +101,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 
 class PDFDependencyUnavailableError(RuntimeError):
@@ -379,7 +113,7 @@ class PDFDependencyUnavailableError(RuntimeError):
 class _SvgBackend:
     """Container describing how SVG assets should be rendered on the PDF canvas."""
 
-    mode: Literal["cairosvg", "svglib", "none"]
+    mode: Literal["cairosvg", "svglib", "hybrid", "none"]
     svg2png: Optional[Callable[..., Any]]
     image_reader: Optional[Any]
     svg2rlg: Optional[Callable[..., Any]]
@@ -427,28 +161,38 @@ def _load_pdf_dependencies() -> _PdfResources:
 
     svg_backend = _SvgBackend("none", None, None, None, None)
 
+    svg2rlg: Optional[Callable[..., Any]] = None
+    render_pdf: Optional[Any] = None
+
+    try:
+        from svglib.svglib import svg2rlg as _svg2rlg  # type: ignore
+        from reportlab.graphics import renderPDF as _renderPDF
+    except (ImportError, OSError) as svg_exc:
+        logging.getLogger(__name__).warning(
+            "svglib could not be imported. Binder PDFs will fall back to raster rendering when necessary. "
+            "Error: %s",
+            svg_exc,
+        )
+    else:
+        svg2rlg = _svg2rlg
+        render_pdf = _renderPDF
+        svg_backend = _SvgBackend("svglib", None, None, svg2rlg, render_pdf)
+
     try:
         from cairosvg import svg2png as _svg2png  # type: ignore
         from reportlab.lib.utils import ImageReader as _ImageReader
     except (ImportError, OSError) as exc:
-        logging.getLogger(__name__).warning(
-            "CairoSVG is not available. Attempting svglib fallback. Error: %s",
-            exc,
-        )
-
-        try:
-            from svglib.svglib import svg2rlg as _svg2rlg  # type: ignore
-            from reportlab.graphics import renderPDF as _renderPDF
-        except (ImportError, OSError) as svg_exc:
+        if svg2rlg is None:
             logging.getLogger(__name__).warning(
-                "svglib fallback is not available. Binder PDFs will use the text-only layout. "
+                "CairoSVG is not available and svglib is missing. Binder PDFs will use the text-only layout. "
                 "Error: %s",
-                svg_exc,
+                exc,
             )
-        else:
-            svg_backend = _SvgBackend("svglib", None, None, _svg2rlg, _renderPDF)
     else:
-        svg_backend = _SvgBackend("cairosvg", _svg2png, _ImageReader, None, None)
+        if svg2rlg and render_pdf:
+            svg_backend = _SvgBackend("hybrid", _svg2png, _ImageReader, svg2rlg, render_pdf)
+        else:
+            svg_backend = _SvgBackend("cairosvg", _svg2png, _ImageReader, None, None)
 
     return _PdfResources(pdf_canvas.Canvas, letter, svg_backend)
 
@@ -520,8 +264,6 @@ async def login_school(input: SchoolCreate):
     existing_school = await db.schools.find_one({"school_id": input.school_id})
 
     if existing_school:
-        existing_school = existing_school.copy()
-        existing_school.pop("_id", None)
         return School(**existing_school)
 
     # Create new school entry
@@ -934,40 +676,97 @@ async def delete_school(school_id: str):
 async def get_rhyme_svg(rhyme_code: str):
     """Return SVG markup for the requested rhyme.
 
-    When ``RHYME_SVG_BASE_PATH`` is configured the endpoint will attempt to
+    When ``RHYME_SVG_BASE_PATH`` is configured the endpoint first attempts to
     resolve ``<rhyme_code>.svg`` within that directory so real artwork from a
-    network share or local folder can be exercised in development. If the file
-    cannot be found the function falls back to the generated placeholder SVG so
-    the frontend continues to work for missing assets.
+    network share or mounted volume can be exercised. If the environment
+    variable is unset or the file is missing, the lookup falls back to the
+    repository ``images`` directory before ultimately generating the placeholder
+    SVG so the frontend continues to work for missing assets.
     """
 
     svg_content: Optional[str] = None
 
-    if RHYME_SVG_BASE_PATH is not None:
-        svg_path = RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
+    svg_path = _resolve_rhyme_svg_path(rhyme_code)
+
+    if svg_path is not None:
         try:
             svg_content = svg_path.read_text(encoding="utf-8")
-            
-        except FileNotFoundError:
-            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
         except OSError as exc:
-            logger.error("Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc)
+            logger.error(
+                "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc
+            )
 
     if svg_content is None:
         try:
             svg_content = generate_rhyme_svg(rhyme_code)
         except KeyError:
             raise HTTPException(status_code=404, detail="Rhyme not found")
+    else:
+        svg_content = _localize_svg_image_assets(
+            svg_content, svg_path, rhyme_code, inline_mode=True
+        )
 
     return Response(content=svg_content, media_type="image/svg+xml")
 
 
-@api_router.get("/cover-assets/manifest")
-async def get_cover_assets_manifest():
-    """Return a manifest describing all available cover SVG assets."""
+# @api_router.get("/cover-assets/manifest")
+# async def get_cover_assets_manifest():
+#     """Return a manifest describing all available cover SVG assets."""
+
+#     base_path = _ensure_cover_assets_base_path()
+#     assets = _build_cover_asset_manifest(base_path, include_markup=True)
+
+#     return {"assets": assets}
+
+
+@api_router.get("/cover-assets/network/{selection_key}")
+async def get_cover_assets_network_paths(selection_key: str):
+    """Return UNC paths for every SVG within the requested theme/colour folder."""
 
     base_path = _ensure_cover_assets_base_path()
-    assets = _build_cover_asset_manifest(base_path)
+    unc_base_path = _get_cover_assets_unc_base_path()
+   
+
+    try:
+        theme_number, colour_number = config.parse_cover_selection_key(selection_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    selection_unc_path, selection_fs_path = config.build_cover_selection_paths(
+        unc_base_path, base_path, theme_number, colour_number
+    )
+    
+
+    try:
+        exists = Path(selection_fs_path).exists()
+        print(exists)
+        is_directory = selection_fs_path.is_dir()
+    except OSError as exc:
+        logger.error("Unable to access cover SVG directory %s: %s", selection_fs_path, exc)
+        raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
+
+    if not exists or not is_directory:
+        raise HTTPException(status_code=404, detail="Requested cover selection does not exist.")
+
+    try:
+        svg_files = [
+            candidate
+            for candidate in sorted(selection_fs_path.iterdir())
+            if candidate.is_file() and candidate.suffix.lower() == ".svg"
+        ]
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Requested cover selection does not exist.")
+    except OSError as exc:
+        logger.error("Unable to read cover SVG directory %s: %s", selection_fs_path, exc)
+        raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
+
+    assets = [
+        {
+            "fileName": svg_file.name,
+            "uncPath": str(selection_unc_path / svg_file.name),
+        }
+        for svg_file in svg_files
+    ]
 
     return {"assets": assets}
 
@@ -975,13 +774,16 @@ async def get_cover_assets_manifest():
 @api_router.get("/cover-assets/svg/{relative_path:path}")
 async def get_cover_asset(relative_path: str):
     """Return the raw SVG bytes for the cover asset ``relative_path``."""
-
+    print("Iam running")
     base_path = _ensure_cover_assets_base_path()
+   
 
     candidate_path = (base_path / Path(relative_path)).resolve()
+    
 
     try:
         candidate_path.relative_to(base_path)
+        
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid cover asset path requested.")
 
@@ -1102,34 +904,154 @@ def _draw_text_only_rhyme(
 def _render_svg_on_canvas(
     pdf_canvas: Any,
     backend: _SvgBackend,
-    svg_markup: str,
+    svg_document: _SvgDocument,
     width: float,
     height: float,
     *,
     x: float = 0,
     y: float = 0,
+    rhyme_code: Optional[str] = None,
 ) -> bool:
-    """Render ``svg_markup`` onto ``pdf_canvas`` using the available backend.
-
-    Returns ``True`` when the SVG could be rendered, ``False`` otherwise. The
-    function attempts CairoSVG first (when available) and falls back to svglib
-    before signalling failure.
-    """
+    """Render ``svg_document`` onto ``pdf_canvas`` using the available backend."""
 
     logger = logging.getLogger(__name__)
 
+    original_markup = svg_document.markup
+    effective_markup = original_markup
+    source_path = svg_document.source_path
+
+    raster_only = _svg_requires_raster_backend(svg_document)
+
+    if source_path is not None:
+        localized_markup = _localize_svg_image_assets(
+            effective_markup,
+            source_path,
+            rhyme_code or "unknown",
+            inline_mode=True,
+            preprocess_for_pdf=True,
+        )
+        if localized_markup != effective_markup:
+            effective_markup = localized_markup
+
+    sanitized_markup = _sanitize_svg_for_svglib(effective_markup)
+    gradient_requires_raster = sanitized_markup != effective_markup
+    if gradient_requires_raster:
+        logger.debug(
+            "Gradient sanitization required for %s; falling back to raster rendering",
+            rhyme_code or "unknown",
+        )
+
+    vector_markup = sanitized_markup if not gradient_requires_raster else effective_markup
+
+    needs_temp_file = source_path is not None and vector_markup != original_markup
+
+    vector_backend_available = (
+        backend.svg2rlg
+        and backend.render_pdf
+        and not raster_only
+    )
+
+    temp_svg_path: Optional[Path] = None
+
+    if vector_backend_available and not gradient_requires_raster:
+        try:
+            svg_input: Any
+            if source_path is not None:
+                if needs_temp_file:
+                    candidate_dirs: List[Path] = []
+                    parent_dir = source_path.parent
+                    if parent_dir.exists() and parent_dir.is_dir():
+                        candidate_dirs.append(parent_dir)
+                    try:
+                        cache_dir = _ensure_image_cache_dir()
+                    except OSError:
+                        cache_dir = None
+                    if cache_dir and cache_dir not in candidate_dirs:
+                        candidate_dirs.append(cache_dir)
+
+                    for directory in candidate_dirs:
+                        try:
+                            with tempfile.NamedTemporaryFile(
+                                "w",
+                                encoding="utf-8",
+                                suffix=".svg",
+                                prefix=f"{source_path.stem}_sanitized_",
+                                dir=directory,
+                                delete=False,
+                            ) as temp_file:
+                                temp_file.write(vector_markup)
+                            temp_svg_path = Path(temp_file.name)
+                            break
+                        except OSError as exc:
+                            logger.debug(
+                                "Unable to create temporary sanitized SVG in %s: %s",
+                                directory,
+                                exc,
+                            )
+
+                    if temp_svg_path is None:
+                        logger.warning(
+                            "Falling back to in-memory sanitized SVG for %s", source_path
+                        )
+                        svg_input = BytesIO(vector_markup.encode("utf-8"))
+                    else:
+                        svg_input = str(temp_svg_path)
+                else:
+                    svg_input = str(source_path)
+            else:
+                svg_input = BytesIO(vector_markup.encode("utf-8"))
+
+            drawing = backend.svg2rlg(svg_input)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to parse SVG using svglib: %s", exc)
+            drawing = None
+        finally:
+            if temp_svg_path is not None:
+                try:
+                    temp_svg_path.unlink()
+                except OSError as exc:
+                    logger.debug(
+                        "Unable to remove temporary sanitized SVG %s: %s", temp_svg_path, exc
+                    )
+
+        if drawing and getattr(drawing, "width", None) and getattr(drawing, "height", None):
+            try:
+                scale_x = width / float(drawing.width)
+                scale_y = height / float(drawing.height)
+                drawing.scale(scale_x, scale_y)
+                min_x = getattr(drawing, "minX", 0) or 0
+                min_y = getattr(drawing, "minY", 0) or 0
+                drawing.translate(-min_x, -min_y)
+                backend.render_pdf.draw(drawing, pdf_canvas, x, y)
+                return True
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning("Failed to render SVG using svglib: %s", exc)
+        else:
+            logger.debug(
+                "svglib was unable to determine geometry for SVG; falling back to raster rendering"
+            )
+
     if (
-        backend.mode == "cairosvg"
-        and backend.svg2png
+        backend.svg2png
         and backend.image_reader
     ):
         try:
             image_buffer = BytesIO()
+            cairosvg_markup = effective_markup
+            if svg_document.source_path is not None:
+                cairosvg_markup = _localize_svg_image_assets(
+                    cairosvg_markup,
+                    svg_document.source_path,
+                    rhyme_code or "unknown",
+                    inline_mode=True,
+                    preprocess_for_pdf=True,
+                )
             backend.svg2png(
-                bytestring=svg_markup.encode("utf-8"),
+                bytestring=cairosvg_markup.encode("utf-8"),
                 write_to=image_buffer,
                 output_width=int(width),
                 output_height=int(height),
+                background_color="transparent",
             )
             image_buffer.seek(0)
             pdf_canvas.drawImage(
@@ -1138,31 +1060,11 @@ def _render_svg_on_canvas(
                 y,
                 width=width,
                 height=height,
+                mask="auto",
             )
             return True
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to render SVG using CairoSVG: %s", exc)
-
-    if backend.mode == "svglib" and backend.svg2rlg and backend.render_pdf:
-        try:
-            sanitized_markup = _sanitize_svg_for_svglib(svg_markup)
-            drawing = backend.svg2rlg(BytesIO(sanitized_markup.encode("utf-8")))
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Failed to parse SVG using svglib: %s", exc)
-            return False
-
-        if not drawing or not getattr(drawing, "width", None) or not getattr(drawing, "height", None):
-            return False
-
-        try:
-            scale_x = width / float(drawing.width)
-            scale_y = height / float(drawing.height)
-            drawing.scale(scale_x, scale_y)
-            drawing.translate(-drawing.minX, -drawing.minY)
-            backend.render_pdf.draw(drawing, pdf_canvas, x, y)
-            return True
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Failed to render SVG using svglib: %s", exc)
 
     return False
 
@@ -1200,6 +1102,22 @@ async def download_rhyme_binder(school_id: str, grade: str):
     page_width, page_height = pdf_resources.page_size
     svg_backend = pdf_resources.svg_backend
 
+    svg_document_cache: Dict[str, Optional[_SvgDocument]] = {}
+
+    def _get_svg_document(rhyme_code: str) -> Optional[_SvgDocument]:
+        """Return cached SVG metadata for ``rhyme_code`` within this request."""
+
+        if rhyme_code in svg_document_cache:
+            return svg_document_cache[rhyme_code]
+
+        try:
+            document = _load_rhyme_svg_markup(rhyme_code)
+        except KeyError:
+            document = None
+
+        svg_document_cache[rhyme_code] = document
+        return document
+
     for page_index in sorted(pages_map.keys()):
         entries = pages_map[page_index]
         # Sort so that "top" entries are rendered before "bottom"
@@ -1214,17 +1132,15 @@ async def download_rhyme_binder(school_id: str, grade: str):
         )
 
         if full_page_entry:
-            try:
-                svg_markup = generate_rhyme_svg(full_page_entry["rhyme_code"])
-            except KeyError:
-                svg_markup = None
+            svg_document = _get_svg_document(full_page_entry["rhyme_code"])
 
-            if svg_markup and _render_svg_on_canvas(
+            if svg_document and _render_svg_on_canvas(
                 pdf_canvas,
                 svg_backend,
-                svg_markup,
+                svg_document,
                 page_width,
                 page_height,
+                rhyme_code=full_page_entry["rhyme_code"],
             ):
                 pdf_canvas.showPage()
                 continue
@@ -1252,20 +1168,18 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
                 svg_rendered = False
 
-                try:
-                    svg_markup = generate_rhyme_svg(entry["rhyme_code"])
-                except KeyError:
-                    svg_markup = None
+                svg_document = _get_svg_document(entry["rhyme_code"])
 
-                if svg_markup:
+                if svg_document:
                     svg_rendered = _render_svg_on_canvas(
                         pdf_canvas,
                         svg_backend,
-                        svg_markup,
+                        svg_document,
                         page_width,
                         slot_height,
                         x=0,
                         y=y_position,
+                        rhyme_code=entry["rhyme_code"],
                     )
 
                 if not svg_rendered:
@@ -1284,6 +1198,8 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
     filename = f"{grade}_rhyme_binder.pdf"
     headers = {"Content-Disposition": f"attachment; filename={filename}"}
+
+    svg_document_cache.clear()
 
     return Response(
         content=buffer.getvalue(), media_type="application/pdf", headers=headers
