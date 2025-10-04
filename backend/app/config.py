@@ -139,7 +139,7 @@ def build_cover_selection_paths(
     """Return the UNC and filesystem directories for ``theme_number``/``colour_number``."""
 
     segments = [
-        f"({theme_number} Theme",
+        f"{theme_number} Theme",
         f"Theme {theme_number}",
         "SVGs",
         f"Colour {colour_number})",
