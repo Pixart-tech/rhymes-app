@@ -46,7 +46,7 @@ DEFAULT_COVER_SVG_BASE_PATH = Path(
     r"\\pixartnas\home\Project ABC\Project ABC Cover\background\Sample"
 )
 NETWORK_COVER_SVG_BASE_PATH = Path(
-    r"pixartnas\home\Project ABC\Project ABC Cover\background\Sample\1 Theme\Theme 1 Test\SVGs"
+    r"\\pixartnas\home\Project ABC\Project ABC Cover\background\Sample\1 Theme\Theme 1\SVGs\Colour 1"
 )
 PACKAGED_COVER_SVG_BASE_PATH = ROOT_DIR / "sample_cover_assets"
 
@@ -139,10 +139,10 @@ def build_cover_selection_paths(
     """Return the UNC and filesystem directories for ``theme_number``/``colour_number``."""
 
     segments = [
-        f"({theme_number} Theme",
+        f"{theme_number} Theme",
         f"Theme {theme_number}",
         "SVGs",
-        f"Colour {colour_number})",
+        f"Colour {colour_number}",
     ]
 
     unc_path = parent_unc_path.joinpath(*segments)
