@@ -431,6 +431,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
       }
 
       const response = await axios.get(url, { responseType: 'text' });
+      console.log(response);
       const svgMarkup = typeof response.data === 'string' ? response.data.trim() : '';
 
       if (!svgMarkup) {
