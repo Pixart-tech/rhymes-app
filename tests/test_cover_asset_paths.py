@@ -34,8 +34,8 @@ def test_build_cover_selection_paths_matches_packaged_structure():
 
     unc_path, fs_path = config.build_cover_selection_paths(parent_unc, parent_fs, 1, 1)
 
-    expected_unc = parent_unc / "(1 Theme" / "Theme 1" / "SVGs" / "Colour 1)"
-    expected_fs = parent_fs / "(1 Theme" / "Theme 1" / "SVGs" / "Colour 1)"
+    expected_unc = parent_unc / "(1 Theme" / "Theme 1" / "Colour 1)"
+    expected_fs = parent_fs / "(1 Theme" / "Theme 1" / "Colour 1)"
 
     assert unc_path == expected_unc
     assert fs_path == expected_fs
