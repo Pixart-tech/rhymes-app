@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import re
-from pathlib import Path
-from typing import Iterable, List, Optional, Set
+from pathlib import Path, PureWindowsPath
+from typing import Iterable, List, Optional, Set, Tuple
 from xml.etree import ElementTree as ET
 
 from dotenv import load_dotenv
@@ -29,6 +29,7 @@ GRADIENT_URL_RE = re.compile(r"^url\(#(?P<id>[^)]+)\)$")
 CSS_GRADIENT_DECLARATION_RE = re.compile(
     r"(?P<prop>\b(?:fill|stroke)\s*:\s*)url\(#(?P<id>[^)]+)\)", re.IGNORECASE
 )
+SELECTION_KEY_PATTERN = re.compile(r"^\s*(?P<theme>\d+)\s*\.\s*(?P<colour>\d+)\s*$")
 
 
 ET.register_namespace("", SVG_NS)
@@ -106,6 +107,50 @@ def ensure_cover_assets_base_path(base_path: Optional[Path]) -> Path:
     return base_path
 
 
+def get_cover_unc_base_path() -> PureWindowsPath:
+    """Return the network UNC parent directory configured for cover SVG assets."""
+
+    base_path = os.environ.get("COVER_SVG_BASE_PATH", "").strip()
+    if not base_path:
+        raise ValueError("COVER_SVG_BASE_PATH is not configured.")
+
+    return PureWindowsPath(base_path.rstrip("\\/"))
+
+
+def parse_cover_selection_key(selection_key: str) -> Tuple[int, int]:
+    """Return the theme and colour numbers encoded in ``selection_key``."""
+
+    match = SELECTION_KEY_PATTERN.match(selection_key or "")
+    if not match:
+        raise ValueError("Selection key must be in 'N.C' format with numeric values.")
+
+    theme_number = int(match.group("theme"))
+    colour_number = int(match.group("colour"))
+
+    return theme_number, colour_number
+
+
+def build_cover_selection_paths(
+    parent_unc_path: PureWindowsPath,
+    parent_filesystem_path: Path,
+    theme_number: int,
+    colour_number: int,
+) -> Tuple[PureWindowsPath, Path]:
+    """Return the UNC and filesystem directories for ``theme_number``/``colour_number``."""
+
+    segments = [
+        f"({theme_number} Theme",
+        f"Theme {theme_number}",
+        "SVGs",
+        f"Colour {colour_number})",
+    ]
+
+    unc_path = parent_unc_path.joinpath(*segments)
+    filesystem_path = parent_filesystem_path.joinpath(*segments)
+
+    return unc_path, filesystem_path
+
+
 def _normalize_cors_origin(origin: str) -> Optional[str]:
     """Return a sanitized representation of a configured CORS origin."""
 
@@ -152,9 +197,13 @@ __all__ = [
     "NETWORK_COVER_SVG_BASE_PATH",
     "PACKAGED_COVER_SVG_BASE_PATH",
     "RHYME_SVG_BASE_PATH",
+    "SELECTION_KEY_PATTERN",
     "SVG_NS",
     "XLINK_NS",
+    "build_cover_selection_paths",
     "ensure_cover_assets_base_path",
+    "get_cover_unc_base_path",
+    "parse_cover_selection_key",
     "resolve_cover_svg_base_path",
     "_normalize_cors_origin",
     "_parse_csv",

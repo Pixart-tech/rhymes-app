@@ -10,7 +10,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
 
 from fastapi import APIRouter, FastAPI, HTTPException
@@ -59,6 +59,20 @@ def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]:
 
 def _ensure_cover_assets_base_path() -> Path:
     return config.ensure_cover_assets_base_path(COVER_SVG_BASE_PATH)
+
+
+def _get_cover_assets_unc_base_path() -> PureWindowsPath:
+    try:
+        return config.get_cover_unc_base_path()
+    except ValueError as exc:
+        logger.error("COVER_SVG_BASE_PATH is not configured: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "COVER_SVG_BASE_PATH is not configured on the server. "
+                "Please set it to the network directory containing the cover SVG files."
+            ),
+        ) from exc
 
 
 def _load_rhyme_svg_markup(rhyme_code: str) -> _SvgDocument:
@@ -703,6 +717,55 @@ async def get_rhyme_svg(rhyme_code: str):
 #     assets = _build_cover_asset_manifest(base_path, include_markup=True)
 
 #     return {"assets": assets}
+
+
+@api_router.get("/cover-assets/network/{selection_key}")
+async def get_cover_assets_network_paths(selection_key: str):
+    """Return UNC paths for every SVG within the requested theme/colour folder."""
+
+    base_path = _ensure_cover_assets_base_path()
+    unc_base_path = _get_cover_assets_unc_base_path()
+
+    try:
+        theme_number, colour_number = config.parse_cover_selection_key(selection_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    selection_unc_path, selection_fs_path = config.build_cover_selection_paths(
+        unc_base_path, base_path, theme_number, colour_number
+    )
+
+    try:
+        exists = selection_fs_path.exists()
+        is_directory = selection_fs_path.is_dir()
+    except OSError as exc:
+        logger.error("Unable to access cover SVG directory %s: %s", selection_fs_path, exc)
+        raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
+
+    if not exists or not is_directory:
+        raise HTTPException(status_code=404, detail="Requested cover selection does not exist.")
+
+    try:
+        svg_files = [
+            candidate
+            for candidate in sorted(selection_fs_path.iterdir())
+            if candidate.is_file() and candidate.suffix.lower() == ".svg"
+        ]
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Requested cover selection does not exist.")
+    except OSError as exc:
+        logger.error("Unable to read cover SVG directory %s: %s", selection_fs_path, exc)
+        raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
+
+    assets = [
+        {
+            "fileName": svg_file.name,
+            "uncPath": str(selection_unc_path / svg_file.name),
+        }
+        for svg_file in svg_files
+    ]
+
+    return {"assets": assets}
 
 
 @api_router.get("/cover-assets/svg/{relative_path:path}")

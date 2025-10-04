@@ -82,14 +82,16 @@ const joinUrl = (baseUrl, path) => {
   return `${trimmedBase}/${trimmedPath}`;
 };
 
-const resolveCoverAssetsBaseUrl = () => {
-  const explicitBase = process.env.REACT_APP_COVER_ASSETS_BASE_URL;
+const resolveCoverAssetsNetworkBaseUrl = () => {
+  const explicitBase =
+    process.env.REACT_APP_COVER_ASSETS_NETWORK_BASE_URL ||
+    process.env.REACT_APP_COVER_ASSETS_BASE_URL;
 
   if (explicitBase && explicitBase.trim()) {
     return explicitBase.trim();
   }
 
-  return joinUrl(API_BASE_URL, 'cover-assets/svg');
+  return joinUrl(API_BASE_URL, 'cover-assets/network');
 };
 
 const resolveErrorMessage = (error) => {
@@ -110,62 +112,6 @@ const resolveErrorMessage = (error) => {
   }
 
   return 'An unexpected error occurred.';
-};
-
-const PERSONALISATION_TARGETS = {
-  schoolLogo: ['#school-logo', '[data-cover-binding="school-logo"]'],
-  gradeName: ['#grade-name', '[data-cover-binding="grade-name"]'],
-  kidName: ['#kid-name', '[data-cover-binding="kid-name"]'],
-  addressLine1: ['#address-line-1', '[data-cover-binding="address-line-1"]'],
-  addressLine2: ['#address-line-2', '[data-cover-binding="address-line-2"]'],
-  addressLine3: ['#address-line-3', '[data-cover-binding="address-line-3"]'],
-  contactNumber: ['#contact-number', '[data-cover-binding="contact-number"]'],
-  website: [
-    '#website',
-    '#website text',
-    '[data-cover-binding="website"]',
-    '[id="Website"] text'
-  ],
-  tagLine1: [
-    '#tag-line-1',
-    '#tag-line-1 text',
-    '[data-cover-binding="tag-line-1"]',
-    '[id="Tag_1"] text'
-  ],
-  tagLine2: [
-    '#tag-line-2',
-    '#tag-line-2 text',
-    '[data-cover-binding="tag-line-2"]',
-    '[id="Tag_2"] text'
-  ],
-  tagLine3: [
-    '#tag-line-3',
-    '#tag-line-3 text',
-    '[data-cover-binding="tag-line-3"]',
-    '[id="Tag_3"] text'
-  ]
-};
-
-const collectNodes = (doc, selectors = []) => {
-  if (!doc || !Array.isArray(selectors)) {
-    return [];
-  }
-
-  const results = [];
-  selectors.forEach((selector) => {
-    if (!selector) {
-      return;
-    }
-
-    const found = doc.querySelectorAll(selector);
-    found.forEach((node) => {
-      if (!results.includes(node)) {
-        results.push(node);
-      }
-    });
-  });
-
-  return results;
 };
 
 const readFileAsDataUrl = (file) =>
@@ -195,130 +141,6 @@ const readFileAsDataUrl = (file) =>
     reader.readAsDataURL(file);
   });
 
-const updateNodeText = (nodes, value) => {
-  const textValue = value ?? '';
-  nodes.forEach((node) => {
-    if (!node) {
-      return;
-    }
-
-    node.textContent = textValue;
-  });
-};
-
-const updateNodeImage = (nodes, value) => {
-  const imageValue = value ?? '';
-
-  nodes.forEach((node) => {
-    if (!node) {
-      return;
-    }
-
-    if (imageValue) {
-      node.setAttribute('href', imageValue);
-      node.setAttribute('xlink:href', imageValue);
-      if (typeof node.setAttributeNS === 'function') {
-        try {
-          node.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageValue);
-        } catch (error) {
-          // Ignore namespace errors in older browsers.
-        }
-      }
-
-      if (node.tagName?.toLowerCase() === 'image') {
-        node.setAttribute('preserveAspectRatio', 'xMidYMin slice');
-      }
-
-      const imgChild = node.tagName?.toLowerCase() === 'image' ? null : node.querySelector('img');
-      if (imgChild) {
-        imgChild.setAttribute('src', imageValue);
-        if (imgChild.style) {
-          imgChild.style.objectFit = imgChild.style.objectFit || 'cover';
-          imgChild.style.objectPosition = imgChild.style.objectPosition || '50% 0%';
-          imgChild.style.width = imgChild.style.width || '100%';
-          imgChild.style.height = imgChild.style.height || '100%';
-          imgChild.style.backgroundColor = imgChild.style.backgroundColor || 'transparent';
-        }
-      }
-    } else {
-      node.removeAttribute('href');
-      node.removeAttribute('xlink:href');
-      if (typeof node.removeAttributeNS === 'function') {
-        try {
-          node.removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
-        } catch (error) {
-          // Ignore namespace errors in older browsers.
-        }
-      }
-
-      const imgChild = node.tagName?.toLowerCase() === 'image' ? null : node.querySelector('img');
-      if (imgChild) {
-        imgChild.removeAttribute('src');
-        if (imgChild.style) {
-          imgChild.style.removeProperty('object-position');
-          imgChild.style.removeProperty('background-color');
-        }
-      }
-    }
-  });
-};
-
-const applyPersonalisationToSvg = (svgMarkup, personalisation) => {
-  if (!svgMarkup || typeof svgMarkup !== 'string') {
-    return '';
-  }
-
-  if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
-    return svgMarkup;
-  }
-
-  try {
-    const parser = new window.DOMParser();
-    const doc = parser.parseFromString(svgMarkup, 'image/svg+xml');
-    const svgElement = doc?.documentElement;
-
-    if (!svgElement || svgElement.nodeName.toLowerCase() !== 'svg') {
-      return svgMarkup;
-    }
-
-    const {
-      schoolLogo,
-      gradeName,
-      kidName,
-      addressLine1,
-      addressLine2,
-      addressLine3,
-      contactNumber,
-      website,
-      tagLine1,
-      tagLine2,
-      tagLine3
-    } = personalisation || {};
-
-    updateNodeImage(collectNodes(svgElement, PERSONALISATION_TARGETS.schoolLogo), schoolLogo);
-    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.gradeName), gradeName);
-    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.kidName), kidName);
-    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine1), addressLine1);
-    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine2), addressLine2);
-    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.addressLine3), addressLine3);
-    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.contactNumber), contactNumber);
-    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.website), website);
-    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.tagLine1), tagLine1);
-    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.tagLine2), tagLine2);
-    updateNodeText(collectNodes(svgElement, PERSONALISATION_TARGETS.tagLine3), tagLine3);
-
-    if (typeof XMLSerializer === 'undefined') {
-      return svgMarkup;
-    }
-
-    const serializer = new XMLSerializer();
-    return serializer.serializeToString(svgElement);
-  } catch (error) {
-    return svgMarkup;
-  }
-
- }
-   
 const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogout }) => {
   const [selectedThemeId, setSelectedThemeId] = useState(null);
   const [selectedColourId, setSelectedColourId] = useState(null);
@@ -348,7 +170,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   const [hasSubmittedDetails, setHasSubmittedDetails] = useState(false);
 
   const assetCacheRef = useRef(new Map());
-  const coverAssetsBaseUrl = useMemo(resolveCoverAssetsBaseUrl, []);
+  const coverAssetsNetworkBaseUrl = useMemo(resolveCoverAssetsNetworkBaseUrl, []);
 
   const gradeLabel = useMemo(() => {
     return GRADE_LABELS[grade] || grade?.toUpperCase() || 'Grade';
@@ -425,33 +247,47 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
     [personalisation]
   );
 
-  const fetchCoverAsset = useCallback(
+  const fetchCoverAssets = useCallback(
     async (selectionKey) => {
       if (!selectionKey) {
         throw new Error('Invalid cover asset requested.');
       }
 
-      const fileName = `${selectionKey}.svg`;
-      const url = joinUrl(coverAssetsBaseUrl, fileName);
-      const cacheKey = `${selectionKey}|${url}`;
-
-      if (assetCacheRef.current.has(cacheKey)) {
-        return assetCacheRef.current.get(cacheKey);
+      if (assetCacheRef.current.has(selectionKey)) {
+        return assetCacheRef.current.get(selectionKey);
       }
 
-      const response = await axios.get(url, { responseType: 'text' });
-      console.log(response);
-      const svgMarkup = typeof response.data === 'string' ? response.data.trim() : '';
+      const requestUrl = joinUrl(
+        coverAssetsNetworkBaseUrl,
+        encodeURIComponent(selectionKey)
+      );
+      const response = await axios.get(requestUrl);
+      const rawAssets = response?.data?.assets;
 
-      if (!svgMarkup) {
-        throw new Error(`The SVG for “${fileName}” could not be loaded.`);
+      const sanitizedAssets = [];
+      if (Array.isArray(rawAssets)) {
+        const seenPaths = new Set();
+
+        rawAssets.forEach((asset, index) => {
+          const uncPath = typeof asset?.uncPath === 'string' ? asset.uncPath.trim() : '';
+          if (!uncPath || seenPaths.has(uncPath)) {
+            return;
+          }
+
+          const fileName =
+            typeof asset?.fileName === 'string' && asset.fileName.trim()
+              ? asset.fileName.trim()
+              : `Cover-${selectionKey}-${index + 1}.svg`;
+
+          sanitizedAssets.push({ fileName, uncPath });
+          seenPaths.add(uncPath);
+        });
       }
 
-      const record = { fileName, url, selectionKey, svgMarkup };
-      assetCacheRef.current.set(cacheKey, record);
-      return record;
+      assetCacheRef.current.set(selectionKey, sanitizedAssets);
+      return sanitizedAssets;
     },
-    [coverAssetsBaseUrl]
+    [coverAssetsNetworkBaseUrl]
   );
 
   const handlePreviewRequest = useCallback(
@@ -483,15 +319,16 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
       setAssetError('');
 
       try {
-        const asset = await fetchCoverAsset(selectionKey);
-        const personalised = {
-          ...asset,
-          personalisedMarkup: applyPersonalisationToSvg(asset.svgMarkup, trimmedPersonalisation)
-        };
+        const assets = await fetchCoverAssets(selectionKey);
 
-        setPreviewAssets([personalised]);
-        setActiveIndex(0);
-        setHasSubmittedDetails(true);
+        if (!assets.length) {
+          setPreviewAssets([]);
+          setAssetError('No cover files found for this theme and colour combination yet.');
+        } else {
+          setPreviewAssets(assets);
+          setActiveIndex(0);
+          setHasSubmittedDetails(true);
+        }
       } catch (error) {
         const message =
           error?.response?.status === 404
@@ -503,7 +340,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
         setIsFetchingAssets(false);
       }
     },
-    [fetchCoverAsset, selectedTheme, selectedColour, trimmedPersonalisation]
+    [fetchCoverAssets, selectedTheme, selectedColour, trimmedPersonalisation]
   );
 
   const isPersonalisationComplete = useMemo(() => {
@@ -975,12 +812,14 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                 {!isFetchingAssets && !assetError && previewCount > 0 && activeAsset && (
                   <div className="space-y-4">
                     <div className="cover-carousel-stage">
-                      <div
-                        className="cover-carousel-svg"
-                        dangerouslySetInnerHTML={{
-                          __html: activeAsset.personalisedMarkup || activeAsset.svgMarkup
-                        }}
-                      />
+                      <div className="cover-carousel-svg">
+                        <img
+                          src={activeAsset.uncPath}
+                          alt={`Cover design ${activeIndex + 1}`}
+                          className="cover-carousel-image"
+                          loading="lazy"
+                        />
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
@@ -1018,7 +857,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                       <div className="cover-carousel-indicators">
                         {previewAssets.map((asset, index) => (
                           <button
-                            key={asset.url || asset.fileName || index}
+                            key={asset.uncPath || asset.fileName || index}
                             type="button"
                             onClick={() => setActiveIndex(index)}
                             className={`cover-carousel-indicator${index === activeIndex ? ' is-active' : ''}`}
