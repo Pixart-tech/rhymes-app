@@ -719,9 +719,31 @@ async def get_rhyme_svg(rhyme_code: str):
 #     return {"assets": assets}
 
 
+def _read_svg_markup(svg_path: Path) -> Optional[str]:
+    """Return the textual SVG markup stored at ``svg_path``.
+
+    The helper prefers UTF-8 encoded files but gracefully falls back to common
+    alternatives before ultimately replacing undecodable characters. Cover
+    artwork supplied by designers occasionally arrives with a UTF-16 BOM which
+    would otherwise trigger ``UnicodeDecodeError`` exceptions.
+    """
+
+    try:
+        return svg_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raw_bytes = svg_path.read_bytes()
+        for encoding in ("utf-8-sig", "utf-16", "latin-1"):
+            try:
+                return raw_bytes.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+
+        return raw_bytes.decode("utf-8", errors="replace")
+
+
 @api_router.get("/cover-assets/network/{selection_key}")
 async def get_cover_assets_network_paths(selection_key: str):
-    """Return UNC paths for every SVG within the requested theme/colour folder."""
+    """Return inline SVG markup for every file within the requested folder."""
 
     base_path = _ensure_cover_assets_base_path()
     unc_base_path = _get_cover_assets_unc_base_path()
@@ -757,13 +779,33 @@ async def get_cover_assets_network_paths(selection_key: str):
         logger.error("Unable to read cover SVG directory %s: %s", selection_fs_path, exc)
         raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
 
-    assets = [
-        {
-            "fileName": svg_file.name,
-            "uncPath": str(selection_unc_path / svg_file.name),
-        }
-        for svg_file in svg_files
-    ]
+    print(f"[cover-assets] Resolved folder: {selection_fs_path}")
+    print(f"[cover-assets] SVG files discovered: {len(svg_files)}")
+
+    assets = []
+    for svg_file in svg_files:
+        svg_markup = _read_svg_markup(svg_file)
+        trimmed_markup = svg_markup.strip() if isinstance(svg_markup, str) else ""
+
+        if not trimmed_markup:
+            logger.warning("Cover SVG %s is empty or unreadable.", svg_file)
+            continue
+
+        try:
+            relative_path = svg_file.relative_to(base_path)
+        except ValueError:
+            relative_path = svg_file.name
+
+        assets.append(
+            {
+                "fileName": svg_file.name,
+                "relativePath": str(relative_path).replace("\\", "/"),
+                "uncPath": str(selection_unc_path / svg_file.name),
+                "svgMarkup": trimmed_markup,
+            }
+        )
+
+    print(f"[cover-assets] Accessible SVGs returned: {len(assets)}")
 
     return {"assets": assets}
 

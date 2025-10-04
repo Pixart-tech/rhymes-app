@@ -12,6 +12,7 @@ import { Label } from './ui/label';
 
 import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 import { API_BASE_URL } from '../lib/utils';
+import InlineSvg from './InlineSvg';
 
 const GRADE_LABELS = {
   nursery: 'Nursery',
@@ -266,11 +267,22 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
 
       const sanitizedAssets = [];
       if (Array.isArray(rawAssets)) {
-        const seenPaths = new Set();
+        const seenKeys = new Set();
 
         rawAssets.forEach((asset, index) => {
-          const uncPath = typeof asset?.uncPath === 'string' ? asset.uncPath.trim() : '';
-          if (!uncPath || seenPaths.has(uncPath)) {
+          const rawMarkup = typeof asset?.svgMarkup === 'string' ? asset.svgMarkup : '';
+          const svgMarkup = rawMarkup.trim();
+          if (!svgMarkup) {
+            return;
+          }
+
+          const relativePath =
+            typeof asset?.relativePath === 'string' && asset.relativePath.trim()
+              ? asset.relativePath.trim()
+              : '';
+
+          const dedupeKey = relativePath || svgMarkup;
+          if (dedupeKey && seenKeys.has(dedupeKey)) {
             return;
           }
 
@@ -279,8 +291,17 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
               ? asset.fileName.trim()
               : `Cover-${selectionKey}-${index + 1}.svg`;
 
-          sanitizedAssets.push({ fileName, uncPath });
-          seenPaths.add(uncPath);
+          sanitizedAssets.push({
+            fileName,
+            relativePath,
+            svgMarkup,
+            personalisedMarkup:
+              typeof asset?.personalisedMarkup === 'string' ? asset.personalisedMarkup.trim() : ''
+          });
+
+          if (dedupeKey) {
+            seenKeys.add(dedupeKey);
+          }
         });
       }
 
@@ -742,11 +763,10 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                         <span className="truncate">{activeAsset.fileName}</span>
                       </div>
                       <div className="max-h-80 overflow-auto bg-white px-3 py-4">
-                        <div
+                        <InlineSvg
+                          markup={activeAsset.personalisedMarkup || activeAsset.svgMarkup}
                           className="mx-auto max-h-72 min-h-[180px] w-full overflow-hidden rounded border border-emerald-100 bg-white shadow-sm"
-                          dangerouslySetInnerHTML={{
-                            __html: activeAsset.personalisedMarkup || activeAsset.svgMarkup
-                          }}
+                          sanitize={false}
                         />
                       </div>
                     </div>
@@ -813,11 +833,11 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                   <div className="space-y-4">
                     <div className="cover-carousel-stage">
                       <div className="cover-carousel-svg">
-                        <img
-                          src={activeAsset.uncPath}
-                          alt={`Cover design ${activeIndex + 1}`}
+                        <InlineSvg
+                          markup={activeAsset.personalisedMarkup || activeAsset.svgMarkup}
                           className="cover-carousel-image"
-                          loading="lazy"
+                          ariaLabel={`Cover design ${activeIndex + 1}`}
+                          sanitize={false}
                         />
                       </div>
                     </div>
@@ -854,10 +874,10 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                     </div>
 
                     {previewCount > 1 && (
-                      <div className="cover-carousel-indicators">
-                        {previewAssets.map((asset, index) => (
-                          <button
-                            key={asset.uncPath || asset.fileName || index}
+                        <div className="cover-carousel-indicators">
+                          {previewAssets.map((asset, index) => (
+                            <button
+                              key={asset.relativePath || asset.fileName || index}
                             type="button"
                             onClick={() => setActiveIndex(index)}
                             className={`cover-carousel-indicator${index === activeIndex ? ' is-active' : ''}`}
