@@ -1,141 +1,93 @@
-"""Utilities for working with UNC network paths.
-
-This module contains a small, focused helper that demonstrates how to build
-UNC paths safely and how to debug situations where `Path.exists()` returns
-``False`` unexpectedly on network shares.
-
-The code purposefully favours explicit string handling and emits verbose
-diagnostics so that issues with permissions, connectivity, or path casing can
-be identified quickly.
-"""
-
+"""Utilities for working with UNC paths for themed SVG assets."""
 from __future__ import annotations
 
-import os
 from pathlib import Path, PureWindowsPath
-from typing import Iterable, Tuple
+from typing import Iterable, List, Tuple
 
 
-def build_cover_selection_paths(
-    unc_base_path: str,
-    base_path: str,
-    theme_number: int,
-    colour_number: int,
-) -> Tuple[Path, Path]:
-    """Return the UNC path and filesystem path for the requested selection.
+def parse_selection_key(selection_key: str) -> Tuple[int, int]:
+    """Return the theme and colour numbers encoded in *selection_key*.
+
+    The key is expected to contain two integers separated by a dot, e.g. ``"1.1"``.
+    Whitespace is ignored so ``" 1 . 2 "`` is also valid.
+    """
+
+    cleaned_key = selection_key.replace(" ", "")
+    try:
+        theme_str, colour_str = cleaned_key.split(".", maxsplit=1)
+    except ValueError as exc:  # pragma: no cover - defensive programming
+        raise ValueError(
+            "Selection key must contain a single dot separating theme and colour"
+        ) from exc
+
+    try:
+        theme_number = int(theme_str)
+        colour_number = int(colour_str)
+    except ValueError as exc:  # pragma: no cover - defensive programming
+        raise ValueError("Theme and colour numbers must be integers") from exc
+
+    if theme_number < 1 or colour_number < 1:  # pragma: no cover - defensive programming
+        raise ValueError("Theme and colour numbers must be positive")
+
+    return theme_number, colour_number
+
+
+def build_theme_folder_path(base_path: str, selection_key: str) -> PureWindowsPath:
+    """Create a UNC path for the theme/colour folder represented by ``selection_key``.
 
     Parameters
     ----------
-    unc_base_path:
-        The root of the selection folder on the network share. The string
-        should use doubled backslashes or a raw string literal, for example::
-
-            r"\\\pixartnas\home\Project ABC"
-
     base_path:
-        The local filesystem root that mirrors the UNC share (if applicable).
-
-    theme_number / colour_number:
-        The numeric identifiers used to construct the folder name segments.
-
-    Returns
-    -------
-    tuple(Path, Path)
-        ``(selection_unc_path, selection_fs_path)``
+        UNC base path to the "Sample" folder. Double-backslashes are expected, but the
+        function accepts standard strings as well.
+    selection_key:
+        A string in the format ``"<theme>.<colour>"``.
     """
 
-    # Guard against accidental interpretation of escape sequences by always
-    # working with ``PureWindowsPath`` for UNC handling and feeding only
-    # strings to ``Path``.
-    unc_root = PureWindowsPath(unc_base_path)
-    theme_component = f"Theme {theme_number:02d}"
-    colour_component = f"Colour {colour_number:02d}"
+    theme_number, colour_number = parse_selection_key(selection_key)
 
-    selection_unc_path = Path(str(unc_root.joinpath(theme_component, colour_component)))
-    selection_fs_path = Path(base_path).joinpath(theme_component, colour_component)
+    root = PureWindowsPath(base_path)
+    # Folder names include the leading and trailing parenthesis characters.
+    theme_segment = f"({theme_number} Theme"
+    colour_segment = f"Colour {colour_number})"
 
-    return selection_unc_path, selection_fs_path
+    return root / theme_segment / f"Theme {theme_number}" / "SVGs" / colour_segment
 
 
-def debug_path(path: Path) -> None:
-    """Print diagnostics for the provided path.
+def inspect_theme_folder(base_path: str, selection_key: str) -> List[PureWindowsPath]:
+    """Print debug information and optionally list SVG files for the selection.
 
-    The output makes it easier to understand why a network folder check might
-    fail: it shows the raw string, confirms parent folder availability, and
-    compares ``Path.exists`` with ``os.path.exists``.
+    Returns a list of :class:`~pathlib.PureWindowsPath` objects representing ``.svg``
+    files when the folder exists. Otherwise an empty list is returned.
     """
 
-    raw_path = str(path)
-    print("--- Path debug information ---")
-    print(f"Path string: {raw_path}")
-    print(f"Repr string: {raw_path!r}")
+    unc_path = build_theme_folder_path(base_path, selection_key)
+    path_for_io = Path(str(unc_path))
 
-    parent = path.parent
-    print(f"Parent: {parent}")
-    print(f"Parent exists: {parent.exists()}")
+    print(f"Final UNC path: {unc_path}")
+    print(f"Parent folder exists: {path_for_io.parent.exists()}")
 
-    pathlib_exists = path.exists()
-    os_exists = os.path.exists(raw_path)
-    print(f"Path.exists(): {pathlib_exists}")
-    print(f"os.path.exists(): {os_exists}")
+    folder_exists = path_for_io.exists()
+    print(f"Folder exists: {folder_exists}")
 
-    if pathlib_exists:
-        try:
-            list_directory(path)
-        except OSError as exc:  # pragma: no cover - diagnostic output only
-            print(f"Error listing directory contents: {exc}")
+    if not folder_exists:
+        return []
 
+    svg_paths: Iterable[Path] = path_for_io.glob("*.svg")
+    svg_files = [PureWindowsPath(str(svg_path)) for svg_path in svg_paths]
 
-def list_directory(path: Path, suffixes: Iterable[str] | None = None) -> None:
-    """List the files inside ``path`` filtering by the given suffixes."""
+    if svg_files:
+        print("SVG files found:")
+        for svg_file in svg_files:
+            print(f" - {svg_file}")
+    else:
+        print("No SVG files found in the folder.")
 
-    suffixes = {s.lower() for s in suffixes} if suffixes else None
-
-    print(f"Contents of {path}:")
-    for entry in sorted(path.iterdir()):
-        if entry.is_file():
-            if suffixes and entry.suffix.lower() not in suffixes:
-                continue
-            print(f"  FILE  {entry.name}")
-        elif entry.is_dir():
-            print(f"  DIR   {entry.name}")
+    return svg_files
 
 
-def check_selection_folder(
-    unc_base_path: str,
-    base_path: str,
-    theme_number: int,
-    colour_number: int,
-) -> Tuple[bool, bool]:
-    """High level helper that prints diagnostics and returns existence flags."""
-
-    selection_unc_path, selection_fs_path = build_cover_selection_paths(
-        unc_base_path, base_path, theme_number, colour_number
-    )
-
-    print("\nUNC selection path:")
-    debug_path(selection_unc_path)
-
-    print("\nLocal mirror path:")
-    debug_path(selection_fs_path)
-
-    return selection_unc_path.exists(), selection_fs_path.exists()
-
-
-if __name__ == "__main__":  # pragma: no cover - module demonstration
-    SAMPLE_UNC_BASE = r"\\pixartnas\home\Project ABC\Project ABC Cover\background\Sample"
-    SAMPLE_LOCAL_BASE = r"C:\\Project ABC\\Project ABC Cover\\background\\Sample"
-
-    unc_exists, local_exists = check_selection_folder(
-        SAMPLE_UNC_BASE,
-        SAMPLE_LOCAL_BASE,
-        theme_number=1,
-        colour_number=1,
-    )
-
-    if unc_exists:
-        selection_unc_path, _ = build_cover_selection_paths(
-            SAMPLE_UNC_BASE, SAMPLE_LOCAL_BASE, 1, 1
-        )
-        list_directory(selection_unc_path, suffixes={".svg"})
-
+__all__ = [
+    "build_theme_folder_path",
+    "inspect_theme_folder",
+    "parse_selection_key",
+]
