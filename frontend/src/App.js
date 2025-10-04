@@ -14,7 +14,9 @@ import { Separator } from './components/ui/separator';
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
 import CoverPageWorkflow from './components/CoverPageWorkflow';
+import InlineSvg from './components/InlineSvg';
 import { API_BASE_URL } from './lib/utils';
+import { decodeSvgPayload, sanitizeRhymeSvgContent } from './lib/svgUtils';
 
 
 // Icons
@@ -42,174 +44,6 @@ const GRADE_OPTIONS = [
   { id: 'ukg', name: 'UKG', color: 'from-green-400 to-emerald-400', icon: '🌟' },
   { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' }
 ];
-
-const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
-  if (!svgContent || typeof svgContent !== 'string') {
-    return svgContent;
-  }
-
-  if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
-    return svgContent;
-  }
-
-  try {
-    const parser = new window.DOMParser();
-    const doc = parser.parseFromString(svgContent, 'image/svg+xml');
-    const svgElement = doc.querySelector('svg');
-
-    if (!svgElement) {
-      return svgContent;
-    }
-
-    const widthAttr = svgElement.getAttribute('width');
-    const heightAttr = svgElement.getAttribute('height');
-    const widthValue = Number.parseFloat(widthAttr ?? '');
-    const heightValue = Number.parseFloat(heightAttr ?? '');
-
-    svgElement.removeAttribute('width');
-    svgElement.removeAttribute('height');
-
-    const inlineStyleAttr = svgElement.getAttribute('style');
-    if (typeof inlineStyleAttr === 'string' && inlineStyleAttr.trim().length > 0) {
-      const filteredStyleRules = inlineStyleAttr
-        .split(';')
-        .map((rule) => rule.trim())
-        .filter((rule) =>
-          rule.length > 0 && !/^width\s*:/i.test(rule) && !/^height\s*:/i.test(rule)
-        );
-
-      if (filteredStyleRules.length > 0) {
-        svgElement.setAttribute('style', `${filteredStyleRules.join('; ')};`);
-      } else {
-        svgElement.removeAttribute('style');
-      }
-    }
-
-    if (!svgElement.getAttribute('viewBox')) {
-      if (Number.isFinite(widthValue) && Number.isFinite(heightValue) && widthValue > 0 && heightValue > 0) {
-        svgElement.setAttribute('viewBox', `0 0 ${widthValue} ${heightValue}`);
-      }
-    }
-
-    svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-
-    const viewBoxAttr = svgElement.getAttribute('viewBox');
-    let viewBoxWidth;
-    let viewBoxHeight;
-
-    if (typeof viewBoxAttr === 'string' && viewBoxAttr.trim().length > 0) {
-      const viewBoxParts = viewBoxAttr
-        .trim()
-        .split(/[\s,]+/)
-        .map((part) => Number.parseFloat(part))
-        .filter((part) => Number.isFinite(part));
-
-      if (viewBoxParts.length >= 4) {
-        const sanitizedParts = viewBoxParts.slice(0, 4);
-        svgElement.setAttribute('viewBox', sanitizedParts.map((value) => `${value}`).join(' '));
-        viewBoxWidth = sanitizedParts[2];
-        viewBoxHeight = sanitizedParts[3];
-      }
-    }
-
-    const referenceWidth = Number.isFinite(viewBoxWidth) ? viewBoxWidth : widthValue;
-    const referenceHeight = Number.isFinite(viewBoxHeight) ? viewBoxHeight : heightValue;
-
-    const rectElements = svgElement.querySelectorAll('rect');
-
-    rectElements.forEach((rect) => {
-      const rectWidthAttr = rect.getAttribute('width');
-      const rectHeightAttr = rect.getAttribute('height');
-      const rectXAttr = rect.getAttribute('x');
-      const rectYAttr = rect.getAttribute('y');
-
-      const rectWidthValue = Number.parseFloat(rectWidthAttr ?? '');
-      const rectHeightValue = Number.parseFloat(rectHeightAttr ?? '');
-      const rectXValue = Number.parseFloat(rectXAttr ?? '');
-      const rectYValue = Number.parseFloat(rectYAttr ?? '');
-
-      const widthLooksLikeCanvas =
-        Number.isFinite(referenceWidth) &&
-        Number.isFinite(rectWidthValue) &&
-        Math.abs(rectWidthValue - referenceWidth) < 1;
-
-      const heightLooksLikeCanvas =
-        Number.isFinite(referenceHeight) &&
-        Number.isFinite(rectHeightValue) &&
-        Math.abs(rectHeightValue - referenceHeight) < 1;
-
-      const shouldStretchWidth =
-        !rectWidthAttr ||
-        /%/i.test(rectWidthAttr) ||
-        !Number.isFinite(rectWidthValue) ||
-        widthLooksLikeCanvas;
-
-      const shouldStretchHeight =
-        !rectHeightAttr ||
-        /%/i.test(rectHeightAttr) ||
-        !Number.isFinite(rectHeightValue) ||
-        heightLooksLikeCanvas;
-
-      if (shouldStretchWidth) {
-        rect.setAttribute('width', '100%');
-      }
-
-      if (shouldStretchHeight) {
-        rect.setAttribute('height', '100%');
-      }
-
-      if (shouldStretchWidth && (!rectXAttr || !Number.isFinite(rectXValue) || Math.abs(rectXValue) < 0.5)) {
-        rect.setAttribute('x', '0');
-      }
-
-      if (shouldStretchHeight && (!rectYAttr || !Number.isFinite(rectYValue) || Math.abs(rectYValue) < 0.5)) {
-        rect.setAttribute('y', '0');
-      }
-    });
-
-    const normalizedCode = (rhymeCode ?? '').toString().trim();
-    const normalizedCodeLower = normalizedCode.toLowerCase();
-    const normalizedCodeCompact = normalizedCodeLower.replace(/[^a-z0-9]/g, '');
-    const textNodes = svgElement.querySelectorAll('text, tspan');
-
-    textNodes.forEach(node => {
-      const rawText = (node.textContent ?? '').toString();
-      const normalizedText = rawText.trim().toLowerCase();
-
-      if (!normalizedText) {
-        return;
-      }
-
-      const normalizedCompact = normalizedText.replace(/[^a-z0-9]/g, '');
-      const hasCodeReference = Boolean(
-        (normalizedCodeLower && normalizedText.includes(normalizedCodeLower)) ||
-        (normalizedCodeCompact && normalizedCompact.includes(normalizedCodeCompact))
-      );
-      const hasLabel = normalizedText.includes('rhyme code') || normalizedText.includes('code:');
-
-      if (hasCodeReference || hasLabel) {
-        if (typeof node.closest === 'function') {
-          const parentText = node.closest('text');
-          if (parentText) {
-            parentText.remove();
-            return;
-          }
-        }
-        node.remove();
-      }
-    });
-
-    if (typeof window.XMLSerializer === 'undefined') {
-      return svgElement.outerHTML;
-    }
-
-    const serializer = new window.XMLSerializer();
-    return serializer.serializeToString(svgElement);
-  } catch (error) {
-    console.error('Error sanitizing rhyme SVG:', error);
-    return svgContent;
-  }
-};
 
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
@@ -958,9 +792,10 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
       }
 
       const requestPromise = axios
-        .get(`${API}/rhymes/svg/${code}`)
+        .get(`${API}/rhymes/svg/${code}`, { responseType: 'arraybuffer' })
         .then((response) => {
-          const svgContent = sanitizeRhymeSvgContent(response.data, code);
+          const decoded = decodeSvgPayload(response.data, response.headers);
+          const svgContent = sanitizeRhymeSvgContent(decoded, code);
           svgCacheRef.current.set(code, svgContent);
           return svgContent;
         })
@@ -1619,9 +1454,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const renderDoublePageSvg = () => {
     if (typeof doublePageSvgContent === 'string' && doublePageSvgContent.trim().length > 0) {
       return (
-        <div
+        <InlineSvg
+          markup={doublePageSvgContent}
           className="rhyme-svg-content"
-          dangerouslySetInnerHTML={{ __html: doublePageSvgContent }}
+          sanitize={false}
+          ariaLabel={`${currentPageRhymes.top?.name || 'Rhyme'} illustration`}
         />
       );
     }
@@ -1764,9 +1601,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                                       <div className={`rhyme-slot-container${hasTopRhyme ? ' has-svg' : ''}`}>
 
-                                        <div
-                                          dangerouslySetInnerHTML={{ __html: currentPageRhymes.top?.svgContent || '' }}
+                                        <InlineSvg
+                                          markup={currentPageRhymes.top?.svgContent || ''}
                                           className="rhyme-svg-content"
+                                          sanitize={false}
+                                          ariaLabel={`${currentPageRhymes.top?.name || 'Rhyme'} illustration`}
                                         />
                                       </div>
                                     </div>
@@ -1802,9 +1641,11 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
                                         <div className={`rhyme-slot-container${hasBottomRhyme ? ' has-svg' : ''}`}>
 
-                                          <div
-                                            dangerouslySetInnerHTML={{ __html: currentPageRhymes.bottom?.svgContent || '' }}
+                                          <InlineSvg
+                                            markup={currentPageRhymes.bottom?.svgContent || ''}
                                             className="rhyme-svg-content"
+                                            sanitize={false}
+                                            ariaLabel={`${currentPageRhymes.bottom?.name || 'Rhyme'} illustration`}
                                           />
                                         </div>
                                       </div>
