@@ -11,6 +11,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 
 import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
+import { API_BASE_URL } from '../lib/utils';
 
 const GRADE_LABELS = {
   nursery: 'Nursery',
@@ -79,6 +80,16 @@ const joinUrl = (baseUrl, path) => {
   const trimmedBase = baseUrl.replace(/\/+$/, '');
   const trimmedPath = (path ?? '').replace(/^\/+/, '');
   return `${trimmedBase}/${trimmedPath}`;
+};
+
+const resolveCoverAssetsBaseUrl = () => {
+  const explicitBase = process.env.REACT_APP_COVER_ASSETS_BASE_URL;
+
+  if (explicitBase && explicitBase.trim()) {
+    return explicitBase.trim();
+  }
+
+  return joinUrl(API_BASE_URL, 'cover-assets/svg');
 };
 
 const resolveErrorMessage = (error) => {
@@ -309,9 +320,6 @@ const applyPersonalisationToSvg = (svgMarkup, personalisation) => {
  }
    
 const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogout }) => {
-  const coverAssetsBaseUrl =
-    process.env.REACT_APP_COVER_ASSETS_BASE_URL || '/api/cover-assets/svg';
-
   const [selectedThemeId, setSelectedThemeId] = useState(null);
   const [selectedColourId, setSelectedColourId] = useState(null);
 
@@ -340,6 +348,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   const [hasSubmittedDetails, setHasSubmittedDetails] = useState(false);
 
   const assetCacheRef = useRef(new Map());
+  const coverAssetsBaseUrl = useMemo(resolveCoverAssetsBaseUrl, []);
 
   const gradeLabel = useMemo(() => {
     return GRADE_LABELS[grade] || grade?.toUpperCase() || 'Grade';
