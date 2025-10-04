@@ -725,6 +725,7 @@ async def get_cover_assets_network_paths(selection_key: str):
 
     base_path = _ensure_cover_assets_base_path()
     unc_base_path = _get_cover_assets_unc_base_path()
+   
 
     try:
         theme_number, colour_number = config.parse_cover_selection_key(selection_key)
@@ -734,9 +735,11 @@ async def get_cover_assets_network_paths(selection_key: str):
     selection_unc_path, selection_fs_path = config.build_cover_selection_paths(
         unc_base_path, base_path, theme_number, colour_number
     )
+    
 
     try:
-        exists = selection_fs_path.exists()
+        exists = Path(selection_fs_path).exists()
+        
         is_directory = selection_fs_path.is_dir()
     except OSError as exc:
         logger.error("Unable to access cover SVG directory %s: %s", selection_fs_path, exc)
