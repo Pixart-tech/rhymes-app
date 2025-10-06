@@ -141,7 +141,7 @@ def build_cover_selection_paths(
     segments = [
         f"{theme_number} Theme",
         f"Theme {theme_number}",
-        f"Colour{colour_number})",
+        f"Colour{colour_number}",
     ]
 
     unc_path = parent_unc_path.joinpath(*segments)
