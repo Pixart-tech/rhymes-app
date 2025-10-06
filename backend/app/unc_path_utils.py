@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path, PureWindowsPath
-from typing import Iterable, Tuple
+from typing import Iterable, Tuple, Union
 
 
 def build_cover_selection_paths(
@@ -34,6 +34,29 @@ def build_cover_selection_paths(
     filesystem_path = parent_filesystem_path.joinpath(*segments)
 
     return unc_path, filesystem_path
+
+
+def format_unc_path(path: Union[PureWindowsPath, str]) -> str:
+    """Return ``path`` as a normalized UNC string with a standard ``\\\\`` prefix."""
+
+    path_str = str(path)
+    if not path_str:
+        return path_str
+
+    if path_str.startswith("\\\\?\\UNC\\"):
+        prefix = "\\\\?\\UNC\\"
+        remainder = path_str[len(prefix):].lstrip("\\")
+        return prefix + remainder
+
+    if path_str.startswith("\\\\?\\"):
+        prefix = "\\\\?\\"
+        remainder = path_str[len(prefix):].lstrip("\\")
+        return prefix + remainder
+
+    if path_str.startswith("\\\\"):
+        return "\\\\" + path_str.lstrip("\\")
+
+    return path_str
 
 
 def debug_path(path: Path) -> None:
