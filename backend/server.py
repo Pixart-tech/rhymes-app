@@ -714,7 +714,7 @@ async def get_cover_assets_network_paths(selection_key: str):
     
 
     try:
-        print(selection_fs_path)
+        
         exists = Path(selection_fs_path).exists()
        
         is_directory = selection_fs_path.is_dir()
