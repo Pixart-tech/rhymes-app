@@ -17,44 +17,23 @@ from typing import Iterable, Tuple
 
 
 def build_cover_selection_paths(
-    unc_base_path: str,
-    base_path: str,
+    parent_unc_path: PureWindowsPath,
+    parent_filesystem_path: Path,
     theme_number: int,
     colour_number: int,
-) -> Tuple[Path, Path]:
-    """Return the UNC path and filesystem path for the requested selection.
+) -> Tuple[PureWindowsPath, Path]:
+    """Return the UNC and filesystem directories for ``theme_number``/``colour_number``."""
 
-    Parameters
-    ----------
-    unc_base_path:
-        The root of the selection folder on the network share. The string
-        should use doubled backslashes or a raw string literal, for example::
+    segments = [
+        f"{theme_number} Theme",
+        f"Theme {theme_number}",
+        f"Colour{colour_number}"
+    ]
 
-            r"\\\pixartnas\home\Project ABC"
+    unc_path = parent_unc_path.joinpath(*segments)
+    filesystem_path = parent_filesystem_path.joinpath(*segments)
 
-    base_path:
-        The local filesystem root that mirrors the UNC share (if applicable).
-
-    theme_number / colour_number:
-        The numeric identifiers used to construct the folder name segments.
-
-    Returns
-    -------
-    tuple(Path, Path)
-        ``(selection_unc_path, selection_fs_path)``
-    """
-
-    # Guard against accidental interpretation of escape sequences by always
-    # working with ``PureWindowsPath`` for UNC handling and feeding only
-    # strings to ``Path``.
-    unc_root = PureWindowsPath(unc_base_path)
-    theme_component = f"Theme {theme_number:02d}"
-    colour_component = f"Colour {colour_number:02d}"
-
-    selection_unc_path = Path(str(unc_root.joinpath(theme_component, colour_component)))
-    selection_fs_path = Path(base_path).joinpath(theme_component, colour_component)
-
-    return selection_unc_path, selection_fs_path
+    return unc_path, filesystem_path
 
 
 def debug_path(path: Path) -> None:
