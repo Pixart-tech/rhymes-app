@@ -115,34 +115,14 @@ const resolveErrorMessage = (error) => {
   return 'An unexpected error occurred.';
 };
 
-const readFileAsDataUrl = (file) =>
-  new Promise((resolve, reject) => {
-    if (!file) {
-      resolve('');
-      return;
-    }
-
-    if (typeof FileReader === 'undefined') {
-      reject(new Error('FileReader is not supported in this environment.'));
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      resolve(result);
-    };
-    reader.onerror = () => {
-      reject(reader.error || new Error('Unable to read file.'));
-    };
-    reader.onabort = () => {
-      reject(new Error('File reading was aborted.'));
-    };
-
-    reader.readAsDataURL(file);
-  });
-
-const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogout }) => {
+const CoverPageWorkflow = ({
+  school,
+  grade,
+  onBackToGrades,
+  onBackToMode,
+  onLogout,
+  coverDefaults
+}) => {
   const [selectedThemeId, setSelectedThemeId] = useState(null);
   const [selectedColourId, setSelectedColourId] = useState(null);
 
@@ -151,21 +131,20 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   const [assetError, setAssetError] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [personalisation, setPersonalisation] = useState({
-    schoolLogo: '',
+    schoolLogo: coverDefaults?.schoolLogo || '',
     gradeName: '',
-    kidName: '',
+    kidName: coverDefaults?.kidName || '',
     addressLine1: '',
     addressLine2: '',
     addressLine3: '',
-    contactNumber: '',
-    website: '',
+    contactNumber: coverDefaults?.contactNumber || '',
+    website: coverDefaults?.website || '',
     tagLine1: '',
     tagLine2: '',
     tagLine3: ''
   });
   const [gradeNameDirty, setGradeNameDirty] = useState(false);
-  const [schoolLogoFileName, setSchoolLogoFileName] = useState('');
-  const [schoolLogoError, setSchoolLogoError] = useState('');
+  const schoolLogoFileName = coverDefaults?.schoolLogoFileName || '';
 
   const [currentStep, setCurrentStep] = useState(1);
   const [hasSubmittedDetails, setHasSubmittedDetails] = useState(false);
@@ -176,6 +155,17 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   const gradeLabel = useMemo(() => {
     return GRADE_LABELS[grade] || grade?.toUpperCase() || 'Grade';
   }, [grade]);
+
+
+  useEffect(() => {
+    setPersonalisation((current) => ({
+      ...current,
+      schoolLogo: coverDefaults?.schoolLogo || '',
+      kidName: coverDefaults?.kidName || '',
+      contactNumber: coverDefaults?.contactNumber || '',
+      website: coverDefaults?.website || ''
+    }));
+  }, [coverDefaults]);
 
 
   useEffect(() => {
@@ -402,43 +392,7 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
   }, [activeIndex, previewCount]);
 
   const handlePersonalisationChange = useCallback(
-    (field) => async (event) => {
-      if (field === 'schoolLogo') {
-        const input = event?.target;
-        const file = input?.files?.[0] || null;
-
-        if (!file) {
-          setPersonalisation((current) => ({ ...current, schoolLogo: '' }));
-          setSchoolLogoFileName('');
-          setSchoolLogoError('');
-        } else if (file.type && !file.type.startsWith('image/')) {
-          setPersonalisation((current) => ({ ...current, schoolLogo: '' }));
-          setSchoolLogoFileName('');
-          setSchoolLogoError('Please upload an image file for the school logo.');
-        } else {
-          try {
-            const dataUrl = await readFileAsDataUrl(file);
-            setPersonalisation((current) => ({ ...current, schoolLogo: dataUrl.trim() }));
-            setSchoolLogoFileName(file.name);
-            setSchoolLogoError('');
-          } catch (error) {
-            setPersonalisation((current) => ({ ...current, schoolLogo: '' }));
-            setSchoolLogoFileName('');
-            setSchoolLogoError('We could not read that image. Please try a different file.');
-          }
-        }
-
-        if (hasSubmittedDetails) {
-          setHasSubmittedDetails(false);
-        }
-
-        if (input) {
-          input.value = '';
-        }
-
-        return;
-      }
-
+    (field) => (event) => {
       const value = event?.target?.value ?? '';
       setPersonalisation((current) => ({
         ...current,
@@ -610,38 +564,88 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
           <form onSubmit={handlePreviewRequest} className="space-y-6">
             <Card className="border-none bg-white/80 shadow-sm shadow-orange-100/40">
               <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm text-slate-600">
-                <p>Complete the school details below to personalise every cover automatically.</p>
+                <p>
+                  Review the common school details below. These are reused for every grade and can be
+                  updated from the grade selection screen.
+                </p>
                 <Button type="button" variant="outline" onClick={handleBackToSelection}>
                   Change theme or colour
                 </Button>
               </CardContent>
             </Card>
 
+            <Card className="border-none bg-white/85 shadow-sm shadow-orange-100/60">
+              <CardHeader className="space-y-2">
+                <CardTitle className="text-xl font-semibold text-slate-900">
+                  Common cover details
+                </CardTitle>
+                <p className="text-sm text-slate-600">
+                  These details were captured before choosing the grade. Go back to the grade list if you
+                  need to make any changes.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Kid name</p>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {personalisation.kidName || 'Not provided'}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      School contact number
+                    </p>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {personalisation.contactNumber || 'Not provided'}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Website</p>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {personalisation.website || 'Not provided'}
+                    </p>
+                  </div>
+                  <div className="space-y-2 md:col-span-2 lg:col-span-1">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">School logo</p>
+                    {personalisation.schoolLogo ? (
+                      <div className="flex items-center gap-3 rounded-md border border-orange-100 bg-orange-50/60 p-3">
+                        <img
+                          src={personalisation.schoolLogo}
+                          alt="School logo"
+                          className="h-16 w-16 rounded-md border border-white object-contain bg-white"
+                        />
+                        <div>
+                          <p className="text-sm font-medium text-slate-800">
+                            {schoolLogoFileName || 'Logo image'}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            To update the logo, return to the grade selection screen.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-orange-200 bg-orange-50/40 p-4 text-sm text-slate-500">
+                        No logo uploaded yet. Return to the grade selection screen to add one.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card className="border-none shadow-xl shadow-orange-100/60">
               <CardHeader className="space-y-2">
-                <CardTitle className="text-xl font-semibold text-slate-900">Cover details</CardTitle>
+                <CardTitle className="text-xl font-semibold text-slate-900">
+                  Grade specific details
+                </CardTitle>
                 <p className="text-sm text-slate-600">
-                  Personalise the cover by filling in the school information below. The values you enter
-                  will be merged into the SVG artwork before it appears in the carousel.
+                  Provide the remaining information that is unique to this grade. It will be merged into the
+                  SVG artwork before it appears in the carousel.
                 </p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="cover-personalisation-grid two-column">
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-school-logo">Upload school logo image</Label>
-                    <Input
-                      id="cover-school-logo"
-                      type="file"
-                      accept="image/*"
-                      onChange={handlePersonalisationChange('schoolLogo')}
-                    />
-                    {schoolLogoFileName && !schoolLogoError && (
-                      <p className="mt-1 text-xs text-slate-500">Selected file: {schoolLogoFileName}</p>
-                    )}
-                    {schoolLogoError && (
-                      <p className="mt-1 text-xs text-red-600">{schoolLogoError}</p>
-                    )}
-                  </div>
                   <div className="cover-form-field">
                     <Label htmlFor="cover-grade-name">Grade name</Label>
                     <Input
@@ -649,15 +653,6 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                       placeholder="e.g. UKG"
                       value={personalisation.gradeName}
                       onChange={handlePersonalisationChange('gradeName')}
-                    />
-                  </div>
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-kid-name">Kid name</Label>
-                    <Input
-                      id="cover-kid-name"
-                      placeholder="Kid name"
-                      value={personalisation.kidName}
-                      onChange={handlePersonalisationChange('kidName')}
                     />
                   </div>
                   <div className="cover-form-field">
@@ -685,26 +680,6 @@ const CoverPageWorkflow = ({ school, grade, onBackToGrades, onBackToMode, onLogo
                       placeholder="Address line 3"
                       value={personalisation.addressLine3}
                       onChange={handlePersonalisationChange('addressLine3')}
-                    />
-                  </div>
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-contact-number">School contact number</Label>
-                    <Input
-                      id="cover-contact-number"
-                      type="tel"
-                      inputMode="tel"
-                      placeholder="Contact number"
-                      value={personalisation.contactNumber}
-                      onChange={handlePersonalisationChange('contactNumber')}
-                    />
-                  </div>
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-website">Website</Label>
-                    <Input
-                      id="cover-website"
-                      placeholder="e.g. www.edplore.com"
-                      value={personalisation.website}
-                      onChange={handlePersonalisationChange('website')}
                     />
                   </div>
                   <div className="cover-form-field">
