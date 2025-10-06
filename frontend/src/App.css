@@ -133,12 +133,12 @@ body {
 }
 
 .a4-preview {
-  width: clamp(260px, 58vw, 720px);
+  width: clamp(240px, 75vw, 560px);
   height: auto;
-  max-height: min(calc(100vh - 140px), 980px);
+  max-height: min(calc(100vh - 120px), 900px);
   background: #fff;
-  border-radius: 28px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0;
+  border: 2px solid #000000;
   box-shadow: 0 34px 70px -30px rgba(15, 23, 42, 0.35);
 
   transition: width 0.4s ease, height 0.4s ease, box-shadow 0.4s ease;
@@ -147,11 +147,10 @@ body {
 
 @media (max-width: 1024px) {
   .a4-preview {
-
     width: clamp(240px, 75vw, 560px);
     height: auto;
     max-height: min(calc(100vh - 120px), 900px);
-    border-radius: 24px;
+    border-radius: 0;
   }
 }
 
@@ -160,6 +159,7 @@ body {
     width: 100%;
     height: auto;
     min-height: 540px;
+    border-radius: 0;
   }
 }
 
@@ -169,7 +169,7 @@ body {
   flex: 1 1 auto;
   height: 100%;
   aspect-ratio: 210 / 297;
-  width: auto;
+  width: 100%;
   max-width: 100%;
   align-self: center;
   background: #ffffff;
@@ -177,6 +177,10 @@ body {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   overflow: hidden;
   gap: 0;
+}
+
+.rhyme-slot + .rhyme-slot {
+  border-top: 2px solid #000000;
 }
 
 .rhyme-slot {
