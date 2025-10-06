@@ -29,11 +29,13 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(project_root))
     from backend.app import unc_path_utils
 
-    from backend.app import config, rhymes, svg_processing  # type: ignore
+    from backend.app import auth, config, rhymes, svg_processing  # type: ignore
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
-    from .app import config, rhymes, svg_processing
+    from .app import auth, config, rhymes, svg_processing
     from .app.svg_processing import SvgDocument as _SvgDocument
+
+School = auth.School
 
 logger = logging.getLogger(__name__)
 
@@ -201,21 +203,10 @@ def _load_pdf_dependencies() -> _PdfResources:
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
+api_router.include_router(auth.create_auth_router(db))
 
 
 # Models
-class School(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    school_id: str
-    school_name: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-
-
-class SchoolCreate(BaseModel):
-    school_id: str
-    school_name: str
-
-
 class RhymeSelection(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     school_id: str
@@ -256,22 +247,6 @@ class SchoolWithSelections(School):
     total_selections: int = 0
     last_updated: Optional[datetime] = None
     grades: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
-
-
-# Authentication endpoints
-@api_router.post("/auth/login", response_model=School)
-async def login_school(input: SchoolCreate):
-    # Check if school already exists
-    existing_school = await db.schools.find_one({"school_id": input.school_id})
-
-    if existing_school:
-        return School(**existing_school)
-
-    # Create new school entry
-    school_dict = input.dict()
-    school_obj = School(**school_dict)
-    await db.schools.insert_one(school_obj.dict())
-    return school_obj
 
 
 # Rhymes data endpoints
