@@ -27,6 +27,7 @@ if __package__ in {None, ""}:
     project_root = current_dir.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
+    from backend.app import unc_path_utils
 
     from backend.app import config, rhymes, svg_processing  # type: ignore
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
@@ -732,15 +733,17 @@ async def get_cover_assets_network_paths(selection_key: str):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    selection_unc_path, selection_fs_path = config.build_cover_selection_paths(
+    selection_unc_path, selection_fs_path = unc_path_utils.build_cover_selection_paths(
         unc_base_path, base_path, theme_number, colour_number
     )
     
 
     try:
+        print(selection_fs_path)
         exists = Path(selection_fs_path).exists()
-        print(exists)
+       
         is_directory = selection_fs_path.is_dir()
+        
     except OSError as exc:
         logger.error("Unable to access cover SVG directory %s: %s", selection_fs_path, exc)
         raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
