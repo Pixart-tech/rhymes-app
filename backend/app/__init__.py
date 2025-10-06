@@ -6,9 +6,10 @@ structure keeps the deployment entry-point stable while allowing the codebase
 to grow in a maintainable fashion.
 """
 
-from . import config, rhymes, svg_processing
+from . import auth, config, rhymes, svg_processing
 
 __all__ = [
+    "auth",
     "config",
     "rhymes",
     "svg_processing",
