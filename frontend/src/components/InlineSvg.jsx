@@ -2,14 +2,18 @@ import React, { useMemo } from 'react';
 import { cn } from '../lib/utils';
 import { sanitizeRhymeSvgContent } from '../lib/svgUtils';
 
-const InlineSvg = ({
-  markup,
-  className,
-  ariaLabel,
-  role,
-  sanitize = true,
-  emptyFallback = null
-}) => {
+const InlineSvg = React.forwardRef(
+  (
+    {
+      markup,
+      className,
+      ariaLabel,
+      role,
+      sanitize = true,
+      emptyFallback = null
+    },
+    ref
+  ) => {
   const processedMarkup = useMemo(() => {
     if (typeof markup !== 'string') {
       return '';
@@ -39,12 +43,16 @@ const InlineSvg = ({
 
   return (
     <div
+      ref={ref}
       className={cn('inline-svg-renderer', className)}
       role={resolvedRole}
       aria-label={ariaLabel}
       dangerouslySetInnerHTML={{ __html: processedMarkup }}
     />
   );
-};
+}
+);
+
+InlineSvg.displayName = 'InlineSvg';
 
 export default InlineSvg;

@@ -134,6 +134,7 @@ const CoverPageWorkflow = ({
     schoolLogo: coverDefaults?.schoolLogo || '',
     gradeName: '',
     kidName: coverDefaults?.kidName || '',
+    email: '',
     addressLine1: '',
     addressLine2: '',
     addressLine3: '',
@@ -141,15 +142,20 @@ const CoverPageWorkflow = ({
     website: coverDefaults?.website || '',
     tagLine1: '',
     tagLine2: '',
-    tagLine3: ''
+    tagLine3: '',
+    kidPhoto: ''
   });
   const [gradeNameDirty, setGradeNameDirty] = useState(false);
+  const [kidPhotoFileName, setKidPhotoFileName] = useState('');
   const schoolLogoFileName = coverDefaults?.schoolLogoFileName || '';
 
   const [currentStep, setCurrentStep] = useState(1);
   const [hasSubmittedDetails, setHasSubmittedDetails] = useState(false);
 
   const assetCacheRef = useRef(new Map());
+  const svgPreviewRef = useRef(null);
+  const svgCarouselRef = useRef(null);
+  const kidPhotoInputRef = useRef(null);
   const coverAssetsNetworkBaseUrl = useMemo(resolveCoverAssetsNetworkBaseUrl, []);
 
   const gradeLabel = useMemo(() => {
@@ -226,6 +232,7 @@ const CoverPageWorkflow = ({
       schoolLogo: personalisation.schoolLogo.trim(),
       gradeName: personalisation.gradeName.trim(),
       kidName: personalisation.kidName.trim(),
+      email: personalisation.email.trim(),
       addressLine1: personalisation.addressLine1.trim(),
       addressLine2: personalisation.addressLine2.trim(),
       addressLine3: personalisation.addressLine3.trim(),
@@ -233,7 +240,8 @@ const CoverPageWorkflow = ({
       website: personalisation.website.trim(),
       tagLine1: personalisation.tagLine1.trim(),
       tagLine2: personalisation.tagLine2.trim(),
-      tagLine3: personalisation.tagLine3.trim()
+      tagLine3: personalisation.tagLine3.trim(),
+      kidPhoto: personalisation.kidPhoto
     }),
     [personalisation]
   );
@@ -413,6 +421,87 @@ const CoverPageWorkflow = ({
     [hasSubmittedDetails]
   );
 
+  const handleKidPhotoChange = useCallback(
+    (event) => {
+      const file = event?.target?.files?.[0];
+
+      if (!file) {
+        setKidPhotoFileName('');
+        setPersonalisation((current) => ({
+          ...current,
+          kidPhoto: ''
+        }));
+
+        if (hasSubmittedDetails) {
+          setHasSubmittedDetails(false);
+        }
+
+        return;
+      }
+
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        const result = reader.result;
+        const imageValue = typeof result === 'string' ? result : '';
+
+        setPersonalisation((current) => ({
+          ...current,
+          kidPhoto: imageValue
+        }));
+
+        if (!imageValue) {
+          setKidPhotoFileName('');
+        }
+
+        if (hasSubmittedDetails) {
+          setHasSubmittedDetails(false);
+        }
+
+        if (kidPhotoInputRef.current) {
+          kidPhotoInputRef.current.value = '';
+        }
+      };
+
+      reader.onerror = () => {
+        console.error('Unable to read kid photo file.');
+        setKidPhotoFileName('');
+        setPersonalisation((current) => ({
+          ...current,
+          kidPhoto: ''
+        }));
+
+        if (hasSubmittedDetails) {
+          setHasSubmittedDetails(false);
+        }
+
+        if (kidPhotoInputRef.current) {
+          kidPhotoInputRef.current.value = '';
+        }
+      };
+
+      reader.readAsDataURL(file);
+      setKidPhotoFileName(file.name);
+    },
+    [hasSubmittedDetails]
+  );
+
+  const handleKidPhotoClear = useCallback(() => {
+    setKidPhotoFileName('');
+    setPersonalisation((current) => ({
+      ...current,
+      kidPhoto: ''
+    }));
+
+    if (kidPhotoInputRef.current) {
+      kidPhotoInputRef.current.value = '';
+    }
+
+    if (hasSubmittedDetails) {
+      setHasSubmittedDetails(false);
+    }
+  }, [hasSubmittedDetails]);
+
   const activeAsset = previewAssets[activeIndex] || null;
 
   const canProceedToDetails = Boolean(selectedTheme && selectedColour);
@@ -442,6 +531,142 @@ const CoverPageWorkflow = ({
     'Preview covers'
   ];
   const currentStepLabel = stepLabels[currentStep - 1] || stepLabels[0];
+
+  const applySvgPersonalisation = useCallback(
+    (container) => {
+      if (!container) {
+        return;
+      }
+
+      const svgElement = container.querySelector('svg');
+      if (!svgElement) {
+        return;
+      }
+
+      const updateGroupText = (groupId, value, textIndex = 0) => {
+        const group = svgElement.querySelector(`g#${groupId}`);
+        if (!group) {
+          return false;
+        }
+
+        const textNodes = group.querySelectorAll('text');
+        if (!textNodes.length) {
+          return false;
+        }
+
+        const safeIndex = Math.min(textIndex, textNodes.length - 1);
+        textNodes[safeIndex].textContent = value || '';
+        return true;
+      };
+
+      updateGroupText('Grade', trimmedPersonalisation.gradeName);
+      updateGroupText('Name', trimmedPersonalisation.kidName);
+      updateGroupText('Add_1', trimmedPersonalisation.addressLine1);
+      updateGroupText('Add_2', trimmedPersonalisation.addressLine2);
+      updateGroupText('Add_3', trimmedPersonalisation.addressLine3);
+      updateGroupText('website', trimmedPersonalisation.website);
+      updateGroupText('Tag_1', trimmedPersonalisation.tagLine1);
+      updateGroupText('Tag_2', trimmedPersonalisation.tagLine2);
+      updateGroupText('Tag_3', trimmedPersonalisation.tagLine3);
+      updateGroupText('Contact__x2C__Email', trimmedPersonalisation.contactNumber, 0);
+
+      const emailHandled =
+        updateGroupText('Email', trimmedPersonalisation.email) ||
+        (() => {
+          const contactGroup = svgElement.querySelector('g#Contact__x2C__Email');
+          if (!contactGroup) {
+            return false;
+          }
+
+          const contactTextNodes = contactGroup.querySelectorAll('text');
+          if (!contactTextNodes.length) {
+            return false;
+          }
+
+          if (contactTextNodes.length > 1) {
+            contactTextNodes[1].textContent = trimmedPersonalisation.email || '';
+            return true;
+          }
+
+          const combined = [
+            trimmedPersonalisation.contactNumber,
+            trimmedPersonalisation.email
+          ]
+            .filter((token) => token)
+            .join(' | ');
+
+          contactTextNodes[0].textContent = combined;
+          return true;
+        })();
+
+      if (!emailHandled) {
+        updateGroupText('ContactEmail', trimmedPersonalisation.email);
+      }
+
+      const updateImageById = (identifier, value) => {
+        if (!identifier) {
+          return false;
+        }
+
+        let imageElement = svgElement.querySelector(`g#${identifier} image`);
+        if (!imageElement) {
+          imageElement = svgElement.querySelector(`image#${identifier}`);
+        }
+        if (!imageElement) {
+          const fallback = svgElement.querySelector(`#${identifier}`);
+          if (fallback?.tagName?.toLowerCase() === 'image') {
+            imageElement = fallback;
+          }
+        }
+
+        if (!imageElement) {
+          return false;
+        }
+
+        if (value) {
+          imageElement.setAttribute('href', value);
+          imageElement.setAttribute('xlink:href', value);
+        } else {
+          imageElement.removeAttribute('href');
+          imageElement.removeAttribute('xlink:href');
+        }
+
+        return true;
+      };
+
+      updateImageById('_Logo_1', trimmedPersonalisation.schoolLogo);
+      updateImageById('kid_photo', trimmedPersonalisation.kidPhoto);
+    },
+    [trimmedPersonalisation]
+  );
+
+  useEffect(() => {
+    const containers = [svgPreviewRef.current, svgCarouselRef.current].filter(Boolean);
+
+    if (!containers.length) {
+      return undefined;
+    }
+
+    if (typeof requestAnimationFrame !== 'function') {
+      containers.forEach(applySvgPersonalisation);
+      return undefined;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      containers.forEach(applySvgPersonalisation);
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [
+    applySvgPersonalisation,
+    activeAsset?.personalisedMarkup,
+    activeAsset?.svgMarkup,
+    activeIndex,
+    currentStep,
+    hasSubmittedDetails
+  ]);
 
 
   return (
@@ -645,6 +870,16 @@ const CoverPageWorkflow = ({
               <CardContent className="space-y-4">
                 <div className="cover-personalisation-grid two-column">
                   <div className="cover-form-field">
+                    <Label htmlFor="cover-email">Email</Label>
+                    <Input
+                      id="cover-email"
+                      type="email"
+                      placeholder="e.g. hello@school.com"
+                      value={personalisation.email}
+                      onChange={handlePersonalisationChange('email')}
+                    />
+                  </div>
+                  <div className="cover-form-field">
                     <Label htmlFor="cover-grade-name">Grade name</Label>
                     <Input
                       id="cover-grade-name"
@@ -652,6 +887,41 @@ const CoverPageWorkflow = ({
                       value={personalisation.gradeName}
                       onChange={handlePersonalisationChange('gradeName')}
                     />
+                  </div>
+                  <div className="cover-form-field md:col-span-2">
+                    <Label htmlFor="cover-kid-photo">Kid photo</Label>
+                    <div className="space-y-3">
+                      <Input
+                        id="cover-kid-photo"
+                        type="file"
+                        accept="image/*"
+                        ref={kidPhotoInputRef}
+                        onChange={handleKidPhotoChange}
+                      />
+                      <p className="text-xs text-slate-500">
+                        Upload a clear image (PNG or JPG) for the kid portrait placeholder.
+                      </p>
+                      {personalisation.kidPhoto && (
+                        <div className="flex flex-wrap items-center gap-4 rounded-md border border-orange-100 bg-orange-50/60 p-3">
+                          <img
+                            src={personalisation.kidPhoto}
+                            alt="Kid preview"
+                            className="h-20 w-20 rounded-md border border-white object-cover"
+                          />
+                          <div className="space-y-2">
+                            {kidPhotoFileName && (
+                              <p className="text-sm font-medium text-slate-800">{kidPhotoFileName}</p>
+                            )}
+                            <Button type="button" variant="outline" size="sm" onClick={handleKidPhotoClear}>
+                              Remove photo
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {!personalisation.kidPhoto && kidPhotoFileName && (
+                        <p className="text-xs font-medium text-slate-700">{kidPhotoFileName}</p>
+                      )}
+                    </div>
                   </div>
                   <div className="cover-form-field">
                     <Label htmlFor="cover-address-line-1">Address line 1</Label>
@@ -740,6 +1010,7 @@ const CoverPageWorkflow = ({
                           markup={activeAsset.personalisedMarkup || activeAsset.svgMarkup}
                           className="mx-auto max-h-72 min-h-[180px] w-full overflow-hidden rounded border border-emerald-100 bg-white shadow-sm"
                           sanitize={false}
+                          ref={svgPreviewRef}
                         />
                       </div>
                     </div>
@@ -811,6 +1082,7 @@ const CoverPageWorkflow = ({
                           className="cover-carousel-image"
                           ariaLabel={`Cover design ${activeIndex + 1}`}
                           sanitize={false}
+                          ref={svgCarouselRef}
                         />
                       </div>
                     </div>
