@@ -138,7 +138,7 @@ body {
   max-height: min(calc(100vh - 120px), 900px);
   background: #fff;
   border-radius: 0;
-  border: 2px solid #000000;
+  
   box-shadow: 0 34px 70px -30px rgba(15, 23, 42, 0.35);
 
   transition: width 0.4s ease, height 0.4s ease, box-shadow 0.4s ease;
