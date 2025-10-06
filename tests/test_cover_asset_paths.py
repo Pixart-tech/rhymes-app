@@ -57,6 +57,7 @@ if "pydantic" not in sys.modules:
     sys.modules["pydantic"] = pydantic_stub
 
 from backend.app import config
+import backend.app.unc_path_utils as unc_path_utils
 
 
 def test_build_cover_selection_paths_matches_packaged_structure():
@@ -71,4 +72,27 @@ def test_build_cover_selection_paths_matches_packaged_structure():
     assert unc_path == expected_unc
     assert fs_path == expected_fs
 
+
+def test_format_unc_path_collapses_extra_leading_backslashes():
+    raw_path = r"\\\\pixartnas\home\Project ABC\folder\file.svg"
+    normalized = unc_path_utils.format_unc_path(raw_path)
+
+    assert normalized == r"\\pixartnas\home\Project ABC\folder\file.svg"
+
+
+def test_format_unc_path_preserves_unc_long_path_prefix():
+    raw_path = r"\\\\?\\UNC\\pixartnas\share\file.svg"
+    normalized = unc_path_utils.format_unc_path(raw_path)
+
+    assert normalized.split("\\") == [
+        "",
+        "",
+        "?",
+        "",
+        "UNC",
+        "",
+        "pixartnas",
+        "share",
+        "file.svg",
+    ]
 

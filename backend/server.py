@@ -27,12 +27,10 @@ if __package__ in {None, ""}:
     project_root = current_dir.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from backend.app import unc_path_utils
-
-    from backend.app import auth, config, rhymes, svg_processing  # type: ignore
+    from backend.app import auth, config, rhymes, svg_processing, unc_path_utils  # type: ignore
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
-    from .app import auth, config, rhymes, svg_processing
+    from .app import auth, config, rhymes, svg_processing, unc_path_utils
     from .app.svg_processing import SvgDocument as _SvgDocument
 
 School = auth.School
@@ -90,6 +88,20 @@ def _normalize_cors_origin(origin: str) -> Optional[str]:
 
 def _parse_csv(value: Optional[str], *, default: Optional[List[str]] = None) -> List[str]:
     return config._parse_csv(value, default=default)
+
+
+def _as_windows_relative_path(base_path: Path, target_path: Path) -> str:
+    """Return ``target_path`` as a Windows-style path relative to ``base_path``."""
+
+    try:
+        relative = target_path.relative_to(base_path)
+    except ValueError:
+        return target_path.name
+
+    if not relative.parts:
+        return target_path.name
+
+    return str(PureWindowsPath(*relative.parts))
 
 # MongoDB connection
 mongo_url = os.environ["MONGO_URL"]
@@ -697,7 +709,7 @@ async def get_rhyme_svg(rhyme_code: str):
 
 @api_router.get("/cover-assets/network/{selection_key}")
 async def get_cover_assets_network_paths(selection_key: str):
-    """Return UNC paths for every SVG within the requested theme/colour folder."""
+    """Return raw SVG markup for every file within the requested theme/colour folder."""
 
     base_path = _ensure_cover_assets_base_path()
     unc_base_path = _get_cover_assets_unc_base_path()
@@ -738,13 +750,45 @@ async def get_cover_assets_network_paths(selection_key: str):
         logger.error("Unable to read cover SVG directory %s: %s", selection_fs_path, exc)
         raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
 
-    assets = [
-        {
-            "fileName": svg_file.name,
-            "uncPath": str(selection_unc_path / svg_file.name),
-        }
-        for svg_file in svg_files
-    ]
+    assets = []
+
+    for svg_file in svg_files:
+        # Build a raw UNC string (for example r"\\pixartnas\share\folder") so the
+        # network lookup uses the exact Windows path supplied by administrators.
+        network_file = unc_path_utils.format_unc_path(selection_unc_path / svg_file.name)
+        svg_markup: Optional[str] = None
+
+        try:
+            with open(network_file, "r", encoding="utf-8") as handle:
+                svg_markup = handle.read()
+        except OSError as exc:
+            logger.warning(
+                "Unable to read cover SVG '%s' via network path %s: %s. Falling back to local mirror.",
+                svg_file.name,
+                network_file,
+                exc,
+            )
+
+        if svg_markup is None:
+            try:
+                svg_markup = svg_file.read_text(encoding="utf-8")
+            except OSError as exc:
+                logger.error(
+                    "Unable to read cover SVG '%s' from local path %s: %s",
+                    svg_file.name,
+                    svg_file,
+                    exc,
+                )
+                raise HTTPException(status_code=500, detail="Unable to load cover SVG files.") from exc
+
+        assets.append(
+            {
+                "fileName": svg_file.name,
+                "relativePath": _as_windows_relative_path(base_path, svg_file),
+                "svgMarkup": svg_markup,
+                "personalisedMarkup": "",
+            }
+        )
 
     return {"assets": assets}
 

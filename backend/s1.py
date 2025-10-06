@@ -28,10 +28,10 @@ if __package__ in {None, ""}:
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-    from backend.app import config, rhymes, svg_processing  # type: ignore
+    from backend.app import config, rhymes, svg_processing, unc_path_utils  # type: ignore
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
-    from .app import config, rhymes, svg_processing
+    from .app import config, rhymes, svg_processing, unc_path_utils
     from .app.svg_processing import SvgDocument as _SvgDocument
 
 logger = logging.getLogger(__name__)
@@ -764,7 +764,9 @@ async def get_cover_assets_network_paths(selection_key: str):
     assets = [
         {
             "fileName": svg_file.name,
-            "uncPath": str(selection_unc_path / svg_file.name),
+            "uncPath": unc_path_utils.format_unc_path(
+                selection_unc_path / svg_file.name
+            ),
         }
         for svg_file in svg_files
     ]
