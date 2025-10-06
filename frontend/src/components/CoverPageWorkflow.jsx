@@ -252,7 +252,10 @@ const CoverPageWorkflow = ({
         coverAssetsNetworkBaseUrl,
         encodeURIComponent(selectionKey)
       );
+      console.log('Fetching cover assets from:', requestUrl);
       const response = await axios.get(requestUrl);
+      console.log(response)
+      
       const rawAssets = response?.data?.assets;
 
       const sanitizedAssets = [];
@@ -586,12 +589,7 @@ const CoverPageWorkflow = ({
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Kid name</p>
-                    <p className="text-sm font-semibold text-slate-800">
-                      {personalisation.kidName || 'Not provided'}
-                    </p>
-                  </div>
+                  
                   <div className="space-y-1">
                     <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                       School contact number

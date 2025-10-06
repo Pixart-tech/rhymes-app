@@ -519,15 +519,7 @@ const GradeSelectionPage = ({
               {isEditingCoverDefaults ? (
                 <form onSubmit={handleSaveCoverDefaults} className="space-y-4">
                   <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="cover-default-kid-name">Kid name</Label>
-                      <Input
-                        id="cover-default-kid-name"
-                        placeholder="Kid name"
-                        value={coverFormState.kidName}
-                        onChange={handleCoverDefaultsChange('kidName')}
-                      />
-                    </div>
+                    
                     <div className="space-y-2">
                       <Label htmlFor="cover-default-contact">School contact number</Label>
                       <Input
