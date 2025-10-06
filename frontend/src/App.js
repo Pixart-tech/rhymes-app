@@ -7,6 +7,7 @@ import './App.css';
 // Components
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
+import { Label } from './components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Badge } from './components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible';
@@ -17,6 +18,7 @@ import CoverPageWorkflow from './components/CoverPageWorkflow';
 import InlineSvg from './components/InlineSvg';
 import { API_BASE_URL } from './lib/utils';
 import { decodeSvgPayload, sanitizeRhymeSvgContent } from './lib/svgUtils';
+import { readFileAsDataUrl } from './lib/fileUtils';
 
 
 // Icons
@@ -44,6 +46,14 @@ const GRADE_OPTIONS = [
   { id: 'ukg', name: 'UKG', color: 'from-green-400 to-emerald-400', icon: '🌟' },
   { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' }
 ];
+
+const DEFAULT_COVER_DEFAULTS = {
+  schoolLogo: '',
+  schoolLogoFileName: '',
+  kidName: '',
+  contactNumber: '',
+  website: ''
+};
 
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
@@ -211,10 +221,147 @@ const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
 };
 
 // Grade Selection Page
-const GradeSelectionPage = ({ school, mode, onGradeSelect, onLogout, onBackToMode }) => {
+const GradeSelectionPage = ({
+  school,
+  mode,
+  onGradeSelect,
+  onLogout,
+  onBackToMode,
+  coverDefaults,
+  onUpdateCoverDefaults
+}) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const isCoverMode = mode === 'cover';
+
+  const [coverFormState, setCoverFormState] = useState(() => ({
+    schoolLogo: coverDefaults?.schoolLogo || '',
+    schoolLogoFileName: coverDefaults?.schoolLogoFileName || '',
+    kidName: coverDefaults?.kidName || '',
+    contactNumber: coverDefaults?.contactNumber || '',
+    website: coverDefaults?.website || ''
+  }));
+  const [coverFormError, setCoverFormError] = useState('');
+  const [coverLogoError, setCoverLogoError] = useState('');
+
+  const coverDefaultsComplete = useMemo(() => {
+    if (!isCoverMode) {
+      return true;
+    }
+
+    return Boolean(
+      (coverDefaults?.schoolLogo || '').trim() &&
+        (coverDefaults?.kidName || '').trim() &&
+        (coverDefaults?.contactNumber || '').trim() &&
+        (coverDefaults?.website || '').trim()
+    );
+  }, [coverDefaults, isCoverMode]);
+
+  const [isEditingCoverDefaults, setIsEditingCoverDefaults] = useState(!coverDefaultsComplete);
+
+  useEffect(() => {
+    setCoverFormState({
+      schoolLogo: coverDefaults?.schoolLogo || '',
+      schoolLogoFileName: coverDefaults?.schoolLogoFileName || '',
+      kidName: coverDefaults?.kidName || '',
+      contactNumber: coverDefaults?.contactNumber || '',
+      website: coverDefaults?.website || ''
+    });
+  }, [coverDefaults]);
+
+  useEffect(() => {
+    setIsEditingCoverDefaults(!coverDefaultsComplete);
+  }, [coverDefaultsComplete]);
+
+  const handleCoverDefaultsChange = useCallback(
+    (field) => (event) => {
+      const value = event?.target?.value ?? '';
+      setCoverFormState((current) => ({
+        ...current,
+        [field]: value
+      }));
+      setCoverFormError('');
+    },
+    []
+  );
+
+  const handleCoverLogoUpload = useCallback(async (event) => {
+    const input = event?.target;
+    const file = input?.files?.[0] || null;
+
+    if (!file) {
+      setCoverFormState((current) => ({ ...current, schoolLogo: '', schoolLogoFileName: '' }));
+      setCoverLogoError('');
+    } else if (file.type && !file.type.startsWith('image/')) {
+      setCoverFormState((current) => ({ ...current, schoolLogo: '', schoolLogoFileName: '' }));
+      setCoverLogoError('Please upload an image file for the school logo.');
+    } else {
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        setCoverFormState((current) => ({
+          ...current,
+          schoolLogo: dataUrl.trim(),
+          schoolLogoFileName: file.name
+        }));
+        setCoverLogoError('');
+      } catch (error) {
+        setCoverFormState((current) => ({ ...current, schoolLogo: '', schoolLogoFileName: '' }));
+        setCoverLogoError('We could not read that image. Please try a different file.');
+      }
+    }
+
+    if (input) {
+      input.value = '';
+    }
+  }, []);
+
+  const handleSaveCoverDefaults = useCallback(
+    (event) => {
+      event?.preventDefault();
+
+      const trimmedKidName = coverFormState.kidName.trim();
+      const trimmedContact = coverFormState.contactNumber.trim();
+      const trimmedWebsite = coverFormState.website.trim();
+
+      if (!coverFormState.schoolLogo || !trimmedKidName || !trimmedContact || !trimmedWebsite) {
+        setCoverFormError('Please provide a school logo, kid name, contact number and website.');
+        return;
+      }
+
+      if (typeof onUpdateCoverDefaults === 'function') {
+        onUpdateCoverDefaults({
+          schoolLogo: coverFormState.schoolLogo,
+          schoolLogoFileName: coverFormState.schoolLogoFileName,
+          kidName: trimmedKidName,
+          contactNumber: trimmedContact,
+          website: trimmedWebsite
+        });
+      }
+
+      toast.success('Common cover details saved');
+      setCoverFormError('');
+      setCoverLogoError('');
+      setIsEditingCoverDefaults(false);
+    },
+    [coverFormState, onUpdateCoverDefaults]
+  );
+
+  const handleEditCoverDefaults = useCallback(() => {
+    setIsEditingCoverDefaults(true);
+  }, []);
+
+  const handleResetCoverDefaults = useCallback(() => {
+    setCoverFormState({
+      schoolLogo: '',
+      schoolLogoFileName: '',
+      kidName: '',
+      contactNumber: '',
+      website: ''
+    });
+    setCoverFormError('');
+    setCoverLogoError('');
+  }, []);
 
   const modeConfig = {
     rhymes: {
@@ -314,6 +461,18 @@ const GradeSelectionPage = ({ school, mode, onGradeSelect, onLogout, onBackToMod
 
   const currentMode = modeConfig[mode] || modeConfig.rhymes;
 
+  const handleGradeCardSelect = useCallback(
+    (gradeId) => {
+      if (isCoverMode && !coverDefaultsComplete) {
+        toast.error('Please save the common cover details before choosing a grade.');
+        return;
+      }
+
+      onGradeSelect(gradeId, mode);
+    },
+    [coverDefaultsComplete, isCoverMode, mode, onGradeSelect]
+  );
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
       <div className="max-w-4xl mx-auto">
@@ -345,12 +504,144 @@ const GradeSelectionPage = ({ school, mode, onGradeSelect, onLogout, onBackToMod
           <p className="text-gray-600">{currentMode.subtitle}</p>
         </div>
 
+        {isCoverMode && (
+          <Card className="mb-8 border-0 bg-white/85 backdrop-blur">
+            <CardHeader>
+              <CardTitle className="text-xl font-semibold text-gray-800">
+                Common cover page details
+              </CardTitle>
+              <p className="text-sm text-gray-600">
+                These details are shared across all grades. Complete them once to speed up cover page
+                personalisation.
+              </p>
+            </CardHeader>
+            <CardContent>
+              {isEditingCoverDefaults ? (
+                <form onSubmit={handleSaveCoverDefaults} className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="cover-default-kid-name">Kid name</Label>
+                      <Input
+                        id="cover-default-kid-name"
+                        placeholder="Kid name"
+                        value={coverFormState.kidName}
+                        onChange={handleCoverDefaultsChange('kidName')}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="cover-default-contact">School contact number</Label>
+                      <Input
+                        id="cover-default-contact"
+                        type="tel"
+                        inputMode="tel"
+                        placeholder="Contact number"
+                        value={coverFormState.contactNumber}
+                        onChange={handleCoverDefaultsChange('contactNumber')}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="cover-default-website">Website</Label>
+                      <Input
+                        id="cover-default-website"
+                        placeholder="e.g. www.edplore.com"
+                        value={coverFormState.website}
+                        onChange={handleCoverDefaultsChange('website')}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="cover-default-logo">Upload school logo</Label>
+                      <Input
+                        id="cover-default-logo"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleCoverLogoUpload}
+                      />
+                      {coverFormState.schoolLogoFileName && !coverLogoError && (
+                        <p className="text-xs text-gray-500">
+                          Selected file: {coverFormState.schoolLogoFileName}
+                        </p>
+                      )}
+                      {coverLogoError && (
+                        <p className="text-xs text-red-600">{coverLogoError}</p>
+                      )}
+                    </div>
+                  </div>
+                  {coverFormError && (
+                    <p className="text-sm text-red-600">{coverFormError}</p>
+                  )}
+                  <div className="flex flex-wrap gap-3">
+                    <Button type="submit" className="bg-gradient-to-r from-orange-400 to-red-400 text-white">
+                      Save details
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleResetCoverDefaults}
+                      className="border-orange-300 text-orange-500 hover:bg-orange-50"
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Kid name</p>
+                      <p className="text-sm font-semibold text-gray-800">
+                        {coverDefaults?.kidName || 'Not provided'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                        School contact number
+                      </p>
+                      <p className="text-sm font-semibold text-gray-800">
+                        {coverDefaults?.contactNumber || 'Not provided'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Website</p>
+                      <p className="text-sm font-semibold text-gray-800">
+                        {coverDefaults?.website || 'Not provided'}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">School logo</p>
+                      {coverDefaults?.schoolLogo ? (
+                        <img
+                          src={coverDefaults.schoolLogo}
+                          alt="School logo"
+                          className="h-16 w-16 rounded-md border border-gray-200 bg-white object-contain"
+                        />
+                      ) : (
+                        <div className="rounded-md border border-dashed border-orange-200 bg-orange-50/40 p-4 text-sm text-gray-500">
+                          No logo uploaded yet.
+                        </div>
+                      )}
+                      {coverDefaults?.schoolLogoFileName && (
+                        <p className="text-xs text-gray-500">{coverDefaults.schoolLogoFileName}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <Button type="button" onClick={handleEditCoverDefaults}>
+                      Edit details
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {GRADE_OPTIONS.map((grade) => (
             <Card
               key={grade.id}
               className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
-              onClick={() => onGradeSelect(grade.id, mode)}
+              onClick={() => handleGradeCardSelect(grade.id)}
+              aria-disabled={isCoverMode && !coverDefaultsComplete}
             >
               <CardContent className="p-6 text-center">
                 <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
@@ -1742,11 +2033,23 @@ function App() {
   const [school, setSchool] = useState(null);
   const [selectedMode, setSelectedMode] = useState(null);
   const [selectedGrade, setSelectedGrade] = useState(null);
+  const [coverDefaults, setCoverDefaults] = useState(() => ({ ...DEFAULT_COVER_DEFAULTS }));
+
+  const handleCoverDefaultsUpdate = useCallback((defaults) => {
+    setCoverDefaults({
+      schoolLogo: defaults?.schoolLogo || '',
+      schoolLogoFileName: defaults?.schoolLogoFileName || '',
+      kidName: defaults?.kidName || '',
+      contactNumber: defaults?.contactNumber || '',
+      website: defaults?.website || ''
+    });
+  }, []);
 
   const handleAuth = (schoolData) => {
     setSchool(schoolData);
     setSelectedMode(null);
     setSelectedGrade(null);
+    setCoverDefaults({ ...DEFAULT_COVER_DEFAULTS });
   };
 
   const handleModeSelect = (mode) => {
@@ -1774,6 +2077,7 @@ function App() {
     setSelectedGrade(null);
     setSelectedMode(null);
     setSchool(null);
+    setCoverDefaults({ ...DEFAULT_COVER_DEFAULTS });
   };
 
   return (
@@ -1798,6 +2102,8 @@ function App() {
                 onGradeSelect={handleGradeSelect}
                 onLogout={handleLogout}
                 onBackToMode={handleBackToModeSelection}
+                coverDefaults={coverDefaults}
+                onUpdateCoverDefaults={handleCoverDefaultsUpdate}
               />
             ) : selectedMode === 'rhymes' ? (
               <RhymeSelectionPage
@@ -1813,6 +2119,7 @@ function App() {
                 onBackToGrades={handleBackToGrades}
                 onBackToMode={handleBackToModeSelection}
                 onLogout={handleLogout}
+                coverDefaults={coverDefaults}
               />
             ) : (
               <FeaturePlaceholderPage
