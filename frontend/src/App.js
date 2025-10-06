@@ -434,17 +434,6 @@ const GradeSelectionPage = ({
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading grade information...</p>
-        </div>
-      </div>
-    );
-  }
-
   const handleLogoutClick = () => {
     if (typeof onLogout === 'function') {
       onLogout();
@@ -472,6 +461,17 @@ const GradeSelectionPage = ({
     },
     [coverDefaultsComplete, isCoverMode, mode, onGradeSelect]
   );
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading grade information...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
