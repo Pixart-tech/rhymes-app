@@ -741,7 +741,6 @@ async def get_cover_assets_network_paths(selection_key: str):
         exists = Path(selection_fs_path).exists()
         print(exists)
         is_directory = selection_fs_path.is_dir()
-        print(is_directory)
     except OSError as exc:
         logger.error("Unable to access cover SVG directory %s: %s", selection_fs_path, exc)
         raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
