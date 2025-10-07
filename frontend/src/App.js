@@ -14,6 +14,14 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './component
 import { Separator } from './components/ui/separator';
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from './components/ui/dialog';
 import CoverPageWorkflow from './components/CoverPageWorkflow';
 import InlineSvg from './components/InlineSvg';
 import { API_BASE_URL } from './lib/utils';
@@ -249,6 +257,7 @@ const GradeSelectionPage = ({
   }));
   const [coverFormError, setCoverFormError] = useState('');
   const [coverLogoError, setCoverLogoError] = useState('');
+  const [isCoverDefaultsDialogOpen, setIsCoverDefaultsDialogOpen] = useState(false);
 
   const coverDefaultsComplete = useMemo(() => {
     if (!isCoverMode) {
@@ -257,17 +266,10 @@ const GradeSelectionPage = ({
 
     return Boolean(
       (coverDefaults?.schoolLogo || '').trim() &&
-<<<<<<< HEAD
-        (coverDefaults?.contactNumber || '').trim() &&
-        (coverDefaults?.website || '').trim()
-=======
       (coverDefaults?.contactNumber || '').trim() &&
       (coverDefaults?.website || '').trim()
->>>>>>> 801214ddbdd697e019e5675884b7cf49ce5a2545
     );
   }, [coverDefaults, isCoverMode]);
-
-  const [isEditingCoverDefaults, setIsEditingCoverDefaults] = useState(!coverDefaultsComplete);
 
   useEffect(() => {
     setCoverFormState({
@@ -279,8 +281,28 @@ const GradeSelectionPage = ({
   }, [coverDefaults]);
 
   useEffect(() => {
-    setIsEditingCoverDefaults(!coverDefaultsComplete);
+    if (isCoverMode) {
+      if (!coverDefaultsComplete) {
+        setIsCoverDefaultsDialogOpen(true);
+      }
+    } else {
+      setIsCoverDefaultsDialogOpen(false);
+    }
+  }, [coverDefaultsComplete, isCoverMode]);
+
+  const handleCoverDefaultsDialogChange = useCallback((open) => {
+    if (!open && !coverDefaultsComplete) {
+      toast.error('Please complete the common cover details before continuing.');
+      setIsCoverDefaultsDialogOpen(true);
+      return;
+    }
+
+    setIsCoverDefaultsDialogOpen(open);
   }, [coverDefaultsComplete]);
+
+  const handleOpenCoverDefaultsDialog = useCallback(() => {
+    setIsCoverDefaultsDialogOpen(true);
+  }, []);
 
   const handleCoverDefaultsChange = useCallback(
     (field) => (event) => {
@@ -327,10 +349,7 @@ const GradeSelectionPage = ({
   const handleSaveCoverDefaults = useCallback(
     (event) => {
       event?.preventDefault();
-<<<<<<< HEAD
 
-=======
->>>>>>> 801214ddbdd697e019e5675884b7cf49ce5a2545
       const trimmedContact = coverFormState.contactNumber.trim();
       const trimmedWebsite = coverFormState.website.trim();
 
@@ -351,14 +370,10 @@ const GradeSelectionPage = ({
       toast.success('Common cover details saved');
       setCoverFormError('');
       setCoverLogoError('');
-      setIsEditingCoverDefaults(false);
+      setIsCoverDefaultsDialogOpen(false);
     },
     [coverFormState, onUpdateCoverDefaults]
   );
-
-  const handleEditCoverDefaults = useCallback(() => {
-    setIsEditingCoverDefaults(true);
-  }, []);
 
   const handleResetCoverDefaults = useCallback(() => {
     setCoverFormState({
@@ -458,17 +473,15 @@ const GradeSelectionPage = ({
 
   const currentMode = modeConfig[mode] || modeConfig.rhymes;
 
-  const handleGradeCardSelect = useCallback(
-    (gradeId) => {
-      if (isCoverMode && !coverDefaultsComplete) {
-        toast.error('Please save the common cover details before choosing a grade.');
-        return;
-      }
+  const handleGradeCardSelect = useCallback((gradeId) => {
+    if (isCoverMode && !coverDefaultsComplete) {
+      toast.error('Please save the common cover details before choosing a grade.');
+      setIsCoverDefaultsDialogOpen(true);
+      return;
+    }
 
-      onGradeSelect(gradeId, mode);
-    },
-    [coverDefaultsComplete, isCoverMode, mode, onGradeSelect]
-  );
+    onGradeSelect(gradeId, mode);
+  }, [coverDefaultsComplete, isCoverMode, mode, onGradeSelect]);
 
   if (loading) {
     return (
@@ -513,77 +526,17 @@ const GradeSelectionPage = ({
         </div>
 
         {isCoverMode && (
-          <Card className="mb-8 border-0 bg-white/85 backdrop-blur">
-            <CardHeader>
-              <CardTitle className="text-xl font-semibold text-gray-800">
-                Common cover page details
-              </CardTitle>
-              <p className="text-sm text-gray-600">
-                These details are shared across all grades. Complete them once to speed up cover page
-                personalisation.
-              </p>
-            </CardHeader>
-            <CardContent>
-              {isEditingCoverDefaults ? (
-                <form onSubmit={handleSaveCoverDefaults} className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="cover-default-contact">School contact number</Label>
-                      <Input
-                        id="cover-default-contact"
-                        type="tel"
-                        inputMode="tel"
-                        placeholder="Contact number"
-                        value={coverFormState.contactNumber}
-                        onChange={handleCoverDefaultsChange('contactNumber')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="cover-default-website">Website</Label>
-                      <Input
-                        id="cover-default-website"
-                        placeholder="e.g. www.edplore.com"
-                        value={coverFormState.website}
-                        onChange={handleCoverDefaultsChange('website')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="cover-default-logo">Upload school logo</Label>
-                      <Input
-                        id="cover-default-logo"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleCoverLogoUpload}
-                      />
-                      {coverFormState.schoolLogoFileName && !coverLogoError && (
-                        <p className="text-xs text-gray-500">
-                          Selected file: {coverFormState.schoolLogoFileName}
-                        </p>
-                      )}
-                      {coverLogoError && (
-                        <p className="text-xs text-red-600">{coverLogoError}</p>
-                      )}
-                    </div>
-                  </div>
-                  {coverFormError && (
-                    <p className="text-sm text-red-600">{coverFormError}</p>
-                  )}
-                  <div className="flex flex-wrap gap-3">
-                    <Button type="submit" className="bg-gradient-to-r from-orange-400 to-red-400 text-white">
-                      Save details
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleResetCoverDefaults}
-                      className="border-orange-300 text-orange-500 hover:bg-orange-50"
-                    >
-                      Clear
-                    </Button>
-                  </div>
-                </form>
-              ) : (
+          <>
+            <Card className="mb-8 border-0 bg-white/85 backdrop-blur">
+              <CardHeader>
+                <CardTitle className="text-xl font-semibold text-gray-800">
+                  Common cover page details
+                </CardTitle>
+                <p className="text-sm text-gray-600">
+                  These details are shared across all grades. Update them anytime to personalise cover pages.
+                </p>
+              </CardHeader>
+              <CardContent>
                 <div className="space-y-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
@@ -618,31 +571,100 @@ const GradeSelectionPage = ({
                       )}
                     </div>
                   </div>
+                  {!coverDefaultsComplete && (
+                    <p className="text-sm text-orange-600">
+                      Add your school logo, contact number, and website to unlock cover page personalisation.
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-3">
-                    <Button type="button" onClick={handleEditCoverDefaults}>
-                      Edit details
+                    <Button type="button" onClick={handleOpenCoverDefaultsDialog}>
+                      {coverDefaultsComplete ? 'Edit details' : 'Add details'}
                     </Button>
                   </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+
+            <Dialog open={isCoverDefaultsDialogOpen} onOpenChange={handleCoverDefaultsDialogChange}>
+              <DialogContent className="bg-white">
+                <DialogHeader>
+                  <DialogTitle>Common cover page details</DialogTitle>
+                  <DialogDescription>
+                    Provide the shared school information used to personalise every cover page.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleSaveCoverDefaults} className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="cover-default-contact">School contact number</Label>
+                      <Input
+                        id="cover-default-contact"
+                        type="tel"
+                        inputMode="tel"
+                        placeholder="Contact number"
+                        value={coverFormState.contactNumber}
+                        onChange={handleCoverDefaultsChange('contactNumber')}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="cover-default-website">Website</Label>
+                      <Input
+                        id="cover-default-website"
+                        placeholder="e.g. www.edplore.com"
+                        value={coverFormState.website}
+                        onChange={handleCoverDefaultsChange('website')}
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="cover-default-logo">Upload school logo</Label>
+                      <Input
+                        id="cover-default-logo"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleCoverLogoUpload}
+                      />
+                      {coverFormState.schoolLogoFileName && !coverLogoError && (
+                        <p className="text-xs text-gray-500">
+                          Selected file: {coverFormState.schoolLogoFileName}
+                        </p>
+                      )}
+                      {coverLogoError && (
+                        <p className="text-xs text-red-600">{coverLogoError}</p>
+                      )}
+                    </div>
+                  </div>
+                  {coverFormError && (
+                    <p className="text-sm text-red-600">{coverFormError}</p>
+                  )}
+                  <DialogFooter className="gap-2">
+                    <Button type="submit" className="bg-gradient-to-r from-orange-400 to-red-400 text-white">
+                      Save details
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleResetCoverDefaults}
+                      className="border-orange-300 text-orange-500 hover:bg-orange-50"
+                    >
+                      Clear
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {GRADE_OPTIONS.map((grade) => {
             const storedGradeLabel = gradeCustomNames?.[grade.id]?.trim();
             const displayGradeLabel = storedGradeLabel || grade.name;
-            const isCardDisabled = isCoverMode && !coverDefaultsComplete;
 
             return (
               <Card
                 key={grade.id}
-                className={`group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm ${
-                  isCardDisabled ? 'opacity-60 hover:scale-100 hover:shadow-none' : ''
-                }`}
+                className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
                 onClick={() => handleGradeCardSelect(grade.id)}
-                aria-disabled={isCardDisabled}
               >
                 <CardContent className="p-6 text-center space-y-4">
                   <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
