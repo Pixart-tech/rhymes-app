@@ -231,7 +231,7 @@ const CoverPageWorkflow = ({
     () => ({
       schoolLogo: personalisation.schoolLogo.trim(),
       gradeName: personalisation.gradeName.trim(),
-      kidName: personalisation.kidName.trim(),
+      
       email: personalisation.email.trim(),
       addressLine1: personalisation.addressLine1.trim(),
       addressLine2: personalisation.addressLine2.trim(),
@@ -560,7 +560,7 @@ const CoverPageWorkflow = ({
       };
 
       updateGroupText('Grade', trimmedPersonalisation.gradeName);
-      updateGroupText('Name', trimmedPersonalisation.kidName);
+      
       updateGroupText('Add_1', trimmedPersonalisation.addressLine1);
       updateGroupText('Add_2', trimmedPersonalisation.addressLine2);
       updateGroupText('Add_3', trimmedPersonalisation.addressLine3);
