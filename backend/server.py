@@ -103,6 +103,34 @@ def _as_windows_relative_path(base_path: Path, target_path: Path) -> str:
 
     return str(PureWindowsPath(*relative.parts))
 
+
+def _read_cover_svg_text(svg_path: Path) -> str:
+    """Return the textual SVG markup for ``svg_path``."""
+
+    try:
+        return svg_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return svg_path.read_bytes().decode("utf-8", errors="replace")
+
+
+def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
+    """Inline bitmap assets referenced by ``svg_markup`` when possible."""
+
+    try:
+        return _localize_svg_image_assets(
+            svg_markup,
+            svg_path,
+            f"cover::{svg_path.name}",
+            inline_mode=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        logger.warning(
+            "Unable to inline image assets for cover SVG '%s': %s",
+            svg_path,
+            exc,
+        )
+        return svg_markup
+
 # MongoDB connection
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -759,9 +787,12 @@ async def get_cover_assets_network_paths(selection_key: str):
         print(network_file)
         svg_markup: Optional[str] = None
 
+        svg_source_path: Optional[Path] = None
+
         try:
             with open(network_file, "r", encoding="utf-8") as handle:
                 svg_markup = handle.read()
+            svg_source_path = Path(network_file)
         except OSError as exc:
             logger.warning(
                 "Unable to read cover SVG '%s' via network path %s: %s. Falling back to local mirror.",
@@ -772,7 +803,7 @@ async def get_cover_assets_network_paths(selection_key: str):
 
         if svg_markup is None:
             try:
-                svg_markup = svg_file.read_text(encoding="utf-8")
+                svg_markup = _read_cover_svg_text(svg_file)
             except OSError as exc:
                 logger.error(
                     "Unable to read cover SVG '%s' from local path %s: %s",
@@ -781,6 +812,13 @@ async def get_cover_assets_network_paths(selection_key: str):
                     exc,
                 )
                 raise HTTPException(status_code=500, detail="Unable to load cover SVG files.") from exc
+            else:
+                svg_source_path = svg_file
+
+        if svg_source_path is None:
+            svg_source_path = svg_file
+
+        svg_markup = _localize_cover_svg_markup(svg_markup, svg_source_path)
 
         assets.append(
             {
@@ -814,12 +852,14 @@ async def get_cover_asset(relative_path: str):
         raise HTTPException(status_code=404, detail="Cover asset not found.")
 
     try:
-        svg_bytes = candidate_path.read_bytes()
+        svg_text = _read_cover_svg_text(candidate_path)
     except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
         logger.error("Unable to read cover SVG '%s': %s", candidate_path, exc)
         raise HTTPException(status_code=500, detail="Unable to read cover asset.") from exc
 
-    return Response(content=svg_bytes, media_type="image/svg+xml")
+    localized_svg = _localize_cover_svg_markup(svg_text, candidate_path)
+
+    return Response(content=localized_svg.encode("utf-8"), media_type="image/svg+xml")
 
 
 def _draw_text_only_rhyme(
