@@ -40,9 +40,9 @@ const COLOUR_OPTIONS = [
   { id: 'colour4', label: 'Colour 4', hex: '#c8e9f1' }
 ];
 
-const createBlankPersonalisation = (defaults = {}) => ({
+const createBlankPersonalisation = (defaults = {}, defaultGradeLabel = '') => ({
   schoolLogo: defaults.schoolLogo || '',
-  gradeName: '',
+  gradeName: defaultGradeLabel || '',
   email: '',
   addressLine1: '',
   addressLine2: '',
@@ -128,6 +128,22 @@ const resolveErrorMessage = (error) => {
   return 'An unexpected error occurred.';
 };
 
+const resolveGradeLabel = (grade, customGradeName) => {
+  if (customGradeName && customGradeName.trim()) {
+    return customGradeName.trim();
+  }
+
+  if (GRADE_LABELS[grade]) {
+    return GRADE_LABELS[grade];
+  }
+
+  if (typeof grade === 'string' && grade.trim()) {
+    return grade.trim().toUpperCase();
+  }
+
+  return 'Grade';
+};
+
 const CoverPageWorkflow = ({
   school,
   grade,
@@ -137,6 +153,7 @@ const CoverPageWorkflow = ({
   onLogout,
   coverDefaults
 }) => {
+  const gradeLabel = resolveGradeLabel(grade, customGradeName);
   const [selectedThemeId, setSelectedThemeId] = useState(null);
   const [selectedColourId, setSelectedColourId] = useState(null);
 
@@ -145,7 +162,7 @@ const CoverPageWorkflow = ({
   const [assetError, setAssetError] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [personalisation, setPersonalisation] = useState(() =>
-    createBlankPersonalisation(coverDefaults)
+    createBlankPersonalisation(coverDefaults, gradeLabel)
   );
   const schoolLogoFileName = coverDefaults?.schoolLogoFileName || '';
 
@@ -159,22 +176,16 @@ const CoverPageWorkflow = ({
   const previousGradeLabelRef = useRef(gradeLabel);
   const coverStateKeyRef = useRef('');
 
-  const gradeLabel = useMemo(() => {
-    if (customGradeName && customGradeName.trim()) {
-      return customGradeName.trim();
-    }
-    return GRADE_LABELS[grade] || grade?.toUpperCase() || 'Grade';
-  }, [customGradeName, grade]);
-
 
   useEffect(() => {
     setPersonalisation((current) => ({
       ...current,
       schoolLogo: coverDefaults?.schoolLogo || '',
       contactNumber: coverDefaults?.contactNumber || '',
-      website: coverDefaults?.website || ''
+      website: coverDefaults?.website || '',
+      gradeName: (current.gradeName || '').trim() ? current.gradeName : gradeLabel
     }));
-  }, [coverDefaults]);
+  }, [coverDefaults, gradeLabel]);
 
 
   useEffect(() => {
@@ -207,7 +218,7 @@ const CoverPageWorkflow = ({
       assetCacheRef.current.clear();
       setSelectedThemeId(null);
       setSelectedColourId(null);
-      setPersonalisation(createBlankPersonalisation(coverDefaults));
+      setPersonalisation(createBlankPersonalisation(coverDefaults, gradeLabel));
       setCurrentStep(1);
       setHasSubmittedDetails(false);
       setPreviewAssets([]);
@@ -230,7 +241,7 @@ const CoverPageWorkflow = ({
     if (!storedState) {
       setSelectedThemeId(null);
       setSelectedColourId(null);
-      setPersonalisation(createBlankPersonalisation(coverDefaults));
+      setPersonalisation(createBlankPersonalisation(coverDefaults, gradeLabel));
       setCurrentStep(1);
       setHasSubmittedDetails(false);
       setPreviewAssets([]);
@@ -253,13 +264,13 @@ const CoverPageWorkflow = ({
 
     if (storedState.personalisation && typeof storedState.personalisation === 'object') {
       setPersonalisation({
-        ...createBlankPersonalisation(coverDefaults),
+        ...createBlankPersonalisation(coverDefaults, gradeLabel),
         ...storedState.personalisation
       });
     } else {
-      setPersonalisation(createBlankPersonalisation(coverDefaults));
+      setPersonalisation(createBlankPersonalisation(coverDefaults, gradeLabel));
     }
-  }, [school?.school_id, grade, coverDefaults]);
+  }, [school?.school_id, grade, coverDefaults, gradeLabel]);
 
   const selectedTheme = useMemo(
     () => THEME_OPTIONS.find((theme) => theme.id === selectedThemeId) || null,
@@ -299,7 +310,7 @@ const CoverPageWorkflow = ({
   const trimmedPersonalisation = useMemo(
     () => ({
       schoolLogo: personalisation.schoolLogo.trim(),
-      gradeName: personalisation.gradeName.trim(),
+      gradeName: personalisation.gradeName.trim() || gradeLabel,
       email: personalisation.email.trim(),
       addressLine1: personalisation.addressLine1.trim(),
       addressLine2: personalisation.addressLine2.trim(),
@@ -310,7 +321,7 @@ const CoverPageWorkflow = ({
       tagLine2: personalisation.tagLine2.trim(),
       tagLine3: personalisation.tagLine3.trim()
     }),
-    [personalisation]
+    [personalisation, gradeLabel]
   );
 
   useEffect(() => {
