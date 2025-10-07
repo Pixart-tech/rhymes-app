@@ -5,8 +5,6 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
-import { Skeleton } from './ui/skeleton';
-
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 
@@ -118,6 +116,7 @@ const resolveErrorMessage = (error) => {
 const CoverPageWorkflow = ({
   school,
   grade,
+  customGradeName,
   onBackToGrades,
   onBackToMode,
   onLogout,
@@ -133,7 +132,6 @@ const CoverPageWorkflow = ({
   const [personalisation, setPersonalisation] = useState({
     schoolLogo: coverDefaults?.schoolLogo || '',
     gradeName: '',
-    kidName: coverDefaults?.kidName || '',
     email: '',
     addressLine1: '',
     addressLine2: '',
@@ -142,11 +140,9 @@ const CoverPageWorkflow = ({
     website: coverDefaults?.website || '',
     tagLine1: '',
     tagLine2: '',
-    tagLine3: '',
-    kidPhoto: ''
+    tagLine3: ''
   });
   const [gradeNameDirty, setGradeNameDirty] = useState(false);
-  const [kidPhotoFileName, setKidPhotoFileName] = useState('');
   const schoolLogoFileName = coverDefaults?.schoolLogoFileName || '';
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -155,19 +151,20 @@ const CoverPageWorkflow = ({
   const assetCacheRef = useRef(new Map());
   const svgPreviewRef = useRef(null);
   const svgCarouselRef = useRef(null);
-  const kidPhotoInputRef = useRef(null);
   const coverAssetsNetworkBaseUrl = useMemo(resolveCoverAssetsNetworkBaseUrl, []);
 
   const gradeLabel = useMemo(() => {
+    if (customGradeName && customGradeName.trim()) {
+      return customGradeName.trim();
+    }
     return GRADE_LABELS[grade] || grade?.toUpperCase() || 'Grade';
-  }, [grade]);
+  }, [customGradeName, grade]);
 
 
   useEffect(() => {
     setPersonalisation((current) => ({
       ...current,
       schoolLogo: coverDefaults?.schoolLogo || '',
-      kidName: coverDefaults?.kidName || '',
       contactNumber: coverDefaults?.contactNumber || '',
       website: coverDefaults?.website || ''
     }));
@@ -231,7 +228,6 @@ const CoverPageWorkflow = ({
     () => ({
       schoolLogo: personalisation.schoolLogo.trim(),
       gradeName: personalisation.gradeName.trim(),
-      
       email: personalisation.email.trim(),
       addressLine1: personalisation.addressLine1.trim(),
       addressLine2: personalisation.addressLine2.trim(),
@@ -240,8 +236,7 @@ const CoverPageWorkflow = ({
       website: personalisation.website.trim(),
       tagLine1: personalisation.tagLine1.trim(),
       tagLine2: personalisation.tagLine2.trim(),
-      tagLine3: personalisation.tagLine3.trim(),
-      kidPhoto: personalisation.kidPhoto
+      tagLine3: personalisation.tagLine3.trim()
     }),
     [personalisation]
   );
@@ -421,87 +416,6 @@ const CoverPageWorkflow = ({
     [hasSubmittedDetails]
   );
 
-  const handleKidPhotoChange = useCallback(
-    (event) => {
-      const file = event?.target?.files?.[0];
-
-      if (!file) {
-        setKidPhotoFileName('');
-        setPersonalisation((current) => ({
-          ...current,
-          kidPhoto: ''
-        }));
-
-        if (hasSubmittedDetails) {
-          setHasSubmittedDetails(false);
-        }
-
-        return;
-      }
-
-      const reader = new FileReader();
-
-      reader.onload = () => {
-        const result = reader.result;
-        const imageValue = typeof result === 'string' ? result : '';
-
-        setPersonalisation((current) => ({
-          ...current,
-          kidPhoto: imageValue
-        }));
-
-        if (!imageValue) {
-          setKidPhotoFileName('');
-        }
-
-        if (hasSubmittedDetails) {
-          setHasSubmittedDetails(false);
-        }
-
-        if (kidPhotoInputRef.current) {
-          kidPhotoInputRef.current.value = '';
-        }
-      };
-
-      reader.onerror = () => {
-        console.error('Unable to read kid photo file.');
-        setKidPhotoFileName('');
-        setPersonalisation((current) => ({
-          ...current,
-          kidPhoto: ''
-        }));
-
-        if (hasSubmittedDetails) {
-          setHasSubmittedDetails(false);
-        }
-
-        if (kidPhotoInputRef.current) {
-          kidPhotoInputRef.current.value = '';
-        }
-      };
-
-      reader.readAsDataURL(file);
-      setKidPhotoFileName(file.name);
-    },
-    [hasSubmittedDetails]
-  );
-
-  const handleKidPhotoClear = useCallback(() => {
-    setKidPhotoFileName('');
-    setPersonalisation((current) => ({
-      ...current,
-      kidPhoto: ''
-    }));
-
-    if (kidPhotoInputRef.current) {
-      kidPhotoInputRef.current.value = '';
-    }
-
-    if (hasSubmittedDetails) {
-      setHasSubmittedDetails(false);
-    }
-  }, [hasSubmittedDetails]);
-
   const activeAsset = previewAssets[activeIndex] || null;
 
   const canProceedToDetails = Boolean(selectedTheme && selectedColour);
@@ -560,7 +474,6 @@ const CoverPageWorkflow = ({
       };
 
       updateGroupText('Grade', trimmedPersonalisation.gradeName);
-      
       updateGroupText('Add_1', trimmedPersonalisation.addressLine1);
       updateGroupText('Add_2', trimmedPersonalisation.addressLine2);
       updateGroupText('Add_3', trimmedPersonalisation.addressLine3);
@@ -635,7 +548,6 @@ const CoverPageWorkflow = ({
       };
 
       updateImageById('_Logo_1', trimmedPersonalisation.schoolLogo);
-      updateImageById('kid_photo', trimmedPersonalisation.kidPhoto);
     },
     [trimmedPersonalisation]
   );
@@ -888,41 +800,6 @@ const CoverPageWorkflow = ({
                       onChange={handlePersonalisationChange('gradeName')}
                     />
                   </div>
-                  <div className="cover-form-field md:col-span-2">
-                    <Label htmlFor="cover-kid-photo">Kid photo</Label>
-                    <div className="space-y-3">
-                      <Input
-                        id="cover-kid-photo"
-                        type="file"
-                        accept="image/*"
-                        ref={kidPhotoInputRef}
-                        onChange={handleKidPhotoChange}
-                      />
-                      <p className="text-xs text-slate-500">
-                        Upload a clear image (PNG or JPG) for the kid portrait placeholder.
-                      </p>
-                      {personalisation.kidPhoto && (
-                        <div className="flex flex-wrap items-center gap-4 rounded-md border border-orange-100 bg-orange-50/60 p-3">
-                          <img
-                            src={personalisation.kidPhoto}
-                            alt="Kid preview"
-                            className="h-20 w-20 rounded-md border border-white object-cover"
-                          />
-                          <div className="space-y-2">
-                            {kidPhotoFileName && (
-                              <p className="text-sm font-medium text-slate-800">{kidPhotoFileName}</p>
-                            )}
-                            <Button type="button" variant="outline" size="sm" onClick={handleKidPhotoClear}>
-                              Remove photo
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                      {!personalisation.kidPhoto && kidPhotoFileName && (
-                        <p className="text-xs font-medium text-slate-700">{kidPhotoFileName}</p>
-                      )}
-                    </div>
-                  </div>
                   <div className="cover-form-field">
                     <Label htmlFor="cover-address-line-1">Address line 1</Label>
                     <Input
@@ -1053,7 +930,10 @@ const CoverPageWorkflow = ({
               <CardContent className="space-y-6 pt-6">
                 {isFetchingAssets && (
                   <div className="cover-carousel-stage">
-                    <Skeleton className="h-full w-full" />
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-orange-200 bg-white/75 p-6">
+                      <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-400 border-t-transparent"></div>
+                      <p className="text-sm font-medium text-orange-500">Loading cover preview...</p>
+                    </div>
                   </div>
                 )}
 

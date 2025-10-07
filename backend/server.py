@@ -756,6 +756,7 @@ async def get_cover_assets_network_paths(selection_key: str):
         # Build a raw UNC string (for example r"\\pixartnas\share\folder") so the
         # network lookup uses the exact Windows path supplied by administrators.
         network_file = unc_path_utils.format_unc_path(selection_unc_path / svg_file.name)
+        print(network_file)
         svg_markup: Optional[str] = None
 
         try:
