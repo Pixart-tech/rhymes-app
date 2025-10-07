@@ -19,6 +19,12 @@ import InlineSvg from './components/InlineSvg';
 import { API_BASE_URL } from './lib/utils';
 import { decodeSvgPayload, sanitizeRhymeSvgContent } from './lib/svgUtils';
 import { readFileAsDataUrl } from './lib/fileUtils';
+import {
+  clearPersistedAppState,
+  loadPersistedAppState,
+  savePersistedAppState,
+  clearCoverWorkflowState
+} from './lib/storage';
 
 
 // Icons
@@ -228,8 +234,7 @@ const GradeSelectionPage = ({
   onBackToMode,
   coverDefaults,
   onUpdateCoverDefaults,
-  gradeCustomNames,
-  onUpdateGradeCustomName
+  gradeCustomNames
 }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -252,8 +257,13 @@ const GradeSelectionPage = ({
 
     return Boolean(
       (coverDefaults?.schoolLogo || '').trim() &&
+<<<<<<< HEAD
         (coverDefaults?.contactNumber || '').trim() &&
         (coverDefaults?.website || '').trim()
+=======
+      (coverDefaults?.contactNumber || '').trim() &&
+      (coverDefaults?.website || '').trim()
+>>>>>>> 801214ddbdd697e019e5675884b7cf49ce5a2545
     );
   }, [coverDefaults, isCoverMode]);
 
@@ -317,7 +327,10 @@ const GradeSelectionPage = ({
   const handleSaveCoverDefaults = useCallback(
     (event) => {
       event?.preventDefault();
+<<<<<<< HEAD
 
+=======
+>>>>>>> 801214ddbdd697e019e5675884b7cf49ce5a2545
       const trimmedContact = coverFormState.contactNumber.trim();
       const trimmedWebsite = coverFormState.website.trim();
 
@@ -452,17 +465,9 @@ const GradeSelectionPage = ({
         return;
       }
 
-      if (isCoverMode) {
-        const customName = gradeCustomNames?.[gradeId]?.trim();
-        if (!customName) {
-          toast.error('Please enter a custom grade name before choosing this grade.');
-          return;
-        }
-      }
-
       onGradeSelect(gradeId, mode);
     },
-    [coverDefaultsComplete, gradeCustomNames, isCoverMode, mode, onGradeSelect]
+    [coverDefaultsComplete, isCoverMode, mode, onGradeSelect]
   );
 
   if (loading) {
@@ -626,8 +631,9 @@ const GradeSelectionPage = ({
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {GRADE_OPTIONS.map((grade) => {
-            const hasCustomGradeName = Boolean(gradeCustomNames?.[grade.id]?.trim());
-            const isCardDisabled = isCoverMode && (!coverDefaultsComplete || !hasCustomGradeName);
+            const storedGradeLabel = gradeCustomNames?.[grade.id]?.trim();
+            const displayGradeLabel = storedGradeLabel || grade.name;
+            const isCardDisabled = isCoverMode && !coverDefaultsComplete;
 
             return (
               <Card
@@ -636,64 +642,48 @@ const GradeSelectionPage = ({
                   isCardDisabled ? 'opacity-60 hover:scale-100 hover:shadow-none' : ''
                 }`}
                 onClick={() => handleGradeCardSelect(grade.id)}
-              aria-disabled={isCardDisabled}
-            >
-              <CardContent className="p-6 text-center space-y-4">
-                <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                  <span className="text-2xl">{grade.icon}</span>
-                </div>
-                <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
-                <div className="space-y-1 text-sm text-gray-600">
-                  <Label
-                    htmlFor={`custom-grade-${grade.id}`}
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    Custom grade name
-                  </Label>
-                  <Input
-                    id={`custom-grade-${grade.id}`}
-                    value={gradeCustomNames?.[grade.id] ?? ''}
-                    placeholder={`e.g. ${grade.name}`}
-                    onClick={(event) => event.stopPropagation()}
-                    onFocus={(event) => event.stopPropagation()}
-                    onChange={(event) => {
-                      const value = event?.target?.value ?? '';
-                      if (typeof onUpdateGradeCustomName === 'function') {
-                        onUpdateGradeCustomName(grade.id, value);
-                      }
-                    }}
-                    className="bg-white/80"
-                  />
-                  <p className="text-xs text-gray-500">
-                    {hasCustomGradeName
-                      ? 'This label will appear on the cover pages.'
-                      : 'Leave blank to use the default grade name.'}
-                  </p>
-                </div>
-                {mode === 'rhymes' && (
-                  <Badge variant="secondary" className="mb-4">
-                    {getGradeStatusInfo(grade.id)} Rhymes Selected
-                  </Badge>
-                )}
-                <div className="space-y-3">
-                  <Button
-                    className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
-                  >
-                    {currentMode.buttonText}
-                  </Button>
-                  {mode === 'rhymes' && (() => {
-                    const status = gradeStatus.find(s => s.grade === grade.id);
-                    const isComplete = status ? status.selected_count >= 25 : false;
-                    if (!isComplete) return null;
+                aria-disabled={isCardDisabled}
+              >
+                <CardContent className="p-6 text-center space-y-4">
+                  <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
+                    <span className="text-2xl">{grade.icon}</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
+                  <div className="space-y-1 text-sm text-gray-600">
+                    <p className="block text-sm font-medium text-gray-700">Grade label</p>
+                    <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 font-medium text-gray-800">
+                      {displayGradeLabel}
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Grade labels come from the pre-grade form. When unavailable, the default grade name is used.
+                    </p>
+                  </div>
+                  {mode === 'rhymes' && (
+                    <Badge variant="secondary" className="mb-4">
+                      {getGradeStatusInfo(grade.id)} Rhymes Selected
+                    </Badge>
+                  )}
+                  <div className="space-y-3">
+                    <Button
+                      type="button"
+                      className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
+                    >
+                      {currentMode.buttonText}
+                    </Button>
+                    {mode === 'rhymes' && (() => {
+                      const status = gradeStatus.find(s => s.grade === grade.id);
+                      const isComplete = status ? status.selected_count >= 25 : false;
+                      if (!isComplete) return null;
 
-                    return (
-                      <Button
-                        variant="outline"
-                        onClick={(event) => handleDownloadBinder(grade.id, event)}
-                        className="w-full flex items-center justify-center gap-2 border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white/90"
-                      >
-                        <Download className="w-4 h-4" />
-                        Download Binder
+                      return (
+                        <Button
+                          variant="outline"
+                          type="button"
+                          onClick={(event) => handleDownloadBinder(grade.id, event)}
+                          className="w-full flex items-center justify-center gap-2 border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white/90"
+                        >
+                          <Download className="w-4 h-4" />
+                          Download Binder
                       </Button>
                     );
                   })()}
@@ -2107,11 +2097,48 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
 // Main App Component
 function App() {
-  const [school, setSchool] = useState(null);
-  const [selectedMode, setSelectedMode] = useState(null);
-  const [selectedGrade, setSelectedGrade] = useState(null);
-  const [coverDefaults, setCoverDefaults] = useState(() => ({ ...DEFAULT_COVER_DEFAULTS }));
-  const [gradeCustomNames, setGradeCustomNames] = useState({});
+  const persistedStateRef = useRef(null);
+  if (persistedStateRef.current === null) {
+    persistedStateRef.current = loadPersistedAppState();
+  }
+
+  const persistedState = persistedStateRef.current || {};
+
+  const [school, setSchool] = useState(() => persistedState.school ?? null);
+  const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
+  const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
+  const [coverDefaults, setCoverDefaults] = useState(() => ({
+    ...DEFAULT_COVER_DEFAULTS,
+    ...(persistedState.coverDefaults || {})
+  }));
+  const [gradeCustomNames, setGradeCustomNames] = useState(() => ({
+    ...(persistedState.gradeCustomNames || {})
+  }));
+
+  useEffect(() => {
+    if (!school) {
+      clearPersistedAppState();
+      return;
+    }
+
+    savePersistedAppState({
+      school,
+      selectedMode,
+      selectedGrade,
+      coverDefaults,
+      gradeCustomNames
+    });
+  }, [school, selectedMode, selectedGrade, coverDefaults, gradeCustomNames]);
+
+  const clearCoverWorkflowForSchool = useCallback((schoolId) => {
+    if (!schoolId) {
+      return;
+    }
+
+    GRADE_OPTIONS.forEach((option) => {
+      clearCoverWorkflowState(schoolId, option.id);
+    });
+  }, []);
 
   const handleCoverDefaultsUpdate = useCallback((defaults) => {
     setCoverDefaults({
@@ -2122,14 +2149,11 @@ function App() {
     });
   }, []);
 
-  const handleCustomGradeNameChange = useCallback((gradeId, value) => {
-    setGradeCustomNames((current) => ({
-      ...current,
-      [gradeId]: value
-    }));
-  }, []);
-
   const handleAuth = (schoolData) => {
+    if (school?.school_id && school?.school_id !== schoolData?.school_id) {
+      clearCoverWorkflowForSchool(school.school_id);
+    }
+
     setSchool(schoolData);
     setSelectedMode(null);
     setSelectedGrade(null);
@@ -2159,10 +2183,16 @@ function App() {
   };
 
   const handleLogout = () => {
+    const currentSchoolId = school?.school_id;
+    if (currentSchoolId) {
+      clearCoverWorkflowForSchool(currentSchoolId);
+    }
+    clearPersistedAppState();
     setSelectedGrade(null);
     setSelectedMode(null);
     setSchool(null);
     setCoverDefaults({ ...DEFAULT_COVER_DEFAULTS });
+    setGradeCustomNames({});
   };
 
   return (
@@ -2190,7 +2220,6 @@ function App() {
                 coverDefaults={coverDefaults}
                 onUpdateCoverDefaults={handleCoverDefaultsUpdate}
                 gradeCustomNames={gradeCustomNames}
-                onUpdateGradeCustomName={handleCustomGradeNameChange}
               />
             ) : selectedMode === 'rhymes' ? (
               <RhymeSelectionPage

@@ -340,7 +340,18 @@ const updateSlotState = useCallback((pageIndex, slot, updater) => {
       );
     }
 
-    if (slotState?.status === 'loading') {
+    const slotStatus = slotState?.status || 'idle';
+
+    if (slotStatus === 'idle') {
+      return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white/80 p-6">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-200 border-t-transparent" />
+          <p className="text-sm font-medium text-gray-500">Preparing {selection.name}...</p>
+        </div>
+      );
+    }
+
+    if (slotStatus === 'loading') {
       return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white/80 p-6">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-400 border-t-transparent"></div>
@@ -349,7 +360,7 @@ const updateSlotState = useCallback((pageIndex, slot, updater) => {
       );
     }
 
-    if (slotState?.status === 'error') {
+    if (slotStatus === 'error') {
       return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50/80 p-6 text-center text-red-600">
           <p className="text-sm font-semibold">Unable to load {selection.name}</p>
