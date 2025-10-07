@@ -238,7 +238,7 @@ const GradeSelectionPage = ({
   const [coverFormState, setCoverFormState] = useState(() => ({
     schoolLogo: coverDefaults?.schoolLogo || '',
     schoolLogoFileName: coverDefaults?.schoolLogoFileName || '',
-    kidName: coverDefaults?.kidName || '',
+   
     contactNumber: coverDefaults?.contactNumber || '',
     website: coverDefaults?.website || ''
   }));
@@ -252,7 +252,7 @@ const GradeSelectionPage = ({
 
     return Boolean(
       (coverDefaults?.schoolLogo || '').trim() &&
-        (coverDefaults?.kidName || '').trim() &&
+        
         (coverDefaults?.contactNumber || '').trim() &&
         (coverDefaults?.website || '').trim()
     );
@@ -264,7 +264,7 @@ const GradeSelectionPage = ({
     setCoverFormState({
       schoolLogo: coverDefaults?.schoolLogo || '',
       schoolLogoFileName: coverDefaults?.schoolLogoFileName || '',
-      kidName: coverDefaults?.kidName || '',
+   
       contactNumber: coverDefaults?.contactNumber || '',
       website: coverDefaults?.website || ''
     });
@@ -320,11 +320,11 @@ const GradeSelectionPage = ({
     (event) => {
       event?.preventDefault();
 
-      const trimmedKidName = coverFormState.kidName.trim();
+      
       const trimmedContact = coverFormState.contactNumber.trim();
       const trimmedWebsite = coverFormState.website.trim();
 
-      if (!coverFormState.schoolLogo || !trimmedKidName || !trimmedContact || !trimmedWebsite) {
+      if (!coverFormState.schoolLogo || !trimmedContact || !trimmedWebsite) {
         setCoverFormError('Please provide a school logo, kid name, contact number and website.');
         return;
       }
@@ -333,7 +333,6 @@ const GradeSelectionPage = ({
         onUpdateCoverDefaults({
           schoolLogo: coverFormState.schoolLogo,
           schoolLogoFileName: coverFormState.schoolLogoFileName,
-          kidName: trimmedKidName,
           contactNumber: trimmedContact,
           website: trimmedWebsite
         });
@@ -355,7 +354,7 @@ const GradeSelectionPage = ({
     setCoverFormState({
       schoolLogo: '',
       schoolLogoFileName: '',
-      kidName: '',
+      
       contactNumber: '',
       website: ''
     });
@@ -578,12 +577,7 @@ const GradeSelectionPage = ({
               ) : (
                 <div className="space-y-4">
                   <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Kid name</p>
-                      <p className="text-sm font-semibold text-gray-800">
-                        {coverDefaults?.kidName || 'Not provided'}
-                      </p>
-                    </div>
+                    
                     <div>
                       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                         School contact number
@@ -2031,7 +2025,7 @@ function App() {
     setCoverDefaults({
       schoolLogo: defaults?.schoolLogo || '',
       schoolLogoFileName: defaults?.schoolLogoFileName || '',
-      kidName: defaults?.kidName || '',
+      
       contactNumber: defaults?.contactNumber || '',
       website: defaults?.website || ''
     });
