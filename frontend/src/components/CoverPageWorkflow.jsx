@@ -5,8 +5,6 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
 
 import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 import { API_BASE_URL } from '../lib/utils';
@@ -40,6 +38,16 @@ const COLOUR_OPTIONS = [
   { id: 'colour4', label: 'Colour 4', hex: '#c8e9f1' }
 ];
 
+const GRADE_DETAIL_FIELDS = [
+  'email',
+  'addressLine1',
+  'addressLine2',
+  'addressLine3',
+  'tagLine1',
+  'tagLine2',
+  'tagLine3'
+];
+
 const createBlankPersonalisation = (defaults = {}, defaultGradeLabel = '') => ({
   schoolLogo: defaults.schoolLogo || '',
   gradeName: defaultGradeLabel || '',
@@ -53,6 +61,41 @@ const createBlankPersonalisation = (defaults = {}, defaultGradeLabel = '') => ({
   tagLine2: '',
   tagLine3: ''
 });
+
+const sanitiseGradeDetails = (details) => {
+  if (!details || typeof details !== 'object') {
+    return null;
+  }
+
+  const safe = {
+    gradeName: '',
+    email: '',
+    addressLine1: '',
+    addressLine2: '',
+    addressLine3: '',
+    tagLine1: '',
+    tagLine2: '',
+    tagLine3: ''
+  };
+
+  Object.keys(safe).forEach((key) => {
+    const value = details[key];
+
+    if (typeof value === 'string') {
+      safe[key] = value;
+      return;
+    }
+
+    if (value == null) {
+      safe[key] = '';
+      return;
+    }
+
+    safe[key] = value.toString();
+  });
+
+  return safe;
+};
 
 const normalizeToken = (value) =>
   (value ?? '')
@@ -151,9 +194,21 @@ const CoverPageWorkflow = ({
   onBackToGrades,
   onBackToMode,
   onLogout,
-  coverDefaults
+  coverDefaults,
+  gradeDetails
 }) => {
   const gradeLabel = resolveGradeLabel(grade, customGradeName);
+  const gradeDetailsSanitised = useMemo(() => {
+    const sanitized = sanitiseGradeDetails(gradeDetails);
+    if (!sanitized) {
+      return null;
+    }
+
+    return {
+      ...sanitized,
+      gradeName: sanitized.gradeName.trim() || gradeLabel
+    };
+  }, [gradeDetails, gradeLabel]);
   const [selectedThemeId, setSelectedThemeId] = useState(null);
   const [selectedColourId, setSelectedColourId] = useState(null);
 
@@ -161,9 +216,10 @@ const CoverPageWorkflow = ({
   const [previewAssets, setPreviewAssets] = useState([]);
   const [assetError, setAssetError] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
-  const [personalisation, setPersonalisation] = useState(() =>
-    createBlankPersonalisation(coverDefaults, gradeLabel)
-  );
+  const [personalisation, setPersonalisation] = useState(() => ({
+    ...createBlankPersonalisation(coverDefaults, gradeLabel),
+    ...(gradeDetailsSanitised || {})
+  }));
   const schoolLogoFileName = coverDefaults?.schoolLogoFileName || '';
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -175,6 +231,7 @@ const CoverPageWorkflow = ({
   const coverAssetsNetworkBaseUrl = useMemo(resolveCoverAssetsNetworkBaseUrl, []);
   const previousGradeLabelRef = useRef(gradeLabel);
   const coverStateKeyRef = useRef('');
+  const previousGradeDetailsRef = useRef('');
 
 
   useEffect(() => {
@@ -215,10 +272,14 @@ const CoverPageWorkflow = ({
 
     if (!schoolId || !grade) {
       coverStateKeyRef.current = '';
+      previousGradeDetailsRef.current = '';
       assetCacheRef.current.clear();
       setSelectedThemeId(null);
       setSelectedColourId(null);
-      setPersonalisation(createBlankPersonalisation(coverDefaults, gradeLabel));
+      setPersonalisation({
+        ...createBlankPersonalisation(coverDefaults, gradeLabel),
+        ...(gradeDetailsSanitised || {})
+      });
       setCurrentStep(1);
       setHasSubmittedDetails(false);
       setPreviewAssets([]);
@@ -229,19 +290,27 @@ const CoverPageWorkflow = ({
     }
 
     const key = `${schoolId}::${grade}`;
-    if (coverStateKeyRef.current === key) {
+    const serializedDetails = gradeDetailsSanitised ? JSON.stringify(gradeDetailsSanitised) : '';
+    const detailsChanged = previousGradeDetailsRef.current !== serializedDetails;
+
+    if (coverStateKeyRef.current === key && !detailsChanged) {
       return;
     }
 
     coverStateKeyRef.current = key;
+    previousGradeDetailsRef.current = serializedDetails;
     assetCacheRef.current.clear();
 
     const storedState = loadCoverWorkflowState(schoolId, grade);
+    const basePersonalisation = createBlankPersonalisation(coverDefaults, gradeLabel);
 
     if (!storedState) {
       setSelectedThemeId(null);
       setSelectedColourId(null);
-      setPersonalisation(createBlankPersonalisation(coverDefaults, gradeLabel));
+      setPersonalisation({
+        ...basePersonalisation,
+        ...(gradeDetailsSanitised || {})
+      });
       setCurrentStep(1);
       setHasSubmittedDetails(false);
       setPreviewAssets([]);
@@ -255,8 +324,8 @@ const CoverPageWorkflow = ({
     setSelectedColourId(storedState.selectedColourId ?? null);
     const storedStep = Number.parseInt(storedState.currentStep ?? 1, 10);
     const normalizedStep = Number.isFinite(storedStep) ? Math.min(Math.max(storedStep, 1), 2) : 1;
-    setCurrentStep(normalizedStep);
-    setHasSubmittedDetails(Boolean(storedState.hasSubmittedDetails));
+    setCurrentStep(detailsChanged ? 1 : normalizedStep);
+    setHasSubmittedDetails(detailsChanged ? false : Boolean(storedState.hasSubmittedDetails));
     setPreviewAssets([]);
     setActiveIndex(0);
     setAssetError('');
@@ -264,13 +333,17 @@ const CoverPageWorkflow = ({
 
     if (storedState.personalisation && typeof storedState.personalisation === 'object') {
       setPersonalisation({
-        ...createBlankPersonalisation(coverDefaults, gradeLabel),
-        ...storedState.personalisation
+        ...basePersonalisation,
+        ...storedState.personalisation,
+        ...(gradeDetailsSanitised || {})
       });
     } else {
-      setPersonalisation(createBlankPersonalisation(coverDefaults, gradeLabel));
+      setPersonalisation({
+        ...basePersonalisation,
+        ...(gradeDetailsSanitised || {})
+      });
     }
-  }, [school?.school_id, grade, coverDefaults, gradeLabel]);
+  }, [school?.school_id, grade, coverDefaults, gradeLabel, gradeDetailsSanitised]);
 
   const selectedTheme = useMemo(
     () => THEME_OPTIONS.find((theme) => theme.id === selectedThemeId) || null,
@@ -405,58 +478,53 @@ const CoverPageWorkflow = ({
     [coverAssetsNetworkBaseUrl]
   );
 
-  const handlePreviewRequest = useCallback(
-    async (event) => {
-      event.preventDefault();
+  const handlePreviewRequest = useCallback(async () => {
+    if (!selectedTheme || !selectedColour) {
+      return;
+    }
 
-      if (!selectedTheme || !selectedColour) {
-        return;
-      }
+    const selectionKey = buildSelectionKey(selectedTheme.id, selectedColour.id);
+    if (!selectionKey) {
+      setAssetError('Please choose a theme and colour before previewing.');
+      return;
+    }
 
-      const selectionKey = buildSelectionKey(selectedTheme.id, selectedColour.id);
-      if (!selectionKey) {
-        setAssetError('Please choose a theme and colour before previewing.');
-        return;
-      }
+    const detailsComplete = Object.values(trimmedPersonalisation).every(
+      (value) => value.length > 0
+    );
+    if (!detailsComplete) {
+      return;
+    }
 
-      const detailsComplete = Object.values(trimmedPersonalisation).every(
-        (value) => value.length > 0
-      );
-      if (!detailsComplete) {
-        return;
-      }
+    setPreviewAssets([]);
+    setActiveIndex(0);
+    setHasSubmittedDetails(false);
+    setCurrentStep(2);
+    setIsFetchingAssets(true);
+    setAssetError('');
 
-      setPreviewAssets([]);
-      setActiveIndex(0);
-      setHasSubmittedDetails(false);
-      setCurrentStep(3);
-      setIsFetchingAssets(true);
-      setAssetError('');
+    try {
+      const assets = await fetchCoverAssets(selectionKey);
 
-      try {
-        const assets = await fetchCoverAssets(selectionKey);
-
-        if (!assets.length) {
-          setPreviewAssets([]);
-          setAssetError('No cover files found for this theme and colour combination yet.');
-        } else {
-          setPreviewAssets(assets);
-          setActiveIndex(0);
-          setHasSubmittedDetails(true);
-        }
-      } catch (error) {
-        const message =
-          error?.response?.status === 404
-            ? 'No cover files found for this theme and colour combination yet.'
-            : resolveErrorMessage(error);
+      if (!assets.length) {
         setPreviewAssets([]);
-        setAssetError(message);
-      } finally {
-        setIsFetchingAssets(false);
+        setAssetError('No cover files found for this theme and colour combination yet.');
+      } else {
+        setPreviewAssets(assets);
+        setActiveIndex(0);
+        setHasSubmittedDetails(true);
       }
-    },
-    [fetchCoverAssets, selectedTheme, selectedColour, trimmedPersonalisation]
-  );
+    } catch (error) {
+      const message =
+        error?.response?.status === 404
+          ? 'No cover files found for this theme and colour combination yet.'
+          : resolveErrorMessage(error);
+      setPreviewAssets([]);
+      setAssetError(message);
+    } finally {
+      setIsFetchingAssets(false);
+    }
+  }, [fetchCoverAssets, selectedColour, selectedTheme, trimmedPersonalisation]);
 
   const isPersonalisationComplete = useMemo(() => {
     return Object.values(trimmedPersonalisation).every((value) => value.length > 0);
@@ -495,47 +563,24 @@ const CoverPageWorkflow = ({
     }
   }, [activeIndex, previewCount]);
 
-  const handlePersonalisationChange = useCallback(
-    (field) => (event) => {
-      const value = event?.target?.value ?? '';
-      setPersonalisation((current) => ({
-        ...current,
-        [field]: value
-      }));
-
-      if (hasSubmittedDetails) {
-        setHasSubmittedDetails(false);
-      }
-    },
-    [hasSubmittedDetails]
-  );
-
   const activeAsset = previewAssets[activeIndex] || null;
-
-  const canProceedToDetails = Boolean(selectedTheme && selectedColour);
-  const canSubmitDetails = Boolean(isPersonalisationComplete && canProceedToDetails);
-
-  const handleThemeContinue = useCallback(() => {
-    if (!canProceedToDetails) {
-      return;
-    }
-
-    setCurrentStep(2);
-  }, [canProceedToDetails]);
+  const canPreviewCovers = Boolean(selectedTheme && selectedColour && isPersonalisationComplete);
 
   const handleBackToSelection = useCallback(() => {
     resetPreviewState();
     setCurrentStep(1);
   }, [resetPreviewState]);
 
-  const handleEditDetails = useCallback(() => {
-    setCurrentStep(2);
-    setHasSubmittedDetails(false);
-  }, []);
+  const handleUpdateGradeDetails = useCallback(() => {
+    resetPreviewState();
+    setCurrentStep(1);
+    if (typeof onBackToGrades === 'function') {
+      onBackToGrades();
+    }
+  }, [onBackToGrades, resetPreviewState]);
 
   const stepLabels = [
     'Select theme & colour',
-    'Enter cover details',
     'Preview covers'
   ];
   const currentStepLabel = stepLabels[currentStep - 1] || stepLabels[0];
@@ -684,6 +729,125 @@ const CoverPageWorkflow = ({
     hasSubmittedDetails
   ]);
 
+  const commonDetailsSummaryCard = (
+    <Card className="border-none bg-white/85 shadow-sm shadow-orange-100/60">
+      <CardHeader className="space-y-2">
+        <CardTitle className="text-xl font-semibold text-slate-900">Common cover details</CardTitle>
+        <p className="text-sm text-slate-600">
+          These details are shared across every grade. Update them from the grade selection screen whenever
+          the school information changes.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">School contact number</p>
+            <p className="text-sm font-semibold text-slate-800">
+              {trimmedPersonalisation.contactNumber || 'Not provided'}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Website</p>
+            <p className="text-sm font-semibold text-slate-800">
+              {trimmedPersonalisation.website || 'Not provided'}
+            </p>
+          </div>
+          <div className="space-y-2 md:col-span-2 lg:col-span-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">School logo</p>
+            {personalisation.schoolLogo ? (
+              <div className="flex items-center gap-3 rounded-md border border-orange-100 bg-orange-50/60 p-3">
+                <img
+                  src={personalisation.schoolLogo}
+                  alt="School logo"
+                  className="h-16 w-16 rounded-md border border-white object-contain bg-white"
+                />
+                <div>
+                  <p className="text-sm font-medium text-slate-800">
+                    {schoolLogoFileName || 'Logo image'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    To update the logo, return to the grade selection screen.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-orange-200 bg-orange-50/40 p-4 text-sm text-slate-500">
+                No logo uploaded yet. Return to the grade selection screen to add one.
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const gradeDetailsSummaryCard = (
+    <Card className="border-none shadow-xl shadow-orange-100/60">
+      <CardHeader className="space-y-2">
+        <CardTitle className="text-xl font-semibold text-slate-900">Grade specific details</CardTitle>
+        <p className="text-sm text-slate-600">
+          These details were collected before selecting the grade. Visit the grade selection screen to make
+          any updates.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="cover-personalisation-grid two-column">
+          <div className="cover-form-field">
+            <p className="text-sm font-medium text-slate-700">Grade name</p>
+            <div className="rounded-md border border-slate-200 bg-slate-50/80 px-3 py-2 text-sm font-semibold text-slate-800">
+              {trimmedPersonalisation.gradeName || gradeLabel}
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Grade labels come from the pre-grade form and default to the standard grade name.
+            </p>
+          </div>
+          <div className="cover-form-field">
+            <p className="text-sm font-medium text-slate-700">Email</p>
+            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
+              {trimmedPersonalisation.email || 'Not provided'}
+            </div>
+          </div>
+          <div className="cover-form-field">
+            <p className="text-sm font-medium text-slate-700">Address line 1</p>
+            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
+              {trimmedPersonalisation.addressLine1 || 'Not provided'}
+            </div>
+          </div>
+          <div className="cover-form-field">
+            <p className="text-sm font-medium text-slate-700">Address line 2</p>
+            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
+              {trimmedPersonalisation.addressLine2 || 'Not provided'}
+            </div>
+          </div>
+          <div className="cover-form-field">
+            <p className="text-sm font-medium text-slate-700">Address line 3</p>
+            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
+              {trimmedPersonalisation.addressLine3 || 'Not provided'}
+            </div>
+          </div>
+          <div className="cover-form-field">
+            <p className="text-sm font-medium text-slate-700">Tag line 1</p>
+            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
+              {trimmedPersonalisation.tagLine1 || 'Not provided'}
+            </div>
+          </div>
+          <div className="cover-form-field">
+            <p className="text-sm font-medium text-slate-700">Tag line 2</p>
+            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
+              {trimmedPersonalisation.tagLine2 || 'Not provided'}
+            </div>
+          </div>
+          <div className="cover-form-field">
+            <p className="text-sm font-medium text-slate-700">Tag line 3</p>
+            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
+              {trimmedPersonalisation.tagLine3 || 'Not provided'}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
@@ -715,7 +879,7 @@ const CoverPageWorkflow = ({
           <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-orange-500">
-                Step {currentStep} of 3
+                Step {currentStep} of 2
               </p>
               <p className="text-base font-semibold text-slate-800">{currentStepLabel}</p>
             </div>
@@ -733,394 +897,224 @@ const CoverPageWorkflow = ({
           </CardContent>
         </Card>
 
+
         {currentStep === 1 && (
-          <div className="space-y-6">
-            <Card className="border-none shadow-xl shadow-orange-100/60">
-              <CardHeader className="space-y-2">
-                <CardTitle className="text-xl font-semibold text-slate-900">Select a theme</CardTitle>
-                <p className="text-sm text-slate-600">
-                  Pick one of the available cover themes. Additional themes can be added later without
-                  changing this workflow.
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="cover-theme-grid">
-                  {THEME_OPTIONS.map((theme) => {
-                    const isSelected = selectedThemeId === theme.id;
-                    return (
-                      <button
-                        key={theme.id}
-                        type="button"
-                        onClick={() => handleThemeSelect(theme.id)}
-                        className={`cover-theme-button${isSelected ? ' is-active' : ''}`}
-                      >
-                        <div>
-                          <p className="text-base font-semibold text-slate-800">{theme.label}</p>
-                          <p className="text-sm text-slate-500 leading-relaxed">{theme.description}</p>
-                        </div>
-                      </button>
-                    );
-                  })}
+  <div className="space-y-6">
+    <Card className="border-none shadow-xl shadow-orange-100/60">
+      <CardHeader className="space-y-2">
+        <CardTitle className="text-xl font-semibold text-slate-900">Select a theme</CardTitle>
+        <p className="text-sm text-slate-600">
+          Pick one of the available cover themes. Additional themes can be added later without
+          changing this workflow.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="cover-theme-grid">
+          {THEME_OPTIONS.map((theme) => {
+            const isSelected = selectedThemeId === theme.id;
+            return (
+              <button
+                key={theme.id}
+                type="button"
+                onClick={() => handleThemeSelect(theme.id)}
+                className={`cover-theme-button${isSelected ? ' is-active' : ''}`}
+              >
+                <div>
+                  <p className="text-base font-semibold text-slate-800">{theme.label}</p>
+                  <p className="text-sm text-slate-500 leading-relaxed">{theme.description}</p>
                 </div>
-              </CardContent>
-            </Card>
+              </button>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
 
-            <Card className="border-none shadow-xl shadow-orange-100/60">
-              <CardHeader className="space-y-2">
-                <CardTitle className="text-xl font-semibold text-slate-900">Choose a colour</CardTitle>
-                <p className="text-sm text-slate-600">
-                  Every theme provides the same four colour families. Select a colour to load matching
-                  cover artwork.
-                </p>
-              </CardHeader>
-              <CardContent>
-                <div className="cover-colour-grid">
-                  {COLOUR_OPTIONS.map((colour) => {
-                    const isSelected = selectedColourId === colour.id;
-                    return (
-                      <button
-                        key={colour.id}
-                        type="button"
-                        onClick={() => handleColourSelect(colour.id)}
-                        className={`cover-colour-chip${isSelected ? ' is-active' : ''}`}
-                        style={{ backgroundColor: colour.hex }}
-                        aria-pressed={isSelected}
-                        aria-label={`${colour.label} ${colour.hex}`}
-                      >
-                        <span className="cover-colour-chip-label">{colour.label}</span>
-                        <span className="cover-colour-chip-hex">{colour.hex}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
+    <Card className="border-none shadow-xl shadow-orange-100/60">
+      <CardHeader className="space-y-2">
+        <CardTitle className="text-xl font-semibold text-slate-900">Choose a colour</CardTitle>
+        <p className="text-sm text-slate-600">
+          Every theme provides the same four colour families. Select a colour to load matching cover artwork.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div className="cover-colour-grid">
+          {COLOUR_OPTIONS.map((colour) => {
+            const isSelected = selectedColourId === colour.id;
+            return (
+              <button
+                key={colour.id}
+                type="button"
+                onClick={() => handleColourSelect(colour.id)}
+                className={`cover-colour-chip${isSelected ? ' is-active' : ''}`}
+                style={{ backgroundColor: colour.hex }}
+                aria-pressed={isSelected}
+                aria-label={`${colour.label} ${colour.hex}`}
+              >
+                <span className="cover-colour-chip-label">{colour.label}</span>
+                <span className="cover-colour-chip-hex">{colour.hex}</span>
+              </button>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
 
-            <div className="flex justify-end">
-              <Button type="button" onClick={handleThemeContinue} disabled={!canProceedToDetails}>
-                Continue to details
-              </Button>
-            </div>
-          </div>
+    {commonDetailsSummaryCard}
+    {gradeDetailsSummaryCard}
+
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-sm text-slate-600">
+        Select a theme and colour, then preview the personalised covers for this grade.
+      </p>
+      <Button
+        type="button"
+        onClick={handlePreviewRequest}
+        disabled={!canPreviewCovers || isFetchingAssets}
+      >
+        {isFetchingAssets ? 'Preparing preview…' : 'Preview covers'}
+      </Button>
+    </div>
+  </div>
         )}
 
         {currentStep === 2 && (
-          <form onSubmit={handlePreviewRequest} className="space-y-6">
-            <Card className="border-none bg-white/80 shadow-sm shadow-orange-100/40">
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm text-slate-600">
-                <p>
-                  Review the common school details below. These are reused for every grade and can be
-                  updated from the grade selection screen.
-                </p>
-                <Button type="button" variant="outline" onClick={handleBackToSelection}>
-                  Change theme or colour
-                </Button>
-              </CardContent>
-            </Card>
+  <div className="space-y-6">
+    {hasSubmittedDetails && (
+      <Alert className="border-emerald-200 bg-emerald-50 text-emerald-800">
+        <AlertTitle>Displaying preview</AlertTitle>
+        <AlertDescription className="space-y-4">
+          <p>Your personalised covers are ready. Use the carousel below to review each design.</p>
+        </AlertDescription>
+      </Alert>
+    )}
 
-            <Card className="border-none bg-white/85 shadow-sm shadow-orange-100/60">
-              <CardHeader className="space-y-2">
-                <CardTitle className="text-xl font-semibold text-slate-900">
-                  Common cover details
-                </CardTitle>
-                <p className="text-sm text-slate-600">
-                  These details were captured before choosing the grade. Go back to the grade list if you
-                  need to make any changes.
-                </p>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-2">
-                  
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      School contact number
-                    </p>
-                    <p className="text-sm font-semibold text-slate-800">
-                      {personalisation.contactNumber || 'Not provided'}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Website</p>
-                    <p className="text-sm font-semibold text-slate-800">
-                      {personalisation.website || 'Not provided'}
-                    </p>
-                  </div>
-                  <div className="space-y-2 md:col-span-2 lg:col-span-1">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">School logo</p>
-                    {personalisation.schoolLogo ? (
-                      <div className="flex items-center gap-3 rounded-md border border-orange-100 bg-orange-50/60 p-3">
-                        <img
-                          src={personalisation.schoolLogo}
-                          alt="School logo"
-                          className="h-16 w-16 rounded-md border border-white object-contain bg-white"
-                        />
-                        <div>
-                          <p className="text-sm font-medium text-slate-800">
-                            {schoolLogoFileName || 'Logo image'}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            To update the logo, return to the grade selection screen.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-md border border-dashed border-orange-200 bg-orange-50/40 p-4 text-sm text-slate-500">
-                        No logo uploaded yet. Return to the grade selection screen to add one.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+    <Card className="border-none bg-white/80 shadow-sm shadow-orange-100/40">
+      <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm text-slate-600">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-slate-700">Theme:</span>
+            <span>{selectedTheme ? selectedTheme.label : 'Not selected'}</span>
+          </div>
+          <Separator orientation="vertical" className="hidden h-4 sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-slate-700">Colour:</span>
+            <span>{selectedColour ? selectedColour.label : 'Not selected'}</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" onClick={handleUpdateGradeDetails}>
+            Update grade details
+          </Button>
+          <Button type="button" variant="outline" onClick={handleBackToSelection}>
+            Change theme
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
 
-            <Card className="border-none shadow-xl shadow-orange-100/60">
-              <CardHeader className="space-y-2">
-                <CardTitle className="text-xl font-semibold text-slate-900">
-                  Grade specific details
-                </CardTitle>
-                <p className="text-sm text-slate-600">
-                  Provide the remaining information that is unique to this grade. It will be merged into the
-                  SVG artwork before it appears in the carousel.
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="cover-personalisation-grid two-column">
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-email">Email</Label>
-                    <Input
-                      id="cover-email"
-                      type="email"
-                      placeholder="e.g. hello@school.com"
-                      value={personalisation.email}
-                      onChange={handlePersonalisationChange('email')}
-                    />
-                  </div>
-                  <div className="cover-form-field">
-                    <Label className="text-slate-700">Grade name</Label>
-                    <div className="rounded-md border border-slate-200 bg-slate-50/80 px-3 py-2 text-sm font-semibold text-slate-800">
-                      {trimmedPersonalisation.gradeName || gradeLabel}
-                    </div>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Grade labels are populated from the pre-grade form and default to the standard grade name.
-                    </p>
-                  </div>
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-address-line-1">Address line 1</Label>
-                    <Input
-                      id="cover-address-line-1"
-                      placeholder="Address line 1"
-                      value={personalisation.addressLine1}
-                      onChange={handlePersonalisationChange('addressLine1')}
-                    />
-                  </div>
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-address-line-2">Address line 2</Label>
-                    <Input
-                      id="cover-address-line-2"
-                      placeholder="Address line 2"
-                      value={personalisation.addressLine2}
-                      onChange={handlePersonalisationChange('addressLine2')}
-                    />
-                  </div>
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-address-line-3">Address line 3</Label>
-                    <Input
-                      id="cover-address-line-3"
-                      placeholder="Address line 3"
-                      value={personalisation.addressLine3}
-                      onChange={handlePersonalisationChange('addressLine3')}
-                    />
-                  </div>
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-tag-line-1">Tag line 1</Label>
-                    <Input
-                      id="cover-tag-line-1"
-                      placeholder="Enter tag line 1"
-                      value={personalisation.tagLine1}
-                      onChange={handlePersonalisationChange('tagLine1')}
-                    />
-                  </div>
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-tag-line-2">Tag line 2</Label>
-                    <Input
-                      id="cover-tag-line-2"
-                      placeholder="Enter tag line 2"
-                      value={personalisation.tagLine2}
-                      onChange={handlePersonalisationChange('tagLine2')}
-                    />
-                  </div>
-                  <div className="cover-form-field">
-                    <Label htmlFor="cover-tag-line-3">Tag line 3</Label>
-                    <Input
-                      id="cover-tag-line-3"
-                      placeholder="e.g. Playgroup | Nursery | LKG | UKG | Daycare"
-                      value={personalisation.tagLine3}
-                      onChange={handlePersonalisationChange('tagLine3')}
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+    {commonDetailsSummaryCard}
+    {gradeDetailsSummaryCard}
 
-            <div className="flex flex-wrap justify-between gap-3">
-              <Button type="button" variant="outline" onClick={handleBackToSelection}>
-                Back
-              </Button>
-              <Button type="submit" disabled={!canSubmitDetails}>
-                Submit &amp; preview
-              </Button>
+    <Card className="border-none shadow-xl shadow-orange-100/60">
+      <CardHeader className="space-y-2">
+        <CardTitle className="text-xl font-semibold text-slate-900">Cover previews</CardTitle>
+        <p className="text-sm text-slate-600">
+          Browse the personalised artwork using the carousel controls below.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-6 pt-6">
+        {isFetchingAssets && (
+          <div className="cover-carousel-stage">
+            <div className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-orange-200 bg-white/75 p-6">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-400 border-t-transparent"></div>
+              <p className="text-sm font-medium text-orange-500">Loading cover preview...</p>
             </div>
-          </form>
-        )}
-
-        {currentStep === 3 && (
-          <div className="space-y-6">
-            {hasSubmittedDetails && (
-              <Alert className="border-emerald-200 bg-emerald-50 text-emerald-800">
-                <AlertTitle>Displaying preview</AlertTitle>
-                <AlertDescription className="space-y-4">
-                  <p>Your personalised covers are ready. Use the carousel below to review each design.</p>
-                  {activeAsset && (
-                    <div className="overflow-hidden rounded-md border border-emerald-100 bg-white/70">
-                      <div className="flex items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs font-medium uppercase tracking-wide text-emerald-700">
-                        <span>Preview loaded</span>
-                        <span className="truncate">{activeAsset.fileName}</span>
-                      </div>
-                      <div className="max-h-80 overflow-auto bg-white px-3 py-4">
-                        <InlineSvg
-                          markup={activeAsset.personalisedMarkup || activeAsset.svgMarkup}
-                          className="mx-auto max-h-72 min-h-[180px] w-full overflow-hidden rounded border border-emerald-100 bg-white shadow-sm"
-                          sanitize={false}
-                          ref={svgPreviewRef}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </AlertDescription>
-              </Alert>
-            )}
-
-            <Card className="border-none bg-white/80 shadow-sm shadow-orange-100/40">
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm text-slate-600">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-700">Theme:</span>
-                    <span>{selectedTheme ? selectedTheme.label : 'Not selected'}</span>
-                  </div>
-                  <Separator orientation="vertical" className="hidden h-4 sm:block" />
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-700">Colour:</span>
-                    <span>{selectedColour ? selectedColour.label : 'Not selected'}</span>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" onClick={handleEditDetails}>
-                    Edit details
-                  </Button>
-                  <Button type="button" variant="outline" onClick={handleBackToSelection}>
-                    Change theme
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-none shadow-xl shadow-orange-100/60">
-              <CardHeader className="space-y-2">
-                <CardTitle className="text-xl font-semibold text-slate-900">Cover previews</CardTitle>
-                <p className="text-sm text-slate-600">
-                  Browse the personalised artwork using the carousel controls below.
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-6 pt-6">
-                {isFetchingAssets && (
-                  <div className="cover-carousel-stage">
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-orange-200 bg-white/75 p-6">
-                      <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-400 border-t-transparent"></div>
-                      <p className="text-sm font-medium text-orange-500">Loading cover preview...</p>
-                    </div>
-                  </div>
-                )}
-
-                {!isFetchingAssets && assetError && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Unable to load covers</AlertTitle>
-                    <AlertDescription>{assetError}</AlertDescription>
-                  </Alert>
-                )}
-
-                {!isFetchingAssets && !assetError && previewCount === 0 && (
-                  <div className="cover-carousel-empty">
-                    <p className="text-sm text-slate-500">
-                      No cover artwork has been uploaded yet for this combination.
-                    </p>
-                  </div>
-                )}
-
-                {!isFetchingAssets && !assetError && previewCount > 0 && activeAsset && (
-                  <div className="space-y-4">
-                    <div className="cover-carousel-stage">
-                      <div className="cover-carousel-svg">
-                        <InlineSvg
-                          markup={activeAsset.personalisedMarkup || activeAsset.svgMarkup}
-                          className="cover-carousel-image"
-                          ariaLabel={`Cover design ${activeIndex + 1}`}
-                          sanitize={false}
-                          ref={svgCarouselRef}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
-                      <span className="font-medium text-slate-700">{activeAsset.fileName}</span>
-                      {previewCount > 1 && (
-                        <div className="cover-carousel-controls">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={handlePrev}
-                            className="bg-white"
-                            aria-label="Previous cover"
-                          >
-                            <ChevronLeft className="h-5 w-5" />
-                          </Button>
-                          <span className="text-sm font-medium text-slate-700">
-                            {activeIndex + 1} of {previewCount}
-                          </span>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={handleNext}
-                            className="bg-white"
-                            aria-label="Next cover"
-                          >
-                            <ChevronRight className="h-5 w-5" />
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-
-                    {previewCount > 1 && (
-                        <div className="cover-carousel-indicators">
-                          {previewAssets.map((asset, index) => (
-                            <button
-                              key={asset.relativePath || asset.fileName || index}
-                            type="button"
-                            onClick={() => setActiveIndex(index)}
-                            className={`cover-carousel-indicator${index === activeIndex ? ' is-active' : ''}`}
-                            aria-label={`Go to cover ${index + 1}`}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
           </div>
         )}
+
+        {!isFetchingAssets && assetError && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Unable to load covers</AlertTitle>
+            <AlertDescription>{assetError}</AlertDescription>
+          </Alert>
+        )}
+
+        {!isFetchingAssets && !assetError && previewCount === 0 && (
+          <div className="cover-carousel-empty">
+            <p className="text-sm text-slate-500">
+              No cover artwork has been uploaded yet for this combination.
+            </p>
+          </div>
+        )}
+
+        {!isFetchingAssets && !assetError && previewCount > 0 && activeAsset && (
+          <div className="space-y-4">
+            <div className="cover-carousel-stage">
+              <div className="cover-carousel-svg">
+                <InlineSvg
+                  markup={activeAsset.personalisedMarkup || activeAsset.svgMarkup}
+                  className="cover-carousel-image"
+                  ariaLabel={`Cover design ${activeIndex + 1}`}
+                  sanitize={false}
+                  ref={svgCarouselRef}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+              <span className="font-medium text-slate-700">{activeAsset.fileName}</span>
+              {previewCount > 1 && (
+                <div className="cover-carousel-controls">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handlePrev}
+                    className="bg-white"
+                    aria-label="Previous cover"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </Button>
+                  <span className="text-sm font-medium text-slate-700">
+                    {activeIndex + 1} of {previewCount}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handleNext}
+                    className="bg-white"
+                    aria-label="Next cover"
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {previewCount > 1 && (
+              <div className="cover-carousel-indicators">
+                {previewAssets.map((asset, index) => (
+                  <button
+                    key={asset.relativePath || asset.fileName || index}
+                    type="button"
+                    onClick={() => setActiveIndex(index)}
+                    className={`cover-carousel-indicator${index === activeIndex ? ' is-active' : ''}`}
+                    aria-label={`Go to cover ${index + 1}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  </div>
+        )}
+
+
 
       </div>
     </div>

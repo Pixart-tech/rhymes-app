@@ -68,6 +68,60 @@ const DEFAULT_COVER_DEFAULTS = {
   website: ''
 };
 
+const EMPTY_GRADE_DETAILS = {
+  gradeName: '',
+  email: '',
+  addressLine1: '',
+  addressLine2: '',
+  addressLine3: '',
+  tagLine1: '',
+  tagLine2: '',
+  tagLine3: ''
+};
+
+const GRADE_DETAIL_FIELDS = [
+  'email',
+  'addressLine1',
+  'addressLine2',
+  'addressLine3',
+  'tagLine1',
+  'tagLine2',
+  'tagLine3'
+];
+
+const resolveDefaultGradeLabel = (gradeId) => {
+  const option = GRADE_OPTIONS.find((item) => item.id === gradeId);
+  return option ? option.name : 'Grade';
+};
+
+const sanitiseGradePersonalisationInput = (gradeId, details) => {
+  const safeDetails = { ...EMPTY_GRADE_DETAILS };
+
+  if (!details || typeof details !== 'object') {
+    safeDetails.gradeName = resolveDefaultGradeLabel(gradeId);
+    return safeDetails;
+  }
+
+  Object.keys(safeDetails).forEach((key) => {
+    const value = details[key];
+    if (typeof value === 'string') {
+      safeDetails[key] = value;
+      return;
+    }
+
+    if (value == null) {
+      safeDetails[key] = '';
+      return;
+    }
+
+    safeDetails[key] = value.toString();
+  });
+
+  safeDetails.gradeName = safeDetails.gradeName.trim() || resolveDefaultGradeLabel(gradeId);
+
+  return safeDetails;
+};
+
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
   const [schoolId, setSchoolId] = useState('');
@@ -242,7 +296,8 @@ const GradeSelectionPage = ({
   onBackToMode,
   coverDefaults,
   onUpdateCoverDefaults,
-  gradeCustomNames
+  gradePersonalisations,
+  onUpdateGradePersonalisation
 }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -258,6 +313,133 @@ const GradeSelectionPage = ({
   const [coverFormError, setCoverFormError] = useState('');
   const [coverLogoError, setCoverLogoError] = useState('');
   const [isCoverDefaultsDialogOpen, setIsCoverDefaultsDialogOpen] = useState(false);
+  const [isGradeDetailsDialogOpen, setIsGradeDetailsDialogOpen] = useState(false);
+  const [activeGradeForDetails, setActiveGradeForDetails] = useState(null);
+  const [gradeDetailsFormState, setGradeDetailsFormState] = useState(() => ({
+    ...EMPTY_GRADE_DETAILS
+  }));
+  const [gradeDetailsError, setGradeDetailsError] = useState('');
+
+  const getGradeDetails = useCallback(
+    (gradeId) => sanitiseGradePersonalisationInput(gradeId, gradePersonalisations?.[gradeId]),
+    [gradePersonalisations]
+  );
+
+  const isGradeDetailsComplete = useCallback(
+    (gradeId) => {
+      if (!gradeId) {
+        return false;
+      }
+
+      const details = gradePersonalisations?.[gradeId];
+      if (!details) {
+        return false;
+      }
+
+      const sanitized = sanitiseGradePersonalisationInput(gradeId, details);
+      return GRADE_DETAIL_FIELDS.every((field) => sanitized[field].trim().length > 0);
+    },
+    [gradePersonalisations]
+  );
+
+  const gradeDetailsFormComplete = useMemo(() => {
+    if (!activeGradeForDetails) {
+      return false;
+    }
+
+    const sanitized = sanitiseGradePersonalisationInput(activeGradeForDetails, gradeDetailsFormState);
+    return GRADE_DETAIL_FIELDS.every((field) => sanitized[field].trim().length > 0);
+  }, [activeGradeForDetails, gradeDetailsFormState]);
+
+  const openGradeDetailsDialog = useCallback(
+    (gradeId) => {
+      if (!gradeId) {
+        return;
+      }
+
+      setActiveGradeForDetails(gradeId);
+      setGradeDetailsFormState(getGradeDetails(gradeId));
+      setGradeDetailsError('');
+      setIsGradeDetailsDialogOpen(true);
+    },
+    [getGradeDetails]
+  );
+
+  const handleGradeDetailsDialogChange = useCallback((open) => {
+    if (!open) {
+      setIsGradeDetailsDialogOpen(false);
+      setActiveGradeForDetails(null);
+      setGradeDetailsError('');
+      setGradeDetailsFormState({ ...EMPTY_GRADE_DETAILS });
+      return;
+    }
+
+    setIsGradeDetailsDialogOpen(true);
+  }, []);
+
+  const handleGradeDetailsChange = useCallback(
+    (field) => (event) => {
+      const value = event?.target?.value ?? '';
+      setGradeDetailsFormState((current) => ({
+        ...current,
+        [field]: value
+      }));
+      setGradeDetailsError('');
+    },
+    []
+  );
+
+  const handleGradeDetailsReset = useCallback(() => {
+    if (!activeGradeForDetails) {
+      setGradeDetailsFormState({ ...EMPTY_GRADE_DETAILS });
+      setGradeDetailsError('');
+      return;
+    }
+
+    setGradeDetailsFormState(sanitiseGradePersonalisationInput(activeGradeForDetails, {}));
+    setGradeDetailsError('');
+  }, [activeGradeForDetails]);
+
+  const handleGradeDetailsSubmit = useCallback(
+    (event) => {
+      event.preventDefault();
+
+      if (!activeGradeForDetails) {
+        return;
+      }
+
+      const sanitized = sanitiseGradePersonalisationInput(
+        activeGradeForDetails,
+        gradeDetailsFormState
+      );
+
+      const missingField = GRADE_DETAIL_FIELDS.find(
+        (field) => sanitized[field].trim().length === 0
+      );
+
+      if (missingField) {
+        setGradeDetailsError('Please complete all grade-specific fields before saving.');
+        return;
+      }
+
+      onUpdateGradePersonalisation(activeGradeForDetails, sanitized);
+      setIsGradeDetailsDialogOpen(false);
+      setActiveGradeForDetails(null);
+      setGradeDetailsError('');
+      setGradeDetailsFormState({ ...EMPTY_GRADE_DETAILS });
+      toast.success('Grade details saved');
+    },
+    [activeGradeForDetails, gradeDetailsFormState, onUpdateGradePersonalisation]
+  );
+
+  const handleGradeDetailsButtonClick = useCallback(
+    (gradeId) => (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openGradeDetailsDialog(gradeId);
+    },
+    [openGradeDetailsDialog]
+  );
 
   const coverDefaultsComplete = useMemo(() => {
     if (!isCoverMode) {
@@ -482,8 +664,17 @@ const GradeSelectionPage = ({
       return;
     }
 
+    if (isCoverMode) {
+      const detailsComplete = isGradeDetailsComplete(gradeId);
+      if (!detailsComplete) {
+        toast.error('Please add the grade-specific details before continuing.');
+        openGradeDetailsDialog(gradeId);
+        return;
+      }
+    }
+
     onGradeSelect(gradeId, mode);
-  }, [coverDefaultsComplete, isCoverMode, mode, onGradeSelect]);
+  }, [coverDefaultsComplete, isCoverMode, isGradeDetailsComplete, mode, onGradeSelect, openGradeDetailsDialog]);
 
   if (loading) {
     return (
@@ -497,230 +688,366 @@ const GradeSelectionPage = ({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8 text-center md:text-left">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
-            <p className="text-gray-600">School ID: {school.school_id}</p>
+    <>
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8 text-center md:text-left">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
+              <p className="text-gray-600">School ID: {school.school_id}</p>
+            </div>
+            <div className="flex items-center justify-center gap-3">
+              <Button
+                onClick={handleBackToMenu}
+                variant="outline"
+                className="bg-white/80 hover:bg-white border-gray-200"
+              >
+                Back to Menu
+              </Button>
+              <Button
+                onClick={handleLogoutClick}
+                variant="outline"
+                className="bg-white/80 hover:bg-white border-gray-200"
+              >
+                Logout
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center justify-center gap-3">
-            <Button
-              onClick={handleBackToMenu}
-              variant="outline"
-              className="bg-white/80 hover:bg-white border-gray-200"
-            >
-              Back to Menu
-            </Button>
-            <Button
-              onClick={handleLogoutClick}
-              variant="outline"
-              className="bg-white/80 hover:bg-white border-gray-200"
-            >
-              Logout
-            </Button>
+
+          <div className="mb-8 space-y-2 text-center md:text-left">
+            <h2 className="text-2xl font-semibold text-gray-800">{currentMode.title}</h2>
+            <p className="text-gray-600">{currentMode.subtitle}</p>
           </div>
-        </div>
 
-        <div className="mb-8 space-y-2 text-center md:text-left">
-          <h2 className="text-2xl font-semibold text-gray-800">{currentMode.title}</h2>
-          <p className="text-gray-600">{currentMode.subtitle}</p>
-        </div>
+          {isCoverMode && (
+            <>
+              <Card className="mb-8 border-0 bg-white/85 backdrop-blur">
+                <CardHeader>
+                  <CardTitle className="text-xl font-semibold text-gray-800">
+                    Common cover page details
+                  </CardTitle>
+                  <p className="text-sm text-gray-600">
+                    These details are shared across all grades. Update them anytime to personalise cover pages.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                          School contact number
+                        </p>
+                        <p className="text-sm font-semibold text-gray-800">
+                          {coverDefaults?.contactNumber || 'Not provided'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Website</p>
+                        <p className="text-sm font-semibold text-gray-800">
+                          {coverDefaults?.website || 'Not provided'}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">School logo</p>
+                        {coverDefaults?.schoolLogo ? (
+                          <img
+                            src={coverDefaults.schoolLogo}
+                            alt="School logo"
+                            className="h-16 w-16 rounded-md border border-gray-200 bg-white object-contain"
+                          />
+                        ) : (
+                          <div className="rounded-md border border-dashed border-orange-200 bg-orange-50/40 p-4 text-sm text-gray-500">
+                            No logo uploaded yet.
+                          </div>
+                        )}
+                        {coverDefaults?.schoolLogoFileName && (
+                          <p className="text-xs text-gray-500">{coverDefaults.schoolLogoFileName}</p>
+                        )}
+                      </div>
+                    </div>
+                    {!coverDefaultsComplete && (
+                      <p className="text-sm text-orange-600">
+                        Add your school logo, contact number, and website to unlock cover page personalisation.
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-3">
+                      <Button type="button" onClick={handleOpenCoverDefaultsDialog}>
+                        {coverDefaultsComplete ? 'Edit details' : 'Add details'}
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-        {isCoverMode && (
-          <>
-            <Card className="mb-8 border-0 bg-white/85 backdrop-blur">
-              <CardHeader>
-                <CardTitle className="text-xl font-semibold text-gray-800">
-                  Common cover page details
-                </CardTitle>
-                <p className="text-sm text-gray-600">
-                  These details are shared across all grades. Update them anytime to personalise cover pages.
-                </p>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                        School contact number
-                      </p>
-                      <p className="text-sm font-semibold text-gray-800">
-                        {coverDefaults?.contactNumber || 'Not provided'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Website</p>
-                      <p className="text-sm font-semibold text-gray-800">
-                        {coverDefaults?.website || 'Not provided'}
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">School logo</p>
-                      {coverDefaults?.schoolLogo ? (
-                        <img
-                          src={coverDefaults.schoolLogo}
-                          alt="School logo"
-                          className="h-16 w-16 rounded-md border border-gray-200 bg-white object-contain"
+              <Dialog open={isCoverDefaultsDialogOpen} onOpenChange={handleCoverDefaultsDialogChange}>
+                <DialogContent className="bg-white">
+                  <DialogHeader>
+                    <DialogTitle>Common cover page details</DialogTitle>
+                    <DialogDescription>
+                      Provide the shared school information used to personalise every cover page.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleSaveCoverDefaults} className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="cover-default-contact">School contact number</Label>
+                        <Input
+                          id="cover-default-contact"
+                          type="tel"
+                          inputMode="tel"
+                          placeholder="Contact number"
+                          value={coverFormState.contactNumber}
+                          onChange={handleCoverDefaultsChange('contactNumber')}
                         />
-                      ) : (
-                        <div className="rounded-md border border-dashed border-orange-200 bg-orange-50/40 p-4 text-sm text-gray-500">
-                          No logo uploaded yet.
-                        </div>
-                      )}
-                      {coverDefaults?.schoolLogoFileName && (
-                        <p className="text-xs text-gray-500">{coverDefaults.schoolLogoFileName}</p>
-                      )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cover-default-website">Website</Label>
+                        <Input
+                          id="cover-default-website"
+                          placeholder="e.g. www.edplore.com"
+                          value={coverFormState.website}
+                          onChange={handleCoverDefaultsChange('website')}
+                        />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor="cover-default-logo">Upload school logo</Label>
+                        <Input
+                          id="cover-default-logo"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleCoverLogoUpload}
+                        />
+                        {coverFormState.schoolLogoFileName && !coverLogoError && (
+                          <p className="text-xs text-gray-500">
+                            Selected file: {coverFormState.schoolLogoFileName}
+                          </p>
+                        )}
+                        {coverLogoError && (
+                          <p className="text-xs text-red-600">{coverLogoError}</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  {!coverDefaultsComplete && (
-                    <p className="text-sm text-orange-600">
-                      Add your school logo, contact number, and website to unlock cover page personalisation.
-                    </p>
-                  )}
-                  <div className="flex flex-wrap gap-3">
-                    <Button type="button" onClick={handleOpenCoverDefaultsDialog}>
-                      {coverDefaultsComplete ? 'Edit details' : 'Add details'}
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                    {coverFormError && (
+                      <p className="text-sm text-red-600">{coverFormError}</p>
+                    )}
+                    <DialogFooter className="gap-2">
+                      <Button type="submit" className="bg-gradient-to-r from-orange-400 to-red-400 text-white">
+                        Save details
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleResetCoverDefaults}
+                        className="border-orange-300 text-orange-500 hover:bg-orange-50"
+                      >
+                        Clear
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </>
+          )}
 
-            <Dialog open={isCoverDefaultsDialogOpen} onOpenChange={handleCoverDefaultsDialogChange}>
-              <DialogContent className="bg-white">
-                <DialogHeader>
-                  <DialogTitle>Common cover page details</DialogTitle>
-                  <DialogDescription>
-                    Provide the shared school information used to personalise every cover page.
-                  </DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleSaveCoverDefaults} className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="cover-default-contact">School contact number</Label>
-                      <Input
-                        id="cover-default-contact"
-                        type="tel"
-                        inputMode="tel"
-                        placeholder="Contact number"
-                        value={coverFormState.contactNumber}
-                        onChange={handleCoverDefaultsChange('contactNumber')}
-                      />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {GRADE_OPTIONS.map((grade) => {
+              const resolvedGradeDetails = getGradeDetails(grade.id);
+              const displayGradeLabel = resolvedGradeDetails.gradeName.trim() || grade.name;
+              const gradeDetailsComplete = GRADE_DETAIL_FIELDS.every(
+                (field) => resolvedGradeDetails[field].trim().length > 0
+              );
+
+              return (
+                <Card
+                  key={grade.id}
+                  className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
+                  onClick={() => handleGradeCardSelect(grade.id)}
+                >
+                  <CardContent className="p-6 text-center space-y-4">
+                    <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
+                      <span className="text-2xl">{grade.icon}</span>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="cover-default-website">Website</Label>
-                      <Input
-                        id="cover-default-website"
-                        placeholder="e.g. www.edplore.com"
-                        value={coverFormState.website}
-                        onChange={handleCoverDefaultsChange('website')}
-                      />
+                    <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
+                    <div className="space-y-1 text-sm text-gray-600">
+                      <p className="block text-sm font-medium text-gray-700">Grade label</p>
+                      <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 font-medium text-gray-800">
+                        {displayGradeLabel}
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Grade labels come from the pre-grade form. When unavailable, the default grade name is used.
+                      </p>
                     </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label htmlFor="cover-default-logo">Upload school logo</Label>
-                      <Input
-                        id="cover-default-logo"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleCoverLogoUpload}
-                      />
-                      {coverFormState.schoolLogoFileName && !coverLogoError && (
+                    {isCoverMode && (
+                      <div className="space-y-2 text-sm text-gray-600">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleGradeDetailsButtonClick(grade.id)}
+                          className="w-full border-dashed border-orange-300 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                        >
+                          {gradeDetailsComplete ? 'Edit grade details' : 'Add grade details'}
+                        </Button>
+                        <p className={`text-xs ${gradeDetailsComplete ? 'text-emerald-600' : 'text-orange-600'}`}>
+                          {gradeDetailsComplete
+                            ? 'Grade-specific details saved.'
+                            : 'Complete the grade details to unlock cover previews.'}
+                        </p>
+                      </div>
+                    )}
+                    {mode === 'rhymes' && (
+                      <Badge variant="secondary" className="mb-4">
+                        {getGradeStatusInfo(grade.id)} Rhymes Selected
+                      </Badge>
+                    )}
+                    <div className="space-y-3">
+                      <Button
+                        type="button"
+                        className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
+                      >
+                        {currentMode.buttonText}
+                      </Button>
+                      {isCoverMode && (
                         <p className="text-xs text-gray-500">
-                          Selected file: {coverFormState.schoolLogoFileName}
+                          These details feed directly into the cover artwork and must be completed before proceeding.
                         </p>
                       )}
-                      {coverLogoError && (
-                        <p className="text-xs text-red-600">{coverLogoError}</p>
-                      )}
+                      {mode === 'rhymes' && (() => {
+                        const status = gradeStatus.find(s => s.grade === grade.id);
+                        const isComplete = status ? status.selected_count >= 25 : false;
+                        if (!isComplete) return null;
+
+                        return (
+                          <Button
+                            variant="outline"
+                            type="button"
+                            onClick={handleDownloadBinderClick(grade.id)}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onTouchStart={(event) => event.stopPropagation()}
+                            className="w-full flex items-center justify-center gap-2 border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white/90"
+                          >
+                            <Download className="w-4 h-4" />
+                            Download Binder
+                          </Button>
+                        );
+                      })()}
                     </div>
-                  </div>
-                  {coverFormError && (
-                    <p className="text-sm text-red-600">{coverFormError}</p>
-                  )}
-                  <DialogFooter className="gap-2">
-                    <Button type="submit" className="bg-gradient-to-r from-orange-400 to-red-400 text-white">
-                      Save details
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleResetCoverDefaults}
-                      className="border-orange-300 text-orange-500 hover:bg-orange-50"
-                    >
-                      Clear
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
-          </>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {GRADE_OPTIONS.map((grade) => {
-            const storedGradeLabel = gradeCustomNames?.[grade.id]?.trim();
-            const displayGradeLabel = storedGradeLabel || grade.name;
-
-            return (
-              <Card
-                key={grade.id}
-                className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
-                onClick={() => handleGradeCardSelect(grade.id)}
-              >
-                <CardContent className="p-6 text-center space-y-4">
-                  <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                    <span className="text-2xl">{grade.icon}</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
-                  <div className="space-y-1 text-sm text-gray-600">
-                    <p className="block text-sm font-medium text-gray-700">Grade label</p>
-                    <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 font-medium text-gray-800">
-                      {displayGradeLabel}
-                    </div>
-                    <p className="text-xs text-gray-500">
-                      Grade labels come from the pre-grade form. When unavailable, the default grade name is used.
-                    </p>
-                  </div>
-                  {mode === 'rhymes' && (
-                    <Badge variant="secondary" className="mb-4">
-                      {getGradeStatusInfo(grade.id)} Rhymes Selected
-                    </Badge>
-                  )}
-                  <div className="space-y-3">
-                    <Button
-                      type="button"
-                      className={`w-full bg-gradient-to-r ${grade.color} hover:opacity-90 text-white font-semibold rounded-xl transition-all duration-300`}
-                    >
-                      {currentMode.buttonText}
-                    </Button>
-                    {mode === 'rhymes' && (() => {
-                      const status = gradeStatus.find(s => s.grade === grade.id);
-                      const isComplete = status ? status.selected_count >= 25 : false;
-                      if (!isComplete) return null;
-
-                      return (
-                        <Button
-                          variant="outline"
-                          type="button"
-                          onClick={handleDownloadBinderClick(grade.id)}
-                          onMouseDown={(event) => event.stopPropagation()}
-                          onTouchStart={(event) => event.stopPropagation()}
-                          className="w-full flex items-center justify-center gap-2 border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white/90"
-                        >
-                          <Download className="w-4 h-4" />
-                          Download Binder
-                      </Button>
-                    );
-                  })()}
-                </div>
-              </CardContent>
-              </Card>
-          );
-          })}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
         </div>
       </div>
-    </div>
+
+      <Dialog open={isGradeDetailsDialogOpen} onOpenChange={handleGradeDetailsDialogChange}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>Grade specific details</DialogTitle>
+            <DialogDescription>
+              Collect the grade-specific information before selecting the cover workflow. These details are
+              reused whenever you reopen this grade.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleGradeDetailsSubmit} className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="grade-details-name">Grade label</Label>
+                <Input
+                  id="grade-details-name"
+                  placeholder="Enter grade label"
+                  value={gradeDetailsFormState.gradeName}
+                  onChange={handleGradeDetailsChange('gradeName')}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="grade-details-email">Email</Label>
+                <Input
+                  id="grade-details-email"
+                  type="email"
+                  placeholder="e.g. hello@school.com"
+                  value={gradeDetailsFormState.email}
+                  onChange={handleGradeDetailsChange('email')}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="grade-details-address-line-1">Address line 1</Label>
+                <Input
+                  id="grade-details-address-line-1"
+                  placeholder="Address line 1"
+                  value={gradeDetailsFormState.addressLine1}
+                  onChange={handleGradeDetailsChange('addressLine1')}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="grade-details-address-line-2">Address line 2</Label>
+                <Input
+                  id="grade-details-address-line-2"
+                  placeholder="Address line 2"
+                  value={gradeDetailsFormState.addressLine2}
+                  onChange={handleGradeDetailsChange('addressLine2')}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="grade-details-address-line-3">Address line 3</Label>
+                <Input
+                  id="grade-details-address-line-3"
+                  placeholder="Address line 3"
+                  value={gradeDetailsFormState.addressLine3}
+                  onChange={handleGradeDetailsChange('addressLine3')}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="grade-details-tag-line-1">Tag line 1</Label>
+                <Input
+                  id="grade-details-tag-line-1"
+                  placeholder="Enter tag line 1"
+                  value={gradeDetailsFormState.tagLine1}
+                  onChange={handleGradeDetailsChange('tagLine1')}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="grade-details-tag-line-2">Tag line 2</Label>
+                <Input
+                  id="grade-details-tag-line-2"
+                  placeholder="Enter tag line 2"
+                  value={gradeDetailsFormState.tagLine2}
+                  onChange={handleGradeDetailsChange('tagLine2')}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="grade-details-tag-line-3">Tag line 3</Label>
+                <Input
+                  id="grade-details-tag-line-3"
+                  placeholder="e.g. Playgroup | Nursery | LKG | UKG | Daycare"
+                  value={gradeDetailsFormState.tagLine3}
+                  onChange={handleGradeDetailsChange('tagLine3')}
+                />
+              </div>
+            </div>
+            {gradeDetailsError && (
+              <p className="text-sm text-red-600">{gradeDetailsError}</p>
+            )}
+            <DialogFooter className="gap-2">
+              <Button
+                type="submit"
+                className="bg-gradient-to-r from-orange-400 to-red-400 text-white"
+                disabled={!gradeDetailsFormComplete}
+              >
+                Save details
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleGradeDetailsReset}
+                className="border-orange-300 text-orange-500 hover:bg-orange-50"
+              >
+                Clear
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 
@@ -2137,9 +2464,28 @@ function App() {
     ...DEFAULT_COVER_DEFAULTS,
     ...(persistedState.coverDefaults || {})
   }));
-  const [gradeCustomNames, setGradeCustomNames] = useState(() => ({
-    ...(persistedState.gradeCustomNames || {})
-  }));
+  const [gradePersonalisations, setGradePersonalisations] = useState(() => {
+    const raw =
+      persistedState.gradePersonalisations ||
+      persistedState.gradeCustomNames ||
+      {};
+
+    return Object.entries(raw).reduce((accumulator, [gradeId, value]) => {
+      if (!gradeId) {
+        return accumulator;
+      }
+
+      if (typeof value === 'string') {
+        accumulator[gradeId] = sanitiseGradePersonalisationInput(gradeId, {
+          gradeName: value
+        });
+        return accumulator;
+      }
+
+      accumulator[gradeId] = sanitiseGradePersonalisationInput(gradeId, value);
+      return accumulator;
+    }, {});
+  });
 
   useEffect(() => {
     if (!school) {
@@ -2152,9 +2498,9 @@ function App() {
       selectedMode,
       selectedGrade,
       coverDefaults,
-      gradeCustomNames
+      gradePersonalisations
     });
-  }, [school, selectedMode, selectedGrade, coverDefaults, gradeCustomNames]);
+  }, [school, selectedMode, selectedGrade, coverDefaults, gradePersonalisations]);
 
   const clearCoverWorkflowForSchool = useCallback((schoolId) => {
     if (!schoolId) {
@@ -2175,6 +2521,55 @@ function App() {
     });
   }, []);
 
+  const handleGradePersonalisationUpdate = useCallback((gradeId, details) => {
+    if (!gradeId) {
+      return;
+    }
+
+    setGradePersonalisations((current) => {
+      const next = { ...current };
+
+      if (!details) {
+        delete next[gradeId];
+        return next;
+      }
+
+      next[gradeId] = sanitiseGradePersonalisationInput(gradeId, details);
+      return next;
+    });
+  }, []);
+
+  const resolveStoredGradeName = useCallback(
+    (gradeId) => {
+      if (!gradeId) {
+        return '';
+      }
+
+      const details = gradePersonalisations?.[gradeId];
+      if (!details) {
+        return '';
+      }
+
+      if (typeof details === 'string') {
+        return details.trim();
+      }
+
+      return (details.gradeName || '').toString().trim();
+    },
+    [gradePersonalisations]
+  );
+
+  const getStoredGradeDetails = useCallback(
+    (gradeId) => {
+      if (!gradeId) {
+        return null;
+      }
+
+      return sanitiseGradePersonalisationInput(gradeId, gradePersonalisations?.[gradeId]);
+    },
+    [gradePersonalisations]
+  );
+
   const handleAuth = (schoolData) => {
     if (school?.school_id && school?.school_id !== schoolData?.school_id) {
       clearCoverWorkflowForSchool(school.school_id);
@@ -2184,7 +2579,7 @@ function App() {
     setSelectedMode(null);
     setSelectedGrade(null);
     setCoverDefaults({ ...DEFAULT_COVER_DEFAULTS });
-    setGradeCustomNames({});
+    setGradePersonalisations({});
   };
 
   const handleModeSelect = (mode) => {
@@ -2218,7 +2613,7 @@ function App() {
     setSelectedMode(null);
     setSchool(null);
     setCoverDefaults({ ...DEFAULT_COVER_DEFAULTS });
-    setGradeCustomNames({});
+    setGradePersonalisations({});
   };
 
   return (
@@ -2245,13 +2640,14 @@ function App() {
                 onBackToMode={handleBackToModeSelection}
                 coverDefaults={coverDefaults}
                 onUpdateCoverDefaults={handleCoverDefaultsUpdate}
-                gradeCustomNames={gradeCustomNames}
+                gradePersonalisations={gradePersonalisations}
+                onUpdateGradePersonalisation={handleGradePersonalisationUpdate}
               />
             ) : selectedMode === 'rhymes' ? (
               <RhymeSelectionPage
                 school={school}
                 grade={selectedGrade}
-                customGradeName={gradeCustomNames?.[selectedGrade]}
+                customGradeName={resolveStoredGradeName(selectedGrade)}
                 onBack={handleBackToGrades}
                 onLogout={handleLogout}
               />
@@ -2259,7 +2655,8 @@ function App() {
               <CoverPageWorkflow
                 school={school}
                 grade={selectedGrade}
-                customGradeName={gradeCustomNames?.[selectedGrade]}
+                customGradeName={resolveStoredGradeName(selectedGrade)}
+                gradeDetails={getStoredGradeDetails(selectedGrade)}
                 onBackToGrades={handleBackToGrades}
                 onBackToMode={handleBackToModeSelection}
                 onLogout={handleLogout}
