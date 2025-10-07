@@ -40,10 +40,33 @@ import {
   Download,
   LayoutTemplate,
   BookMarked,
-  Clock
+  Clock,
+  Loader2
 } from 'lucide-react';
 
 const API = API_BASE_URL || '/api';
+
+const buildBinderDownloadUrl = (apiBase, schoolId, gradeId) => {
+  if (!apiBase || !schoolId || !gradeId) {
+    return '';
+  }
+
+  const basePath = `${apiBase}/rhymes/binder/${schoolId}/${gradeId}`;
+  const timestamp = Date.now().toString();
+
+  if (typeof window !== 'undefined' && window.location) {
+    try {
+      const resolved = new URL(basePath, window.location.origin);
+      resolved.searchParams.set('_t', timestamp);
+      return resolved.toString();
+    } catch (error) {
+      console.error('Error constructing binder download URL:', error);
+    }
+  }
+
+  const separator = basePath.includes('?') ? '&' : '?';
+  return `${basePath}${separator}_t=${timestamp}`;
+};
 
 const GRADE_OPTIONS = [
   { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
@@ -632,8 +655,10 @@ const GradeSelectionPage = ({
 }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [downloadingGradeId, setDownloadingGradeId] = useState(null);
   const navigate = useNavigate();
   const isCoverMode = mode === 'cover';
+  const downloadResetTimerRef = useRef(null);
 
   const modeConfig = {
     rhymes: {
@@ -681,36 +706,60 @@ const GradeSelectionPage = ({
     return status ? `${status.selected_count} of 25` : '0 of 25';
   };
 
-  const handleDownloadBinder = async (gradeId) => {
-    try {
-      const response = await axios.get(`${API}/rhymes/binder/${school.school_id}/${gradeId}`, {
-        responseType: 'blob',
-        params: {
-          _t: Date.now()
+  useEffect(
+    () => () => {
+      if (downloadResetTimerRef.current) {
+        clearTimeout(downloadResetTimerRef.current);
+        downloadResetTimerRef.current = null;
+      }
+    },
+    []
+  );
+
+  const handleDownloadBinder = useCallback(
+    (gradeId, event) => {
+      event?.stopPropagation();
+      event?.preventDefault();
+
+      if (!school?.school_id) {
+        toast.error('Missing school information for download');
+        return;
+      }
+
+      const downloadUrl = buildBinderDownloadUrl(API, school.school_id, gradeId);
+      if (!downloadUrl) {
+        toast.error('Unable to prepare binder download');
+        return;
+      }
+
+      try {
+        setDownloadingGradeId(gradeId);
+
+        const anchor = document.createElement('a');
+        anchor.href = downloadUrl;
+        anchor.setAttribute('download', `${gradeId}-rhyme-binder.pdf`);
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+
+        toast.success('Binder download started');
+      } catch (error) {
+        console.error('Error initiating binder download:', error);
+        toast.error('Failed to download binder');
+      } finally {
+        if (downloadResetTimerRef.current) {
+          clearTimeout(downloadResetTimerRef.current);
         }
-      });
 
-      const blob = new Blob([response.data], { type: 'application/pdf' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${gradeId}-rhyme-binder.pdf`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      toast.success('Binder download started');
-    } catch (error) {
-      console.error('Error downloading binder:', error);
-      toast.error('Failed to download binder');
-    }
-  };
-
-  const handleDownloadBinderClick = (gradeId) => (event) => {
-    event.stopPropagation();
-    event.preventDefault();
-    handleDownloadBinder(gradeId);
-  };
+        downloadResetTimerRef.current = setTimeout(() => {
+          setDownloadingGradeId((current) => (current === gradeId ? null : current));
+          downloadResetTimerRef.current = null;
+        }, 800);
+      }
+    },
+    [school?.school_id]
+  );
 
   const handleLogoutClick = () => {
     if (typeof onLogout === 'function') {
@@ -912,13 +961,23 @@ const GradeSelectionPage = ({
                       <Button
                         variant="outline"
                         type="button"
-                        onClick={handleDownloadBinderClick(grade.id)}
+                        onClick={(event) => handleDownloadBinder(grade.id, event)}
                         onMouseDown={(event) => event.stopPropagation()}
                         onTouchStart={(event) => event.stopPropagation()}
+                        disabled={downloadingGradeId === grade.id}
                         className="w-full flex items-center justify-center gap-2 border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white/90"
                       >
-                        <Download className="w-4 h-4" />
-                        Download Binder
+                        {downloadingGradeId === grade.id ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Preparing...
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4" />
+                            Download Binder
+                          </>
+                        )}
                       </Button>
                     </div>
                   )}
