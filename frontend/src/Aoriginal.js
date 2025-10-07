@@ -139,7 +139,10 @@ const GradeSelectionPage = ({ school, onGradeSelect, onLogout }) => {
 
     try {
       const response = await axios.get(`${API}/rhymes/binder/${school.school_id}/${gradeId}`, {
-        responseType: 'blob'
+        responseType: 'blob',
+        params: {
+          _t: Date.now()
+        }
       });
 
       const blob = new Blob([response.data], { type: 'application/pdf' });
