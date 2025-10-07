@@ -239,10 +239,6 @@ const GradeSelectionPage = ({
   const [coverFormState, setCoverFormState] = useState(() => ({
     schoolLogo: coverDefaults?.schoolLogo || '',
     schoolLogoFileName: coverDefaults?.schoolLogoFileName || '',
-<<<<<<< HEAD
-   
-=======
->>>>>>> 6ec008fb223b01cdbd378d83488f05729e90b36f
     contactNumber: coverDefaults?.contactNumber || '',
     website: coverDefaults?.website || ''
   }));
@@ -256,10 +252,6 @@ const GradeSelectionPage = ({
 
     return Boolean(
       (coverDefaults?.schoolLogo || '').trim() &&
-<<<<<<< HEAD
-        
-=======
->>>>>>> 6ec008fb223b01cdbd378d83488f05729e90b36f
         (coverDefaults?.contactNumber || '').trim() &&
         (coverDefaults?.website || '').trim()
     );
@@ -271,10 +263,6 @@ const GradeSelectionPage = ({
     setCoverFormState({
       schoolLogo: coverDefaults?.schoolLogo || '',
       schoolLogoFileName: coverDefaults?.schoolLogoFileName || '',
-<<<<<<< HEAD
-   
-=======
->>>>>>> 6ec008fb223b01cdbd378d83488f05729e90b36f
       contactNumber: coverDefaults?.contactNumber || '',
       website: coverDefaults?.website || ''
     });
@@ -330,19 +318,11 @@ const GradeSelectionPage = ({
     (event) => {
       event?.preventDefault();
 
-<<<<<<< HEAD
-      
-=======
->>>>>>> 6ec008fb223b01cdbd378d83488f05729e90b36f
       const trimmedContact = coverFormState.contactNumber.trim();
       const trimmedWebsite = coverFormState.website.trim();
 
       if (!coverFormState.schoolLogo || !trimmedContact || !trimmedWebsite) {
-<<<<<<< HEAD
-        setCoverFormError('Please provide a school logo, kid name, contact number and website.');
-=======
         setCoverFormError('Please provide a school logo, contact number and website.');
->>>>>>> 6ec008fb223b01cdbd378d83488f05729e90b36f
         return;
       }
 
@@ -371,10 +351,6 @@ const GradeSelectionPage = ({
     setCoverFormState({
       schoolLogo: '',
       schoolLogoFileName: '',
-<<<<<<< HEAD
-      
-=======
->>>>>>> 6ec008fb223b01cdbd378d83488f05729e90b36f
       contactNumber: '',
       website: ''
     });
@@ -605,10 +581,6 @@ const GradeSelectionPage = ({
               ) : (
                 <div className="space-y-4">
                   <div className="grid gap-4 md:grid-cols-2">
-<<<<<<< HEAD
-                    
-=======
->>>>>>> 6ec008fb223b01cdbd378d83488f05729e90b36f
                     <div>
                       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                         School contact number
@@ -2145,10 +2117,6 @@ function App() {
     setCoverDefaults({
       schoolLogo: defaults?.schoolLogo || '',
       schoolLogoFileName: defaults?.schoolLogoFileName || '',
-<<<<<<< HEAD
-      
-=======
->>>>>>> 6ec008fb223b01cdbd378d83488f05729e90b36f
       contactNumber: defaults?.contactNumber || '',
       website: defaults?.website || ''
     });
