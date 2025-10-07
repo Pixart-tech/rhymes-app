@@ -11,6 +11,7 @@ import { Label } from './ui/label';
 import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 import { API_BASE_URL } from '../lib/utils';
 import InlineSvg from './InlineSvg';
+import { loadCoverWorkflowState, saveCoverWorkflowState } from '../lib/storage';
 
 const GRADE_LABELS = {
   nursery: 'Nursery',
@@ -38,6 +39,20 @@ const COLOUR_OPTIONS = [
   { id: 'colour3', label: 'Colour 3', hex: '#f9b475' },
   { id: 'colour4', label: 'Colour 4', hex: '#c8e9f1' }
 ];
+
+const createBlankPersonalisation = (defaults = {}) => ({
+  schoolLogo: defaults.schoolLogo || '',
+  gradeName: '',
+  email: '',
+  addressLine1: '',
+  addressLine2: '',
+  addressLine3: '',
+  contactNumber: defaults.contactNumber || '',
+  website: defaults.website || '',
+  tagLine1: '',
+  tagLine2: '',
+  tagLine3: ''
+});
 
 const normalizeToken = (value) =>
   (value ?? '')
@@ -129,20 +144,9 @@ const CoverPageWorkflow = ({
   const [previewAssets, setPreviewAssets] = useState([]);
   const [assetError, setAssetError] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
-  const [personalisation, setPersonalisation] = useState({
-    schoolLogo: coverDefaults?.schoolLogo || '',
-    gradeName: '',
-    email: '',
-    addressLine1: '',
-    addressLine2: '',
-    addressLine3: '',
-    contactNumber: coverDefaults?.contactNumber || '',
-    website: coverDefaults?.website || '',
-    tagLine1: '',
-    tagLine2: '',
-    tagLine3: ''
-  });
-  const [gradeNameDirty, setGradeNameDirty] = useState(false);
+  const [personalisation, setPersonalisation] = useState(() =>
+    createBlankPersonalisation(coverDefaults)
+  );
   const schoolLogoFileName = coverDefaults?.schoolLogoFileName || '';
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -152,6 +156,8 @@ const CoverPageWorkflow = ({
   const svgPreviewRef = useRef(null);
   const svgCarouselRef = useRef(null);
   const coverAssetsNetworkBaseUrl = useMemo(resolveCoverAssetsNetworkBaseUrl, []);
+  const previousGradeLabelRef = useRef(gradeLabel);
+  const coverStateKeyRef = useRef('');
 
   const gradeLabel = useMemo(() => {
     if (customGradeName && customGradeName.trim()) {
@@ -172,22 +178,88 @@ const CoverPageWorkflow = ({
 
 
   useEffect(() => {
+    const previousLabel = previousGradeLabelRef.current;
+    previousGradeLabelRef.current = gradeLabel;
+
     if (!gradeLabel) {
       return;
     }
 
     setPersonalisation((current) => {
-      if (gradeNameDirty) {
-        return current;
+      const trimmed = (current.gradeName || '').trim();
+      if (!trimmed) {
+        return { ...current, gradeName: gradeLabel };
       }
 
-      if (current.gradeName === gradeLabel) {
-        return current;
+      if (previousLabel && trimmed === previousLabel && trimmed !== gradeLabel) {
+        return { ...current, gradeName: gradeLabel };
       }
 
-      return { ...current, gradeName: gradeLabel };
+      return current;
     });
-  }, [gradeLabel, gradeNameDirty]);
+  }, [gradeLabel]);
+
+  useEffect(() => {
+    const schoolId = school?.school_id;
+
+    if (!schoolId || !grade) {
+      coverStateKeyRef.current = '';
+      assetCacheRef.current.clear();
+      setSelectedThemeId(null);
+      setSelectedColourId(null);
+      setPersonalisation(createBlankPersonalisation(coverDefaults));
+      setCurrentStep(1);
+      setHasSubmittedDetails(false);
+      setPreviewAssets([]);
+      setActiveIndex(0);
+      setAssetError('');
+      setIsFetchingAssets(false);
+      return;
+    }
+
+    const key = `${schoolId}::${grade}`;
+    if (coverStateKeyRef.current === key) {
+      return;
+    }
+
+    coverStateKeyRef.current = key;
+    assetCacheRef.current.clear();
+
+    const storedState = loadCoverWorkflowState(schoolId, grade);
+
+    if (!storedState) {
+      setSelectedThemeId(null);
+      setSelectedColourId(null);
+      setPersonalisation(createBlankPersonalisation(coverDefaults));
+      setCurrentStep(1);
+      setHasSubmittedDetails(false);
+      setPreviewAssets([]);
+      setActiveIndex(0);
+      setAssetError('');
+      setIsFetchingAssets(false);
+      return;
+    }
+
+    setSelectedThemeId(storedState.selectedThemeId ?? null);
+    setSelectedColourId(storedState.selectedColourId ?? null);
+    const storedStep = Number.parseInt(storedState.currentStep ?? 1, 10);
+    const normalizedStep = Number.isFinite(storedStep) ? Math.min(Math.max(storedStep, 1), 2) : 1;
+    setCurrentStep(normalizedStep);
+    setHasSubmittedDetails(Boolean(storedState.hasSubmittedDetails));
+    setPreviewAssets([]);
+    setActiveIndex(0);
+    setAssetError('');
+    setIsFetchingAssets(false);
+
+    if (storedState.personalisation && typeof storedState.personalisation === 'object') {
+      setPersonalisation({
+        ...createBlankPersonalisation(coverDefaults),
+        ...storedState.personalisation
+      });
+    } else {
+      setPersonalisation(createBlankPersonalisation(coverDefaults));
+    }
+  }, [school?.school_id, grade, coverDefaults]);
 
   const selectedTheme = useMemo(
     () => THEME_OPTIONS.find((theme) => theme.id === selectedThemeId) || null,
@@ -240,6 +312,21 @@ const CoverPageWorkflow = ({
     }),
     [personalisation]
   );
+
+  useEffect(() => {
+    const schoolId = school?.school_id;
+    if (!schoolId || !grade) {
+      return;
+    }
+
+    saveCoverWorkflowState(schoolId, grade, {
+      selectedThemeId,
+      selectedColourId,
+      personalisation,
+      currentStep,
+      hasSubmittedDetails
+    });
+  }, [school?.school_id, grade, selectedThemeId, selectedColourId, personalisation, currentStep, hasSubmittedDetails]);
 
   const fetchCoverAssets = useCallback(
     async (selectionKey) => {
@@ -405,10 +492,6 @@ const CoverPageWorkflow = ({
         [field]: value
       }));
 
-      if (field === 'gradeName') {
-        setGradeNameDirty(true);
-      }
-
       if (hasSubmittedDetails) {
         setHasSubmittedDetails(false);
       }
@@ -458,22 +541,32 @@ const CoverPageWorkflow = ({
       }
 
       const updateGroupText = (groupId, value, textIndex = 0) => {
-        const group = svgElement.querySelector(`g#${groupId}`);
-        if (!group) {
-          return false;
+        const candidateIds = Array.isArray(groupId) ? groupId : [groupId];
+
+        for (const candidate of candidateIds) {
+          if (!candidate) {
+            continue;
+          }
+
+          const group = svgElement.querySelector(`g#${candidate}`);
+          if (!group) {
+            continue;
+          }
+
+          const textNodes = group.querySelectorAll('text');
+          if (!textNodes.length) {
+            continue;
+          }
+
+          const safeIndex = Math.min(textIndex, textNodes.length - 1);
+          textNodes[safeIndex].textContent = value || '';
+          return true;
         }
 
-        const textNodes = group.querySelectorAll('text');
-        if (!textNodes.length) {
-          return false;
-        }
-
-        const safeIndex = Math.min(textIndex, textNodes.length - 1);
-        textNodes[safeIndex].textContent = value || '';
-        return true;
+        return false;
       };
 
-      updateGroupText('Grade', trimmedPersonalisation.gradeName);
+      updateGroupText(['Grade', 'grade'], trimmedPersonalisation.gradeName);
       updateGroupText('Add_1', trimmedPersonalisation.addressLine1);
       updateGroupText('Add_2', trimmedPersonalisation.addressLine2);
       updateGroupText('Add_3', trimmedPersonalisation.addressLine3);
@@ -792,13 +885,13 @@ const CoverPageWorkflow = ({
                     />
                   </div>
                   <div className="cover-form-field">
-                    <Label htmlFor="cover-grade-name">Grade name</Label>
-                    <Input
-                      id="cover-grade-name"
-                      placeholder="e.g. UKG"
-                      value={personalisation.gradeName}
-                      onChange={handlePersonalisationChange('gradeName')}
-                    />
+                    <Label className="text-slate-700">Grade name</Label>
+                    <div className="rounded-md border border-slate-200 bg-slate-50/80 px-3 py-2 text-sm font-semibold text-slate-800">
+                      {trimmedPersonalisation.gradeName || gradeLabel}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Grade labels are populated from the pre-grade form and default to the standard grade name.
+                    </p>
                   </div>
                   <div className="cover-form-field">
                     <Label htmlFor="cover-address-line-1">Address line 1</Label>
