@@ -257,13 +257,8 @@ const GradeSelectionPage = ({
 
     return Boolean(
       (coverDefaults?.schoolLogo || '').trim() &&
-<<<<<<< HEAD
-        (coverDefaults?.contactNumber || '').trim() &&
-        (coverDefaults?.website || '').trim()
-=======
       (coverDefaults?.contactNumber || '').trim() &&
       (coverDefaults?.website || '').trim()
->>>>>>> 801214ddbdd697e019e5675884b7cf49ce5a2545
     );
   }, [coverDefaults, isCoverMode]);
 
@@ -327,10 +322,6 @@ const GradeSelectionPage = ({
   const handleSaveCoverDefaults = useCallback(
     (event) => {
       event?.preventDefault();
-<<<<<<< HEAD
-
-=======
->>>>>>> 801214ddbdd697e019e5675884b7cf49ce5a2545
       const trimmedContact = coverFormState.contactNumber.trim();
       const trimmedWebsite = coverFormState.website.trim();
 
