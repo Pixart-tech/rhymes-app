@@ -50,7 +50,6 @@ const GRADE_OPTIONS = [
 const DEFAULT_COVER_DEFAULTS = {
   schoolLogo: '',
   schoolLogoFileName: '',
-  kidName: '',
   contactNumber: '',
   website: ''
 };
@@ -228,7 +227,9 @@ const GradeSelectionPage = ({
   onLogout,
   onBackToMode,
   coverDefaults,
-  onUpdateCoverDefaults
+  onUpdateCoverDefaults,
+  gradeCustomNames,
+  onUpdateGradeCustomName
 }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -238,7 +239,6 @@ const GradeSelectionPage = ({
   const [coverFormState, setCoverFormState] = useState(() => ({
     schoolLogo: coverDefaults?.schoolLogo || '',
     schoolLogoFileName: coverDefaults?.schoolLogoFileName || '',
-    kidName: coverDefaults?.kidName || '',
     contactNumber: coverDefaults?.contactNumber || '',
     website: coverDefaults?.website || ''
   }));
@@ -252,7 +252,6 @@ const GradeSelectionPage = ({
 
     return Boolean(
       (coverDefaults?.schoolLogo || '').trim() &&
-        (coverDefaults?.kidName || '').trim() &&
         (coverDefaults?.contactNumber || '').trim() &&
         (coverDefaults?.website || '').trim()
     );
@@ -264,7 +263,6 @@ const GradeSelectionPage = ({
     setCoverFormState({
       schoolLogo: coverDefaults?.schoolLogo || '',
       schoolLogoFileName: coverDefaults?.schoolLogoFileName || '',
-      kidName: coverDefaults?.kidName || '',
       contactNumber: coverDefaults?.contactNumber || '',
       website: coverDefaults?.website || ''
     });
@@ -320,12 +318,11 @@ const GradeSelectionPage = ({
     (event) => {
       event?.preventDefault();
 
-      const trimmedKidName = coverFormState.kidName.trim();
       const trimmedContact = coverFormState.contactNumber.trim();
       const trimmedWebsite = coverFormState.website.trim();
 
-      if (!coverFormState.schoolLogo || !trimmedKidName || !trimmedContact || !trimmedWebsite) {
-        setCoverFormError('Please provide a school logo, kid name, contact number and website.');
+      if (!coverFormState.schoolLogo || !trimmedContact || !trimmedWebsite) {
+        setCoverFormError('Please provide a school logo, contact number and website.');
         return;
       }
 
@@ -333,7 +330,6 @@ const GradeSelectionPage = ({
         onUpdateCoverDefaults({
           schoolLogo: coverFormState.schoolLogo,
           schoolLogoFileName: coverFormState.schoolLogoFileName,
-          kidName: trimmedKidName,
           contactNumber: trimmedContact,
           website: trimmedWebsite
         });
@@ -355,7 +351,6 @@ const GradeSelectionPage = ({
     setCoverFormState({
       schoolLogo: '',
       schoolLogoFileName: '',
-      kidName: '',
       contactNumber: '',
       website: ''
     });
@@ -457,9 +452,17 @@ const GradeSelectionPage = ({
         return;
       }
 
+      if (isCoverMode) {
+        const customName = gradeCustomNames?.[gradeId]?.trim();
+        if (!customName) {
+          toast.error('Please enter a custom grade name before choosing this grade.');
+          return;
+        }
+      }
+
       onGradeSelect(gradeId, mode);
     },
-    [coverDefaultsComplete, isCoverMode, mode, onGradeSelect]
+    [coverDefaultsComplete, gradeCustomNames, isCoverMode, mode, onGradeSelect]
   );
 
   if (loading) {
@@ -579,12 +582,6 @@ const GradeSelectionPage = ({
                 <div className="space-y-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Kid name</p>
-                      <p className="text-sm font-semibold text-gray-800">
-                        {coverDefaults?.kidName || 'Not provided'}
-                      </p>
-                    </div>
-                    <div>
                       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                         School contact number
                       </p>
@@ -628,18 +625,51 @@ const GradeSelectionPage = ({
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {GRADE_OPTIONS.map((grade) => (
-            <Card
-              key={grade.id}
-              className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
-              onClick={() => handleGradeCardSelect(grade.id)}
-              aria-disabled={isCoverMode && !coverDefaultsComplete}
+          {GRADE_OPTIONS.map((grade) => {
+            const hasCustomGradeName = Boolean(gradeCustomNames?.[grade.id]?.trim());
+            const isCardDisabled = isCoverMode && (!coverDefaultsComplete || !hasCustomGradeName);
+
+            return (
+              <Card
+                key={grade.id}
+                className={`group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm ${
+                  isCardDisabled ? 'opacity-60 hover:scale-100 hover:shadow-none' : ''
+                }`}
+                onClick={() => handleGradeCardSelect(grade.id)}
+              aria-disabled={isCardDisabled}
             >
-              <CardContent className="p-6 text-center">
+              <CardContent className="p-6 text-center space-y-4">
                 <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
                   <span className="text-2xl">{grade.icon}</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
+                <div className="space-y-1 text-sm text-gray-600">
+                  <Label
+                    htmlFor={`custom-grade-${grade.id}`}
+                    className="block text-sm font-medium text-gray-700"
+                  >
+                    Custom grade name
+                  </Label>
+                  <Input
+                    id={`custom-grade-${grade.id}`}
+                    value={gradeCustomNames?.[grade.id] ?? ''}
+                    placeholder={`e.g. ${grade.name}`}
+                    onClick={(event) => event.stopPropagation()}
+                    onFocus={(event) => event.stopPropagation()}
+                    onChange={(event) => {
+                      const value = event?.target?.value ?? '';
+                      if (typeof onUpdateGradeCustomName === 'function') {
+                        onUpdateGradeCustomName(grade.id, value);
+                      }
+                    }}
+                    className="bg-white/80"
+                  />
+                  <p className="text-xs text-gray-500">
+                    {hasCustomGradeName
+                      ? 'This label will appear on the cover pages.'
+                      : 'Leave blank to use the default grade name.'}
+                  </p>
+                </div>
                 {mode === 'rhymes' && (
                   <Badge variant="secondary" className="mb-4">
                     {getGradeStatusInfo(grade.id)} Rhymes Selected
@@ -669,8 +699,9 @@ const GradeSelectionPage = ({
                   })()}
                 </div>
               </CardContent>
-            </Card>
-          ))}
+              </Card>
+          );
+          })}
         </div>
       </div>
     </div>
@@ -925,7 +956,7 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
 };
 
 // Main Rhyme Selection Interface
-const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
+const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }) => {
   const [availableRhymes, setAvailableRhymes] = useState({});
   const [reusableRhymes, setReusableRhymes] = useState({});
   const [selectedRhymes, setSelectedRhymes] = useState([]);
@@ -1313,6 +1344,13 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         } catch (prefetchError) {
           console.error('Error preloading initial rhyme SVGs:', prefetchError);
         }
+
+        const nextPageIndex = initialIndex + 1;
+        if (nextPageIndex < MAX_RHYMES_PER_GRADE) {
+          ensurePageAssets(nextPageIndex, sortedSelections).catch((prefetchError) => {
+            console.error('Error preloading upcoming rhyme SVGs:', prefetchError);
+          });
+        }
       }
     } catch (error) {
       console.error('Error fetching selected rhymes:', error);
@@ -1606,18 +1644,23 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     }
   };
 
-  const handlePageChange = async (newPageIndex) => {
+  const handlePageChange = (newPageIndex) => {
     const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_RHYMES_PER_GRADE - 1));
 
+    setCurrentPageIndex(clampedIndex);
+
     if (Number.isFinite(clampedIndex)) {
-      try {
-        await ensurePageAssets(clampedIndex);
-      } catch (error) {
+      ensurePageAssets(clampedIndex).catch((error) => {
         console.error('Error loading rhyme SVGs for page:', error);
+      });
+
+      const nextIndex = clampedIndex + 1;
+      if (nextIndex < MAX_RHYMES_PER_GRADE) {
+        ensurePageAssets(nextIndex).catch((error) => {
+          console.error('Error prefetching next rhyme page:', error);
+        });
       }
     }
-
-    setCurrentPageIndex(clampedIndex);
   };
 
   const handleToggleReusable = () => {
@@ -1732,10 +1775,30 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
   const isDoublePageLayout = currentPageRhymes.layout === 'double';
   const isTopFullPage = hasTopRhyme && !isDoublePageLayout && parsePagesValue(currentPageRhymes.top.pages) === 1;
   const showBottomContainer = isDoublePageLayout ? false : !isTopFullPage;
-  const doublePageSvgContent = isDoublePageLayout ? currentPageRhymes.top?.svgContent || '' : '';
+  const topSelection = currentPageRhymes.top;
+  const bottomSelection = currentPageRhymes.bottom;
+  const topSvgContent = typeof topSelection?.svgContent === 'string' ? topSelection.svgContent.trim() : '';
+  const bottomSvgContent = typeof bottomSelection?.svgContent === 'string' ? bottomSelection.svgContent.trim() : '';
+  const topReady = !topSelection || topSvgContent.length > 0;
+  const bottomReady = !showBottomContainer || !bottomSelection || bottomSvgContent.length > 0;
+  const isTopLoading = !!topSelection && !topReady;
+  const isBottomLoading = showBottomContainer && !!bottomSelection && !bottomReady;
+  const canShowNextButton = topReady && bottomReady;
+  const doublePageSvgContent = isDoublePageLayout ? topSvgContent : '';
+
+  const renderLoadingIndicator = (label) => (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-white/80 p-6">
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-400 border-t-transparent"></div>
+      <p className="text-sm font-medium text-orange-500">Loading {label}...</p>
+    </div>
+  );
 
   const renderDoublePageSvg = () => {
-    if (typeof doublePageSvgContent === 'string' && doublePageSvgContent.trim().length > 0) {
+    if (isTopLoading) {
+      return renderLoadingIndicator(topSelection?.name || 'rhyme');
+    }
+
+    if (typeof doublePageSvgContent === 'string' && doublePageSvgContent.length > 0) {
       return (
         <InlineSvg
           markup={doublePageSvgContent}
@@ -1753,13 +1816,15 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
     );
   };
 
+  const gradeDisplayName = (customGradeName && customGradeName.trim()) || grade;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50">
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-6 sm:px-6">
         {/* Header */}
         <div className="mb-6 flex flex-shrink-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800 capitalize">{grade} Grade - Rhyme Selection</h1>
+            <h1 className="text-2xl font-bold text-gray-800 capitalize">{gradeDisplayName} Grade - Rhyme Selection</h1>
             <p className="text-gray-600">{school.school_name} ({school.school_id})</p>
           </div>
           <div className="flex items-center gap-2">
@@ -1797,7 +1862,7 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                 <div className="flex-shrink-0 space-y-4">
                   <div className="flex items-center justify-between">
                     <Button
-                      onClick={() => void handlePageChange(Math.max(0, currentPageIndex - 1))}
+                      onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
                       disabled={currentPageIndex === 0}
                       variant="outline"
                       size="sm"
@@ -1810,15 +1875,21 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                       Page {currentPageIndex + 1} of {totalPages}
                     </div>
 
-                    <Button
-                      onClick={() => void handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
-                      disabled={currentPageIndex >= totalPages - 1}
-                      variant="outline"
-                      size="sm"
-                    >
-                      Next
-                      <ChevronRight className="w-4 h-4 ml-1" />
-                    </Button>
+                    {canShowNextButton ? (
+                      <Button
+                        onClick={() => handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
+                        disabled={currentPageIndex >= totalPages - 1}
+                        variant="outline"
+                        size="sm"
+                      >
+                        Next
+                        <ChevronRight className="w-4 h-4 ml-1" />
+                      </Button>
+                    ) : (
+                      <div className="flex h-10 min-w-[120px] items-center justify-center rounded-full border border-dashed border-orange-200 bg-white/80 px-4 text-xs font-medium text-orange-500">
+                        Loading page...
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1883,13 +1954,20 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                       </Button>
 
                                       <div className={`rhyme-slot-container${hasTopRhyme ? ' has-svg' : ''}`}>
-
-                                        <InlineSvg
-                                          markup={currentPageRhymes.top?.svgContent || ''}
-                                          className="rhyme-svg-content"
-                                          sanitize={false}
-                                          ariaLabel={`${currentPageRhymes.top?.name || 'Rhyme'} illustration`}
-                                        />
+                                        {isTopLoading ? (
+                                          renderLoadingIndicator(currentPageRhymes.top?.name || 'rhyme')
+                                        ) : topSvgContent.length > 0 ? (
+                                          <InlineSvg
+                                            markup={currentPageRhymes.top?.svgContent || ''}
+                                            className="rhyme-svg-content"
+                                            sanitize={false}
+                                            ariaLabel={`${currentPageRhymes.top?.name || 'Rhyme'} illustration`}
+                                          />
+                                        ) : (
+                                          <div className="flex h-full w-full items-center justify-center bg-white/80 text-sm text-gray-500">
+                                            SVG preview unavailable
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                   ) : (
@@ -1923,13 +2001,20 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
                                         </Button>
 
                                         <div className={`rhyme-slot-container${hasBottomRhyme ? ' has-svg' : ''}`}>
-
-                                          <InlineSvg
-                                            markup={currentPageRhymes.bottom?.svgContent || ''}
-                                            className="rhyme-svg-content"
-                                            sanitize={false}
-                                            ariaLabel={`${currentPageRhymes.bottom?.name || 'Rhyme'} illustration`}
-                                          />
+                                          {isBottomLoading ? (
+                                            renderLoadingIndicator(currentPageRhymes.bottom?.name || 'rhyme')
+                                          ) : bottomSvgContent.length > 0 ? (
+                                            <InlineSvg
+                                              markup={currentPageRhymes.bottom?.svgContent || ''}
+                                              className="rhyme-svg-content"
+                                              sanitize={false}
+                                              ariaLabel={`${currentPageRhymes.bottom?.name || 'Rhyme'} illustration`}
+                                            />
+                                          ) : (
+                                            <div className="flex h-full w-full items-center justify-center bg-white/80 text-sm text-gray-500">
+                                              SVG preview unavailable
+                                            </div>
+                                          )}
                                         </div>
                                       </div>
                                     ) : (
@@ -2026,15 +2111,22 @@ function App() {
   const [selectedMode, setSelectedMode] = useState(null);
   const [selectedGrade, setSelectedGrade] = useState(null);
   const [coverDefaults, setCoverDefaults] = useState(() => ({ ...DEFAULT_COVER_DEFAULTS }));
+  const [gradeCustomNames, setGradeCustomNames] = useState({});
 
   const handleCoverDefaultsUpdate = useCallback((defaults) => {
     setCoverDefaults({
       schoolLogo: defaults?.schoolLogo || '',
       schoolLogoFileName: defaults?.schoolLogoFileName || '',
-      kidName: defaults?.kidName || '',
       contactNumber: defaults?.contactNumber || '',
       website: defaults?.website || ''
     });
+  }, []);
+
+  const handleCustomGradeNameChange = useCallback((gradeId, value) => {
+    setGradeCustomNames((current) => ({
+      ...current,
+      [gradeId]: value
+    }));
   }, []);
 
   const handleAuth = (schoolData) => {
@@ -2042,6 +2134,7 @@ function App() {
     setSelectedMode(null);
     setSelectedGrade(null);
     setCoverDefaults({ ...DEFAULT_COVER_DEFAULTS });
+    setGradeCustomNames({});
   };
 
   const handleModeSelect = (mode) => {
@@ -2096,11 +2189,14 @@ function App() {
                 onBackToMode={handleBackToModeSelection}
                 coverDefaults={coverDefaults}
                 onUpdateCoverDefaults={handleCoverDefaultsUpdate}
+                gradeCustomNames={gradeCustomNames}
+                onUpdateGradeCustomName={handleCustomGradeNameChange}
               />
             ) : selectedMode === 'rhymes' ? (
               <RhymeSelectionPage
                 school={school}
                 grade={selectedGrade}
+                customGradeName={gradeCustomNames?.[selectedGrade]}
                 onBack={handleBackToGrades}
                 onLogout={handleLogout}
               />
@@ -2108,6 +2204,7 @@ function App() {
               <CoverPageWorkflow
                 school={school}
                 grade={selectedGrade}
+                customGradeName={gradeCustomNames?.[selectedGrade]}
                 onBackToGrades={handleBackToGrades}
                 onBackToMode={handleBackToModeSelection}
                 onLogout={handleLogout}
