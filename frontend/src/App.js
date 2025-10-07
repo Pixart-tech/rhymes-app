@@ -431,10 +431,7 @@ const GradeSelectionPage = ({
     return status ? `${status.selected_count} of 25` : '0 of 25';
   };
 
-  const handleDownloadBinder = async (gradeId, event) => {
-    event?.stopPropagation();
-    event?.preventDefault();
-
+  const handleDownloadBinder = async (gradeId) => {
     try {
       const response = await axios.get(`${API}/rhymes/binder/${school.school_id}/${gradeId}`, {
         responseType: 'blob'
@@ -454,6 +451,12 @@ const GradeSelectionPage = ({
       console.error('Error downloading binder:', error);
       toast.error('Failed to download binder');
     }
+  };
+
+  const handleDownloadBinderClick = (gradeId) => (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    handleDownloadBinder(gradeId);
   };
 
   const handleLogoutClick = () => {
@@ -700,7 +703,9 @@ const GradeSelectionPage = ({
                         <Button
                           variant="outline"
                           type="button"
-                          onClick={(event) => handleDownloadBinder(grade.id, event)}
+                          onClick={handleDownloadBinderClick(grade.id)}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onTouchStart={(event) => event.stopPropagation()}
                           className="w-full flex items-center justify-center gap-2 border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white/90"
                         >
                           <Download className="w-4 h-4" />
