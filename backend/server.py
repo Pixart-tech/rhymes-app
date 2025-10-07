@@ -1095,6 +1095,7 @@ def _render_svg_on_canvas(
 @api_router.get("/rhymes/binder/{school_id}/{grade}")
 async def download_rhyme_binder(school_id: str, grade: str):
     """Generate a PDF binder containing all rhymes for the specified grade."""
+    print("Iam running")
 
     try:
         pdf_resources = _load_pdf_dependencies()
