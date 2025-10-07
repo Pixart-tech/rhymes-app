@@ -51,15 +51,15 @@ const GRADE_DETAIL_FIELDS = [
 const createBlankPersonalisation = (defaults = {}, defaultGradeLabel = '') => ({
   schoolLogo: defaults.schoolLogo || '',
   gradeName: defaultGradeLabel || '',
-  email: '',
-  addressLine1: '',
-  addressLine2: '',
-  addressLine3: '',
+  email: defaults.email || '',
+  addressLine1: defaults.addressLine1 || '',
+  addressLine2: defaults.addressLine2 || '',
+  addressLine3: defaults.addressLine3 || '',
   contactNumber: defaults.contactNumber || '',
   website: defaults.website || '',
-  tagLine1: '',
-  tagLine2: '',
-  tagLine3: ''
+  tagLine1: defaults.tagLine1 || '',
+  tagLine2: defaults.tagLine2 || '',
+  tagLine3: defaults.tagLine3 || ''
 });
 
 const sanitiseGradeDetails = (details) => {
@@ -240,6 +240,13 @@ const CoverPageWorkflow = ({
       schoolLogo: coverDefaults?.schoolLogo || '',
       contactNumber: coverDefaults?.contactNumber || '',
       website: coverDefaults?.website || '',
+      email: coverDefaults?.email || current.email,
+      addressLine1: coverDefaults?.addressLine1 || current.addressLine1,
+      addressLine2: coverDefaults?.addressLine2 || current.addressLine2,
+      addressLine3: coverDefaults?.addressLine3 || current.addressLine3,
+      tagLine1: coverDefaults?.tagLine1 || current.tagLine1,
+      tagLine2: coverDefaults?.tagLine2 || current.tagLine2,
+      tagLine3: coverDefaults?.tagLine3 || current.tagLine3,
       gradeName: (current.gradeName || '').trim() ? current.gradeName : gradeLabel
     }));
   }, [coverDefaults, gradeLabel]);
@@ -565,19 +572,6 @@ const CoverPageWorkflow = ({
 
   const activeAsset = previewAssets[activeIndex] || null;
   const canPreviewCovers = Boolean(selectedTheme && selectedColour && isPersonalisationComplete);
-
-  const handleBackToSelection = useCallback(() => {
-    resetPreviewState();
-    setCurrentStep(1);
-  }, [resetPreviewState]);
-
-  const handleUpdateGradeDetails = useCallback(() => {
-    resetPreviewState();
-    setCurrentStep(1);
-    if (typeof onBackToGrades === 'function') {
-      onBackToGrades();
-    }
-  }, [onBackToGrades, resetPreviewState]);
 
   const stepLabels = [
     'Select theme & colour',
@@ -980,42 +974,6 @@ const CoverPageWorkflow = ({
 
         {currentStep === 2 && (
   <div className="space-y-6">
-    {hasSubmittedDetails && (
-      <Alert className="border-emerald-200 bg-emerald-50 text-emerald-800">
-        <AlertTitle>Displaying preview</AlertTitle>
-        <AlertDescription className="space-y-4">
-          <p>Your personalised covers are ready. Use the carousel below to review each design.</p>
-        </AlertDescription>
-      </Alert>
-    )}
-
-    <Card className="border-none bg-white/80 shadow-sm shadow-orange-100/40">
-      <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm text-slate-600">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-slate-700">Theme:</span>
-            <span>{selectedTheme ? selectedTheme.label : 'Not selected'}</span>
-          </div>
-          <Separator orientation="vertical" className="hidden h-4 sm:block" />
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-slate-700">Colour:</span>
-            <span>{selectedColour ? selectedColour.label : 'Not selected'}</span>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" onClick={handleUpdateGradeDetails}>
-            Update grade details
-          </Button>
-          <Button type="button" variant="outline" onClick={handleBackToSelection}>
-            Change theme
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-
-    {commonDetailsSummaryCard}
-    {gradeDetailsSummaryCard}
-
     <Card className="border-none shadow-xl shadow-orange-100/60">
       <CardHeader className="space-y-2">
         <CardTitle className="text-xl font-semibold text-slate-900">Cover previews</CardTitle>
