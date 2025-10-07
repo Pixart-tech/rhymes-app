@@ -198,6 +198,24 @@ const CoverPageWorkflow = ({
   gradeDetails
 }) => {
   const gradeLabel = resolveGradeLabel(grade, customGradeName);
+  const resolvedGradeNames = useMemo(() => {
+    const gradeNameSource = coverDefaults?.gradeNames || {};
+    const identifiers = new Set([
+      ...Object.keys(GRADE_LABELS),
+      ...Object.keys(gradeNameSource || {})
+    ]);
+
+    if (grade) {
+      identifiers.add(grade);
+    }
+
+    const result = {};
+    identifiers.forEach((identifier) => {
+      result[identifier] = resolveGradeLabel(identifier, gradeNameSource?.[identifier]);
+    });
+
+    return result;
+  }, [coverDefaults?.gradeNames, grade]);
   const gradeDetailsSanitised = useMemo(() => {
     const sanitized = sanitiseGradeDetails(gradeDetails);
     if (!sanitized) {
@@ -617,6 +635,33 @@ const CoverPageWorkflow = ({
       };
 
       updateGroupText(['Grade', 'grade'], trimmedPersonalisation.gradeName);
+
+      Object.entries(resolvedGradeNames).forEach(([gradeId, gradeValue]) => {
+        if (!gradeValue) {
+          return;
+        }
+
+        const baseId = gradeId.toString();
+        const normalizedId = baseId.toLowerCase();
+        const capitalizedId =
+          normalizedId.charAt(0).toUpperCase() + normalizedId.slice(1);
+
+        const candidateIds = Array.from(
+          new Set([
+            `${baseId}-grade`,
+            `${baseId}_grade`,
+            `${baseId}Grade`,
+            `${normalizedId}-grade`,
+            `${normalizedId}_grade`,
+            `${normalizedId}Grade`,
+            `${capitalizedId}-grade`,
+            `${capitalizedId}_grade`,
+            `${capitalizedId}Grade`
+          ])
+        );
+
+        updateGroupText(candidateIds, gradeValue);
+      });
       updateGroupText('Add_1', trimmedPersonalisation.addressLine1);
       updateGroupText('Add_2', trimmedPersonalisation.addressLine2);
       updateGroupText('Add_3', trimmedPersonalisation.addressLine3);
@@ -692,7 +737,7 @@ const CoverPageWorkflow = ({
 
       updateImageById('_Logo_1', trimmedPersonalisation.schoolLogo);
     },
-    [trimmedPersonalisation]
+    [resolvedGradeNames, trimmedPersonalisation]
   );
 
   useEffect(() => {

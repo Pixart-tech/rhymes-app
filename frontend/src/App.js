@@ -52,6 +52,12 @@ const GRADE_OPTIONS = [
   { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' }
 ];
 
+const createDefaultGradeNames = () =>
+  GRADE_OPTIONS.reduce((acc, grade) => {
+    acc[grade.id] = grade.name;
+    return acc;
+  }, {});
+
 const DEFAULT_COVER_DEFAULTS = {
   schoolLogo: '',
   schoolLogoFileName: '',
@@ -63,13 +69,34 @@ const DEFAULT_COVER_DEFAULTS = {
   addressLine3: '',
   tagLine1: '',
   tagLine2: '',
-  tagLine3: ''
+  tagLine3: '',
+  gradeNames: createDefaultGradeNames()
 };
+
+const mergeCoverDefaults = (overrides = {}) => ({
+  ...DEFAULT_COVER_DEFAULTS,
+  ...overrides,
+  gradeNames: {
+    ...DEFAULT_COVER_DEFAULTS.gradeNames,
+    ...(overrides.gradeNames || {})
+  }
+});
 
 const resolveDefaultGradeLabel = (gradeId) => {
   const option = GRADE_OPTIONS.find((item) => item.id === gradeId);
   return option ? option.name : 'Grade';
 };
+
+const buildCoverGradeNames = (source) =>
+  GRADE_OPTIONS.reduce((acc, grade) => {
+    const rawValue = source?.gradeNames?.[grade.id];
+    if (typeof rawValue === 'string' && rawValue.trim().length > 0) {
+      acc[grade.id] = rawValue.trim();
+    } else {
+      acc[grade.id] = resolveDefaultGradeLabel(grade.id);
+    }
+    return acc;
+  }, {});
 
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
@@ -250,7 +277,8 @@ const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout
     addressLine3: coverDetails?.addressLine3 || '',
     tagLine1: coverDetails?.tagLine1 || '',
     tagLine2: coverDetails?.tagLine2 || '',
-    tagLine3: coverDetails?.tagLine3 || ''
+    tagLine3: coverDetails?.tagLine3 || '',
+    gradeNames: buildCoverGradeNames(coverDetails)
   }));
   const [formError, setFormError] = useState('');
   const [logoError, setLogoError] = useState('');
@@ -267,7 +295,8 @@ const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout
       addressLine3: coverDetails?.addressLine3 || '',
       tagLine1: coverDetails?.tagLine1 || '',
       tagLine2: coverDetails?.tagLine2 || '',
-      tagLine3: coverDetails?.tagLine3 || ''
+      tagLine3: coverDetails?.tagLine3 || '',
+      gradeNames: buildCoverGradeNames(coverDetails)
     });
   }, [coverDetails]);
 
@@ -282,6 +311,18 @@ const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout
     },
     []
   );
+
+  const handleGradeNameChange = useCallback((gradeId) => (event) => {
+    const value = event?.target?.value ?? '';
+    setFormState((current) => ({
+      ...current,
+      gradeNames: {
+        ...(current.gradeNames || {}),
+        [gradeId]: value
+      }
+    }));
+    setFormError('');
+  }, []);
 
   const handleLogoUpload = useCallback(async (event) => {
     const input = event?.target;
@@ -354,6 +395,19 @@ const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout
         return;
       }
 
+      const trimmedGradeNames = GRADE_OPTIONS.reduce((acc, grade) => {
+        const value = formState.gradeNames?.[grade.id] ?? '';
+        acc[grade.id] = value.trim();
+        return acc;
+      }, {});
+
+      const missingGradeName = GRADE_OPTIONS.find((grade) => trimmedGradeNames[grade.id].length === 0);
+
+      if (missingGradeName) {
+        setFormError('Please provide a grade name for every grade.');
+        return;
+      }
+
       if (typeof onSave === 'function') {
         onSave({
           ...formState,
@@ -365,7 +419,8 @@ const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout
           addressLine3: formState.addressLine3.trim(),
           tagLine1: formState.tagLine1.trim(),
           tagLine2: formState.tagLine2.trim(),
-          tagLine3: formState.tagLine3.trim()
+          tagLine3: formState.tagLine3.trim(),
+          gradeNames: trimmedGradeNames
         });
       }
 
@@ -433,6 +488,24 @@ const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout
                     value={formState.email}
                     onChange={handleChange('email')}
                   />
+                </div>
+                <div className="space-y-3 md:col-span-2">
+                  <p className="text-sm font-semibold text-gray-700">Grade names</p>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {GRADE_OPTIONS.map((grade) => (
+                      <div key={`grade-name-field-${grade.id}`} className="space-y-2">
+                        <Label htmlFor={`cover-details-grade-${grade.id}`}>
+                          {grade.name} grade name
+                        </Label>
+                        <Input
+                          id={`cover-details-grade-${grade.id}`}
+                          placeholder={`Enter ${grade.name.toLowerCase()} grade name`}
+                          value={formState.gradeNames?.[grade.id] || ''}
+                          onChange={handleGradeNameChange(grade.id)}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="cover-details-logo">Upload school logo</Label>
@@ -680,6 +753,8 @@ const GradeSelectionPage = ({
     coverDefaults?.tagLine3
   ].filter((line) => typeof line === 'string' && line.trim().length > 0);
 
+  const gradeNameOverrides = buildCoverGradeNames(coverDefaults);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
@@ -770,6 +845,17 @@ const GradeSelectionPage = ({
                       {coverDefaults?.schoolLogoFileName && (
                         <p className="text-xs text-gray-500">{coverDefaults.schoolLogoFileName}</p>
                       )}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Grade names</p>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {GRADE_OPTIONS.map((grade) => (
+                        <div key={`grade-name-display-${grade.id}`}>
+                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{grade.name}</p>
+                          <p className="text-sm font-semibold text-gray-800">{gradeNameOverrides[grade.id]}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
                   {(addressLines.length > 0 || tagLines.length > 0) && (
@@ -2257,10 +2343,9 @@ function App() {
   const [school, setSchool] = useState(() => persistedState.school ?? null);
   const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
   const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
-  const [coverDefaults, setCoverDefaults] = useState(() => ({
-    ...DEFAULT_COVER_DEFAULTS,
-    ...(persistedState.coverDefaults || {})
-  }));
+  const [coverDefaults, setCoverDefaults] = useState(() =>
+    mergeCoverDefaults(persistedState.coverDefaults || {})
+  );
   const [isCoverDetailsStepComplete, setIsCoverDetailsStepComplete] = useState(
     () => Boolean(persistedState.isCoverDetailsStepComplete)
   );
@@ -2291,19 +2376,29 @@ function App() {
   }, []);
 
   const handleCoverDetailsSave = useCallback((details) => {
-    setCoverDefaults({
-      schoolLogo: details?.schoolLogo || '',
-      schoolLogoFileName: details?.schoolLogoFileName || '',
-      contactNumber: details?.contactNumber || '',
-      website: details?.website || '',
-      email: details?.email || '',
-      addressLine1: details?.addressLine1 || '',
-      addressLine2: details?.addressLine2 || '',
-      addressLine3: details?.addressLine3 || '',
-      tagLine1: details?.tagLine1 || '',
-      tagLine2: details?.tagLine2 || '',
-      tagLine3: details?.tagLine3 || ''
-    });
+    const sanitizedGradeNames = GRADE_OPTIONS.reduce((acc, grade) => {
+      const rawValue = details?.gradeNames?.[grade.id];
+      const trimmed = typeof rawValue === 'string' ? rawValue.trim() : '';
+      acc[grade.id] = trimmed || resolveDefaultGradeLabel(grade.id);
+      return acc;
+    }, {});
+
+    setCoverDefaults(
+      mergeCoverDefaults({
+        schoolLogo: details?.schoolLogo || '',
+        schoolLogoFileName: details?.schoolLogoFileName || '',
+        contactNumber: details?.contactNumber || '',
+        website: details?.website || '',
+        email: details?.email || '',
+        addressLine1: details?.addressLine1 || '',
+        addressLine2: details?.addressLine2 || '',
+        addressLine3: details?.addressLine3 || '',
+        tagLine1: details?.tagLine1 || '',
+        tagLine2: details?.tagLine2 || '',
+        tagLine3: details?.tagLine3 || '',
+        gradeNames: sanitizedGradeNames
+      })
+    );
     setIsCoverDetailsStepComplete(true);
   }, []);
 
@@ -2312,13 +2407,21 @@ function App() {
     setIsCoverDetailsStepComplete(false);
   }, []);
 
-  const resolveStoredGradeName = useCallback((gradeId) => {
-    if (!gradeId) {
-      return '';
-    }
+  const resolveStoredGradeName = useCallback(
+    (gradeId) => {
+      if (!gradeId) {
+        return '';
+      }
 
-    return resolveDefaultGradeLabel(gradeId);
-  }, []);
+      const stored = coverDefaults?.gradeNames?.[gradeId];
+      if (typeof stored === 'string' && stored.trim().length > 0) {
+        return stored.trim();
+      }
+
+      return resolveDefaultGradeLabel(gradeId);
+    },
+    [coverDefaults]
+  );
 
   const handleAuth = (schoolData) => {
     if (school?.school_id && school?.school_id !== schoolData?.school_id) {
@@ -2328,7 +2431,7 @@ function App() {
     setSchool(schoolData);
     setSelectedMode(null);
     setSelectedGrade(null);
-    setCoverDefaults({ ...DEFAULT_COVER_DEFAULTS });
+    setCoverDefaults(mergeCoverDefaults());
     setIsCoverDetailsStepComplete(false);
   };
 
@@ -2366,7 +2469,7 @@ function App() {
     setSelectedGrade(null);
     setSelectedMode(null);
     setSchool(null);
-    setCoverDefaults({ ...DEFAULT_COVER_DEFAULTS });
+    setCoverDefaults(mergeCoverDefaults());
     setIsCoverDetailsStepComplete(false);
   };
 
