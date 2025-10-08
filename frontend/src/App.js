@@ -939,7 +939,9 @@ const GradeSelectionPage = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {GRADE_OPTIONS.map((grade) => {
-              const resolvedGradeName = gradeNameOverrides[grade.id] || grade.name;
+              const resolvedGradeName = isCoverMode
+                ? gradeNameOverrides[grade.id] || grade.name
+                : grade.name;
 
               return (
                 <Card
