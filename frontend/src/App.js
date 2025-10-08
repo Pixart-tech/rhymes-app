@@ -938,52 +938,56 @@ const GradeSelectionPage = ({
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {GRADE_OPTIONS.map((grade) => (
-              <Card
-                key={grade.id}
-                className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
-                onClick={() => handleGradeCardSelect(grade.id)}
-              >
-                <CardContent className="p-6 text-center space-y-4">
-                  <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                    <span className="text-2xl">{grade.icon}</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-2">{grade.name}</h3>
-                  {isCoverMode ? (
-                    <p className="text-sm text-gray-600">
-                      Start crafting personalised cover pages for {grade.name}.
-                    </p>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm font-medium text-gray-800">
-                        {getGradeStatusInfo(grade.id)} Rhymes Selected
-                      </div>
-                      <Button
-                        variant="outline"
-                        type="button"
-                        onClick={(event) => handleDownloadBinder(grade.id, event)}
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onTouchStart={(event) => event.stopPropagation()}
-                        disabled={downloadingGradeId === grade.id}
-                        className="w-full flex items-center justify-center gap-2 border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white/90"
-                      >
-                        {downloadingGradeId === grade.id ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Preparing...
-                          </>
-                        ) : (
-                          <>
-                            <Download className="w-4 h-4" />
-                            Download Binder
-                          </>
-                        )}
-                      </Button>
+            {GRADE_OPTIONS.map((grade) => {
+              const resolvedGradeName = gradeNameOverrides[grade.id] || grade.name;
+
+              return (
+                <Card
+                  key={grade.id}
+                  className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
+                  onClick={() => handleGradeCardSelect(grade.id)}
+                >
+                  <CardContent className="p-6 text-center space-y-4">
+                    <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
+                      <span className="text-2xl">{grade.icon}</span>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
+                    <h3 className="text-xl font-bold text-gray-800 mb-2">{resolvedGradeName}</h3>
+                    {isCoverMode ? (
+                      <p className="text-sm text-gray-600">
+                        Start crafting personalised cover pages for {resolvedGradeName}.
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm font-medium text-gray-800">
+                          {getGradeStatusInfo(grade.id)} Rhymes Selected
+                        </div>
+                        <Button
+                          variant="outline"
+                          type="button"
+                          onClick={(event) => handleDownloadBinder(grade.id, event)}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onTouchStart={(event) => event.stopPropagation()}
+                          disabled={downloadingGradeId === grade.id}
+                          className="w-full flex items-center justify-center gap-2 border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white/90"
+                        >
+                          {downloadingGradeId === grade.id ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Preparing...
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-4 h-4" />
+                              Download Binder
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </div>
       </div>
