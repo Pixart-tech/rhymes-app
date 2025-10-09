@@ -7,7 +7,7 @@ import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 
 import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
-import { API_BASE_URL } from '../lib/utils';
+import { API_BASE_URL, cn } from '../lib/utils';
 import InlineSvg from './InlineSvg';
 import { loadCoverWorkflowState, saveCoverWorkflowState } from '../lib/storage';
 
@@ -242,6 +242,14 @@ const CoverPageWorkflow = ({
 
   const [currentStep, setCurrentStep] = useState(1);
   const [hasSubmittedDetails, setHasSubmittedDetails] = useState(false);
+  const [isLoadingThemeThumbnails, setIsLoadingThemeThumbnails] = useState(false);
+  const [themeThumbnails, setThemeThumbnails] = useState([]);
+  const [themeThumbnailError, setThemeThumbnailError] = useState('');
+  const [isLoadingColourThumbnails, setIsLoadingColourThumbnails] = useState(false);
+  const [colourThumbnails, setColourThumbnails] = useState({});
+  const [colourPreviewError, setColourPreviewError] = useState('');
+  const [colourValidationError, setColourValidationError] = useState(false);
+  const autoPreviewRef = useRef(false);
 
   const assetCacheRef = useRef(new Map());
   const svgPreviewRef = useRef(null);
@@ -380,17 +388,24 @@ const CoverPageWorkflow = ({
     [selectedColourId]
   );
 
-  const resetPreviewState = useCallback(() => {
+  const resetPreviewState = useCallback((options = {}) => {
+    const { preserveSubmission = false } = options;
     setPreviewAssets([]);
     setAssetError('');
-    setHasSubmittedDetails(false);
     setActiveIndex(0);
+    if (!preserveSubmission) {
+      setHasSubmittedDetails(false);
+    }
   }, []);
 
   const handleThemeSelect = useCallback(
     (themeId) => {
       setSelectedThemeId(themeId);
+      setSelectedColourId(null);
       resetPreviewState();
+      setThemeThumbnailError('');
+      setColourPreviewError('');
+      setColourValidationError(false);
       setCurrentStep(1);
     },
     [resetPreviewState]
@@ -399,10 +414,16 @@ const CoverPageWorkflow = ({
   const handleColourSelect = useCallback(
     (colourId) => {
       setSelectedColourId(colourId);
-      resetPreviewState();
-      setCurrentStep(1);
+      resetPreviewState({ preserveSubmission: true });
+      setColourValidationError(false);
+      setColourPreviewError('');
+      setAssetError('');
+      if (currentStep === 2 && hasSubmittedDetails) {
+        autoPreviewRef.current = true;
+      }
+      setCurrentStep((step) => (step === 2 ? 2 : 1));
     },
-    [resetPreviewState]
+    [currentStep, hasSubmittedDetails, resetPreviewState]
   );
 
   const trimmedPersonalisation = useMemo(
@@ -505,6 +526,7 @@ const CoverPageWorkflow = ({
 
   const handlePreviewRequest = useCallback(async () => {
     if (!selectedTheme || !selectedColour) {
+      setColourValidationError(true);
       return;
     }
 
@@ -513,6 +535,8 @@ const CoverPageWorkflow = ({
       setAssetError('Please choose a theme and colour before previewing.');
       return;
     }
+
+    autoPreviewRef.current = false;
 
     const detailsComplete = Object.values(trimmedPersonalisation).every(
       (value) => value.length > 0
@@ -527,6 +551,7 @@ const CoverPageWorkflow = ({
     setCurrentStep(2);
     setIsFetchingAssets(true);
     setAssetError('');
+    setColourValidationError(false);
 
     try {
       const assets = await fetchCoverAssets(selectionKey);
@@ -550,6 +575,145 @@ const CoverPageWorkflow = ({
       setIsFetchingAssets(false);
     }
   }, [fetchCoverAssets, selectedColour, selectedTheme, trimmedPersonalisation]);
+
+  useEffect(() => {
+    if (!selectedThemeId) {
+      setThemeThumbnails([]);
+      setThemeThumbnailError('');
+      setIsLoadingThemeThumbnails(false);
+      return;
+    }
+
+    let isMounted = true;
+    if (!extractSelectionToken(selectedThemeId)) {
+      setThemeThumbnails([]);
+      setThemeThumbnailError('');
+      return;
+    }
+
+    const defaultColourId = COLOUR_OPTIONS[0]?.id;
+    if (!defaultColourId) {
+      setThemeThumbnails([]);
+      setThemeThumbnailError('');
+      return;
+    }
+
+    const selectionKey = buildSelectionKey(selectedThemeId, defaultColourId);
+    if (!selectionKey) {
+      setThemeThumbnails([]);
+      setThemeThumbnailError('');
+      return;
+    }
+
+    setIsLoadingThemeThumbnails(true);
+    setThemeThumbnailError('');
+
+    fetchCoverAssets(selectionKey)
+      .then((assets) => {
+        if (!isMounted) {
+          return;
+        }
+
+        if (!assets.length) {
+          setThemeThumbnails([]);
+          setThemeThumbnailError('No theme artwork has been uploaded yet for this theme.');
+          return;
+        }
+
+        setThemeThumbnails(assets);
+      })
+      .catch((error) => {
+        if (!isMounted) {
+          return;
+        }
+        setThemeThumbnails([]);
+        setThemeThumbnailError(resolveErrorMessage(error));
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingThemeThumbnails(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchCoverAssets, selectedThemeId]);
+
+  useEffect(() => {
+    if (!selectedThemeId) {
+      setColourThumbnails({});
+      setColourPreviewError('');
+      setIsLoadingColourThumbnails(false);
+      return;
+    }
+
+    let isMounted = true;
+    const loadColourPreviews = async () => {
+      setIsLoadingColourThumbnails(true);
+      setColourPreviewError('');
+
+      const results = await Promise.all(
+        COLOUR_OPTIONS.map(async (colour) => {
+          const selectionKey = buildSelectionKey(selectedThemeId, colour.id);
+          if (!selectionKey) {
+            return [colour.id, null];
+          }
+
+          try {
+            const assets = await fetchCoverAssets(selectionKey);
+            return [colour.id, assets[0] || null];
+          } catch (error) {
+            return [colour.id, null];
+          }
+        })
+      );
+
+      if (!isMounted) {
+        return;
+      }
+
+      const mapped = results.reduce((accumulator, [colourId, asset]) => {
+        accumulator[colourId] = asset;
+        return accumulator;
+      }, {});
+
+      setColourThumbnails(mapped);
+
+      const hasAnyPreview = results.some(([, asset]) => asset);
+      if (!hasAnyPreview) {
+        setColourPreviewError('No colour previews are available yet for this theme.');
+      }
+
+      setIsLoadingColourThumbnails(false);
+    };
+
+    loadColourPreviews().catch((error) => {
+      if (!isMounted) {
+        return;
+      }
+      setColourThumbnails({});
+      setColourPreviewError(resolveErrorMessage(error));
+      setIsLoadingColourThumbnails(false);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchCoverAssets, selectedThemeId]);
+
+  useEffect(() => {
+    if (!autoPreviewRef.current) {
+      return;
+    }
+
+    if (!canPreviewCovers) {
+      return;
+    }
+
+    autoPreviewRef.current = false;
+    handlePreviewRequest();
+  }, [canPreviewCovers, handlePreviewRequest, selectedColourId, selectedThemeId]);
 
   const isPersonalisationComplete = useMemo(() => {
     return Object.values(trimmedPersonalisation).every((value) => value.length > 0);
@@ -971,30 +1135,132 @@ const CoverPageWorkflow = ({
 
     <Card className="border-none shadow-xl shadow-orange-100/60">
       <CardHeader className="space-y-2">
+        <CardTitle className="text-xl font-semibold text-slate-900">Theme artwork</CardTitle>
+        <p className="text-sm text-slate-600">
+          Browse the artwork that belongs to the selected theme. These are static previews to help visualise the style.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {!selectedTheme && (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-6 text-center">
+            <p className="text-sm font-medium text-slate-600">Select a theme above to view its artwork.</p>
+          </div>
+        )}
+
+        {selectedTheme && (
+          <div className="space-y-4">
+            {isLoadingThemeThumbnails && (
+              <div className="flex items-center justify-center rounded-2xl border border-dashed border-orange-200 bg-white/70 p-6 text-sm font-medium text-orange-500">
+                Loading theme artwork…
+              </div>
+            )}
+
+            {!isLoadingThemeThumbnails && themeThumbnailError && (
+              <div className="rounded-2xl border border-dashed border-orange-200 bg-orange-50 p-4 text-sm text-orange-600">
+                {themeThumbnailError}
+              </div>
+            )}
+
+            {!isLoadingThemeThumbnails && !themeThumbnailError && themeThumbnails.length > 0 && (
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {themeThumbnails.map((asset, index) => (
+                  <div
+                    key={`${asset.fileName}-${index}`}
+                    className="group rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm transition hover:-translate-y-1 hover:shadow-md"
+                  >
+                    <InlineSvg
+                      markup={asset.personalisedMarkup || asset.svgMarkup}
+                      className="aspect-[3/4] w-full overflow-hidden rounded-xl bg-slate-50 shadow-inner"
+                      ariaLabel={`${selectedTheme.label} theme artwork ${index + 1}`}
+                      sanitize={false}
+                    />
+                    <p className="mt-3 text-sm font-medium text-slate-600">{asset.fileName}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!isLoadingThemeThumbnails && !themeThumbnailError && themeThumbnails.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white/80 p-6 text-center text-sm text-slate-500">
+                Theme artwork previews are not available for this theme yet.
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+
+    <Card className="border-none shadow-xl shadow-orange-100/60">
+      <CardHeader className="space-y-2">
         <CardTitle className="text-xl font-semibold text-slate-900">Choose a colour</CardTitle>
         <p className="text-sm text-slate-600">
           Every theme provides the same four colour families. Select a colour to load matching cover artwork.
         </p>
       </CardHeader>
       <CardContent>
-        <div className="cover-colour-grid">
-          {COLOUR_OPTIONS.map((colour) => {
-            const isSelected = selectedColourId === colour.id;
-            return (
-              <button
-                key={colour.id}
-                type="button"
-                onClick={() => handleColourSelect(colour.id)}
-                className={`cover-colour-chip${isSelected ? ' is-active' : ''}`}
-                style={{ backgroundColor: colour.hex }}
-                aria-pressed={isSelected}
-                aria-label={`${colour.label} ${colour.hex}`}
-              >
-                <span className="cover-colour-chip-label">{colour.label}</span>
-                <span className="cover-colour-chip-hex">{colour.hex}</span>
-              </button>
-            );
-          })}
+        <div
+          className={cn(
+            'rounded-3xl border bg-white/80 p-4 shadow-sm transition',
+            colourValidationError ? 'border-orange-400 ring-2 ring-orange-200' : 'border-slate-200'
+          )}
+        >
+          {isLoadingColourThumbnails && (
+            <div className="flex items-center justify-center rounded-2xl border border-dashed border-orange-200 bg-white/80 p-6 text-sm font-medium text-orange-500">
+              Loading colour previews…
+            </div>
+          )}
+
+          {!isLoadingColourThumbnails && colourPreviewError && (
+            <div className="mb-4 rounded-2xl border border-dashed border-orange-200 bg-orange-50 p-4 text-sm text-orange-600">
+              {colourPreviewError}
+            </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {COLOUR_OPTIONS.map((colour) => {
+              const isSelected = selectedColourId === colour.id;
+              const previewAsset = colourThumbnails[colour.id] || null;
+              return (
+                <button
+                  key={colour.id}
+                  type="button"
+                  onClick={() => handleColourSelect(colour.id)}
+                  className={cn(
+                    'group flex h-full flex-col rounded-2xl border-2 border-transparent bg-white/90 p-3 text-left shadow transition hover:-translate-y-1 hover:shadow-lg focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-300',
+                    isSelected ? 'border-orange-500 shadow-lg ring-2 ring-orange-400' : ''
+                  )}
+                  aria-pressed={isSelected}
+                  aria-label={`${colour.label} ${colour.hex}`}
+                >
+                  <div className="relative overflow-hidden rounded-xl bg-slate-50">
+                    {previewAsset ? (
+                      <InlineSvg
+                        markup={previewAsset.personalisedMarkup || previewAsset.svgMarkup}
+                        className="aspect-[3/4] w-full overflow-hidden"
+                        ariaLabel={`${colour.label} preview`}
+                        sanitize={false}
+                      />
+                    ) : (
+                      <div
+                        className="flex aspect-[3/4] w-full items-center justify-center rounded-xl bg-gradient-to-br from-white via-slate-50 to-slate-100 text-sm font-medium text-slate-400"
+                        style={{ backgroundColor: colour.hex }}
+                      >
+                        {colour.label}
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-sm font-medium text-slate-600">
+                    <span>{colour.label}</span>
+                    <span className="text-xs uppercase text-slate-400">{colour.hex}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {colourValidationError && (
+            <p className="mt-3 text-sm font-medium text-orange-600">Please select a colour before previewing.</p>
+          )}
         </div>
       </CardContent>
     </Card>
