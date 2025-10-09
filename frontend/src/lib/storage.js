@@ -1,5 +1,6 @@
 const APP_STATE_KEY = 'rhymes-app::state';
 const COVER_WORKFLOW_KEY_PREFIX = 'rhymes-app::cover::';
+const BOOK_WORKFLOW_KEY_PREFIX = 'rhymes-app::books::';
 
 const isBrowser = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
@@ -108,6 +109,71 @@ export const clearCoverWorkflowState = (schoolId, grade) => {
   }
 
   const key = buildCoverWorkflowKey(schoolId, grade);
+  if (!key) {
+    return;
+  }
+
+  window.localStorage.removeItem(key);
+};
+
+const buildBookWorkflowKey = (schoolId, grade) => {
+  if (!schoolId || !grade) {
+    return '';
+  }
+
+  const normalizedSchool = schoolId.toString().trim();
+  const normalizedGrade = grade.toString().trim();
+
+  if (!normalizedSchool || !normalizedGrade) {
+    return '';
+  }
+
+  return `${BOOK_WORKFLOW_KEY_PREFIX}${normalizedSchool}::${normalizedGrade}`;
+};
+
+export const loadBookWorkflowState = (schoolId, grade) => {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const key = buildBookWorkflowKey(schoolId, grade);
+  if (!key) {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(key);
+  return safeParseJson(raw);
+};
+
+export const saveBookWorkflowState = (schoolId, grade, state) => {
+  if (!isBrowser()) {
+    return;
+  }
+
+  const key = buildBookWorkflowKey(schoolId, grade);
+  if (!key) {
+    return;
+  }
+
+  if (!state) {
+    window.localStorage.removeItem(key);
+    return;
+  }
+
+  try {
+    const payload = JSON.stringify({ ...state, updatedAt: Date.now() });
+    window.localStorage.setItem(key, payload);
+  } catch (error) {
+    console.warn('Unable to persist book workflow state:', error);
+  }
+};
+
+export const clearBookWorkflowState = (schoolId, grade) => {
+  if (!isBrowser()) {
+    return;
+  }
+
+  const key = buildBookWorkflowKey(schoolId, grade);
   if (!key) {
     return;
   }
