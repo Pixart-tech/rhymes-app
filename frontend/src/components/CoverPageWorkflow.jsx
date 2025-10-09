@@ -5,6 +5,8 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { Label } from './ui/label';
+import { Input } from './ui/input';
 
 import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 import { API_BASE_URL, cn } from '../lib/utils';
@@ -36,16 +38,6 @@ const COLOUR_OPTIONS = [
   { id: 'colour2', label: 'Colour 2', hex: '#8faedb' },
   { id: 'colour3', label: 'Colour 3', hex: '#f9b475' },
   { id: 'colour4', label: 'Colour 4', hex: '#c8e9f1' }
-];
-
-const GRADE_DETAIL_FIELDS = [
-  'email',
-  'addressLine1',
-  'addressLine2',
-  'addressLine3',
-  'tagLine1',
-  'tagLine2',
-  'tagLine3'
 ];
 
 const createBlankPersonalisation = (defaults = {}, defaultGradeLabel = '') => ({
@@ -238,7 +230,6 @@ const CoverPageWorkflow = ({
     ...createBlankPersonalisation(coverDefaults, gradeLabel),
     ...(gradeDetailsSanitised || {})
   }));
-  const schoolLogoFileName = coverDefaults?.schoolLogoFileName || '';
 
   const [currentStep, setCurrentStep] = useState(1);
   const [hasSubmittedDetails, setHasSubmittedDetails] = useState(false);
@@ -249,6 +240,7 @@ const CoverPageWorkflow = ({
   const [colourThumbnails, setColourThumbnails] = useState({});
   const [colourPreviewError, setColourPreviewError] = useState('');
   const [colourValidationError, setColourValidationError] = useState(false);
+  const [subjectToCustomize, setSubjectToCustomize] = useState('');
   const autoPreviewRef = useRef(false);
 
   const assetCacheRef = useRef(new Map());
@@ -313,6 +305,7 @@ const CoverPageWorkflow = ({
         ...createBlankPersonalisation(coverDefaults, gradeLabel),
         ...(gradeDetailsSanitised || {})
       });
+      setSubjectToCustomize('');
       setCurrentStep(1);
       setHasSubmittedDetails(false);
       setPreviewAssets([]);
@@ -344,6 +337,7 @@ const CoverPageWorkflow = ({
         ...basePersonalisation,
         ...(gradeDetailsSanitised || {})
       });
+      setSubjectToCustomize('');
       setCurrentStep(1);
       setHasSubmittedDetails(false);
       setPreviewAssets([]);
@@ -355,6 +349,7 @@ const CoverPageWorkflow = ({
 
     setSelectedThemeId(storedState.selectedThemeId ?? null);
     setSelectedColourId(storedState.selectedColourId ?? null);
+    setSubjectToCustomize(storedState.subjectToCustomize ?? '');
     const storedStep = Number.parseInt(storedState.currentStep ?? 1, 10);
     const normalizedStep = Number.isFinite(storedStep) ? Math.min(Math.max(storedStep, 1), 2) : 1;
     setCurrentStep(detailsChanged ? 1 : normalizedStep);
@@ -454,9 +449,19 @@ const CoverPageWorkflow = ({
       selectedColourId,
       personalisation,
       currentStep,
-      hasSubmittedDetails
+      hasSubmittedDetails,
+      subjectToCustomize
     });
-  }, [school?.school_id, grade, selectedThemeId, selectedColourId, personalisation, currentStep, hasSubmittedDetails]);
+  }, [
+    school?.school_id,
+    grade,
+    selectedThemeId,
+    selectedColourId,
+    personalisation,
+    currentStep,
+    hasSubmittedDetails,
+    subjectToCustomize
+  ]);
 
   const fetchCoverAssets = useCallback(
     async (selectionKey) => {
@@ -702,6 +707,12 @@ const CoverPageWorkflow = ({
     };
   }, [fetchCoverAssets, selectedThemeId]);
 
+  const isPersonalisationComplete = useMemo(() => {
+    return Object.values(trimmedPersonalisation).every((value) => value.length > 0);
+  }, [trimmedPersonalisation]);
+
+  const canPreviewCovers = Boolean(selectedTheme && selectedColour && isPersonalisationComplete);
+
   useEffect(() => {
     if (!autoPreviewRef.current) {
       return;
@@ -714,10 +725,6 @@ const CoverPageWorkflow = ({
     autoPreviewRef.current = false;
     handlePreviewRequest();
   }, [canPreviewCovers, handlePreviewRequest, selectedColourId, selectedThemeId]);
-
-  const isPersonalisationComplete = useMemo(() => {
-    return Object.values(trimmedPersonalisation).every((value) => value.length > 0);
-  }, [trimmedPersonalisation]);
 
   const previewCount = previewAssets.length;
 
@@ -753,7 +760,6 @@ const CoverPageWorkflow = ({
   }, [activeIndex, previewCount]);
 
   const activeAsset = previewAssets[activeIndex] || null;
-  const canPreviewCovers = Boolean(selectedTheme && selectedColour && isPersonalisationComplete);
 
   const stepLabels = [
     'Select theme & colour',
@@ -931,125 +937,6 @@ const CoverPageWorkflow = ({
     currentStep,
     hasSubmittedDetails
   ]);
-
-  const commonDetailsSummaryCard = (
-    <Card className="border-none bg-white/85 shadow-sm shadow-orange-100/60">
-      <CardHeader className="space-y-2">
-        <CardTitle className="text-xl font-semibold text-slate-900">Common cover details</CardTitle>
-        <p className="text-sm text-slate-600">
-          These details are shared across every grade. Update them from the grade selection screen whenever
-          the school information changes.
-        </p>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">School contact number</p>
-            <p className="text-sm font-semibold text-slate-800">
-              {trimmedPersonalisation.contactNumber || 'Not provided'}
-            </p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Website</p>
-            <p className="text-sm font-semibold text-slate-800">
-              {trimmedPersonalisation.website || 'Not provided'}
-            </p>
-          </div>
-          <div className="space-y-2 md:col-span-2 lg:col-span-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">School logo</p>
-            {personalisation.schoolLogo ? (
-              <div className="flex items-center gap-3 rounded-md border border-orange-100 bg-orange-50/60 p-3">
-                <img
-                  src={personalisation.schoolLogo}
-                  alt="School logo"
-                  className="h-16 w-16 rounded-md border border-white object-contain bg-white"
-                />
-                <div>
-                  <p className="text-sm font-medium text-slate-800">
-                    {schoolLogoFileName || 'Logo image'}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    To update the logo, return to the grade selection screen.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-md border border-dashed border-orange-200 bg-orange-50/40 p-4 text-sm text-slate-500">
-                No logo uploaded yet. Return to the grade selection screen to add one.
-              </div>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-
-  const gradeDetailsSummaryCard = (
-    <Card className="border-none shadow-xl shadow-orange-100/60">
-      <CardHeader className="space-y-2">
-        <CardTitle className="text-xl font-semibold text-slate-900">Grade specific details</CardTitle>
-        <p className="text-sm text-slate-600">
-          These details were collected before selecting the grade. Visit the grade selection screen to make
-          any updates.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="cover-personalisation-grid two-column">
-          <div className="cover-form-field">
-            <p className="text-sm font-medium text-slate-700">Grade name</p>
-            <div className="rounded-md border border-slate-200 bg-slate-50/80 px-3 py-2 text-sm font-semibold text-slate-800">
-              {trimmedPersonalisation.gradeName || gradeLabel}
-            </div>
-            <p className="mt-1 text-xs text-slate-500">
-              Grade labels come from the pre-grade form and default to the standard grade name.
-            </p>
-          </div>
-          <div className="cover-form-field">
-            <p className="text-sm font-medium text-slate-700">Email</p>
-            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
-              {trimmedPersonalisation.email || 'Not provided'}
-            </div>
-          </div>
-          <div className="cover-form-field">
-            <p className="text-sm font-medium text-slate-700">Address line 1</p>
-            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
-              {trimmedPersonalisation.addressLine1 || 'Not provided'}
-            </div>
-          </div>
-          <div className="cover-form-field">
-            <p className="text-sm font-medium text-slate-700">Address line 2</p>
-            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
-              {trimmedPersonalisation.addressLine2 || 'Not provided'}
-            </div>
-          </div>
-          <div className="cover-form-field">
-            <p className="text-sm font-medium text-slate-700">Address line 3</p>
-            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
-              {trimmedPersonalisation.addressLine3 || 'Not provided'}
-            </div>
-          </div>
-          <div className="cover-form-field">
-            <p className="text-sm font-medium text-slate-700">Tag line 1</p>
-            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
-              {trimmedPersonalisation.tagLine1 || 'Not provided'}
-            </div>
-          </div>
-          <div className="cover-form-field">
-            <p className="text-sm font-medium text-slate-700">Tag line 2</p>
-            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
-              {trimmedPersonalisation.tagLine2 || 'Not provided'}
-            </div>
-          </div>
-          <div className="cover-form-field">
-            <p className="text-sm font-medium text-slate-700">Tag line 3</p>
-            <div className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-sm font-medium text-slate-800">
-              {trimmedPersonalisation.tagLine3 || 'Not provided'}
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
 
 
   return (
@@ -1265,8 +1152,31 @@ const CoverPageWorkflow = ({
       </CardContent>
     </Card>
 
-    {commonDetailsSummaryCard}
-    {gradeDetailsSummaryCard}
+    <Card className="border-none shadow-xl shadow-orange-100/60">
+      <CardHeader className="space-y-2">
+        <CardTitle className="text-xl font-semibold text-slate-900">Subject to customise</CardTitle>
+        <p className="text-sm text-slate-600">
+          Let us know which subject you are preparing covers for. This helps tailor the creative direction for your
+          selection.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <Label htmlFor="cover-subject" className="text-sm font-medium text-slate-700">
+            Subject name
+          </Label>
+          <Input
+            id="cover-subject"
+            type="text"
+            placeholder="e.g. English, Mathematics"
+            value={subjectToCustomize}
+            onChange={(event) => setSubjectToCustomize(event.target.value)}
+            className="bg-white/80"
+          />
+          <p className="text-xs text-slate-500">This field is optional and can be updated later.</p>
+        </div>
+      </CardContent>
+    </Card>
 
     <div className="flex flex-wrap items-center justify-between gap-3">
       <p className="text-sm text-slate-600">

@@ -14,6 +14,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './component
 import { toast } from 'sonner';
 import { Toaster } from './components/ui/sonner';
 import CoverPageWorkflow from './components/CoverPageWorkflow';
+import BookWorkflow from './components/BookWorkflow';
 import InlineSvg from './components/InlineSvg';
 import { API_BASE_URL } from './lib/utils';
 import { decodeSvgPayload, sanitizeRhymeSvgContent } from './lib/svgUtils';
@@ -22,7 +23,9 @@ import {
   clearPersistedAppState,
   loadPersistedAppState,
   savePersistedAppState,
-  clearCoverWorkflowState
+  clearCoverWorkflowState,
+  clearBookWorkflowState,
+  loadBookWorkflowState
 } from './lib/storage';
 
 
@@ -201,6 +204,13 @@ const AuthPage = ({ onAuth }) => {
 const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
   const options = [
     {
+      id: 'books',
+      title: 'Books',
+      description: 'Plan and curate the book list appropriate for every class.',
+      gradient: 'from-blue-400 to-indigo-500',
+      icon: BookMarked
+    },
+    {
       id: 'cover',
       title: 'Cover Pages',
       description: 'Design and manage engaging cover pages tailored to each grade.',
@@ -213,13 +223,6 @@ const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
       description: 'Select and organise rhymes to build your customised binders.',
       gradient: 'from-orange-400 to-red-400',
       icon: Music
-    },
-    {
-      id: 'books',
-      title: 'Books',
-      description: 'Plan and curate the book list appropriate for every class.',
-      gradient: 'from-blue-400 to-indigo-500',
-      icon: BookMarked
     }
   ];
 
@@ -656,8 +659,11 @@ const GradeSelectionPage = ({
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const [downloadingGradeId, setDownloadingGradeId] = useState(null);
+  const [bookSelectionCounts, setBookSelectionCounts] = useState({});
   const navigate = useNavigate();
   const isCoverMode = mode === 'cover';
+  const isRhymeMode = mode === 'rhymes';
+  const isBookMode = mode === 'books';
   const downloadResetTimerRef = useRef(null);
 
   const modeConfig = {
@@ -679,7 +685,7 @@ const GradeSelectionPage = ({
   };
 
   useEffect(() => {
-    if (mode !== 'rhymes') {
+    if (!isRhymeMode) {
       setGradeStatus([]);
       setLoading(false);
       return;
@@ -687,7 +693,22 @@ const GradeSelectionPage = ({
 
     setLoading(true);
     fetchGradeStatus();
-  }, [mode]);
+  }, [isRhymeMode]);
+
+  useEffect(() => {
+    if (!isBookMode || !school?.school_id) {
+      setBookSelectionCounts({});
+      return;
+    }
+
+    const counts = {};
+    GRADE_OPTIONS.forEach((gradeOption) => {
+      const storedState = loadBookWorkflowState(school.school_id, gradeOption.id);
+      const selected = Array.isArray(storedState?.selectedBooks) ? storedState.selectedBooks.length : 0;
+      counts[gradeOption.id] = selected;
+    });
+    setBookSelectionCounts(counts);
+  }, [isBookMode, school?.school_id]);
 
   const fetchGradeStatus = async () => {
     try {
@@ -958,6 +979,15 @@ const GradeSelectionPage = ({
                       <p className="text-sm text-gray-600">
                         Start crafting personalised cover pages for {resolvedGradeName}.
                       </p>
+                    ) : isBookMode ? (
+                      <div className="space-y-3">
+                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm font-medium text-gray-800">
+                          {(bookSelectionCounts[grade.id] ?? 0)} book{(bookSelectionCounts[grade.id] ?? 0) === 1 ? '' : 's'} planned
+                        </div>
+                        <p className="text-sm text-gray-600">
+                          Curate engaging reading experiences for {resolvedGradeName}.
+                        </p>
+                      </div>
                     ) : (
                       <div className="space-y-3">
                         <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm font-medium text-gray-800">
@@ -2437,6 +2467,7 @@ function App() {
 
     GRADE_OPTIONS.forEach((option) => {
       clearCoverWorkflowState(schoolId, option.id);
+      clearBookWorkflowState(schoolId, option.id);
     });
   }, []);
 
@@ -2589,6 +2620,15 @@ function App() {
                 onBackToMode={handleBackToModeSelection}
                 onLogout={handleLogout}
                 coverDefaults={coverDefaults}
+              />
+            ) : selectedMode === 'books' ? (
+              <BookWorkflow
+                school={school}
+                grade={selectedGrade}
+                customGradeName={resolveStoredGradeName(selectedGrade)}
+                onBackToGrades={handleBackToGrades}
+                onBackToMode={handleBackToModeSelection}
+                onLogout={handleLogout}
               />
             ) : (
               <FeaturePlaceholderPage
