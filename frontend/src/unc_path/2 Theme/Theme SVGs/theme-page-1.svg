@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80">
+  <rect width="120" height="80" rx="12" fill="#f4fff3" />
+  <circle cx="60" cy="40" r="22" fill="#5fd18a" opacity="0.6" />
+  <text x="60" y="42" text-anchor="middle" font-family="Arial" font-size="12" fill="#177c40">Theme 2 · Page 1</text>
+</svg>
