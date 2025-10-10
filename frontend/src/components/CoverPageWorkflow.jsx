@@ -11,6 +11,7 @@ import { Input } from './ui/input';
 import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 import { API_BASE_URL, cn } from '../lib/utils';
 import InlineSvg from './InlineSvg';
+import NetworkSvgImage from './NetworkSvgImage';
 import { loadCoverWorkflowState, saveCoverWorkflowState } from '../lib/storage';
 
 const GRADE_LABELS = {
@@ -131,6 +132,29 @@ const joinUrl = (baseUrl, path) => {
   return `${trimmedBase}/${trimmedPath}`;
 };
 
+const encodeRelativeCoverPath = (relativePath) => {
+  if (!relativePath || typeof relativePath !== 'string') {
+    return '';
+  }
+
+  return relativePath
+    .replace(/^[\\/]+/, '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+};
+
+const buildCoverAssetSvgUrl = (baseUrl, relativePath) => {
+  const encodedPath = encodeRelativeCoverPath(relativePath);
+  if (!encodedPath) {
+    return '';
+  }
+
+  return joinUrl(baseUrl, encodedPath);
+};
+
 const resolveCoverAssetsNetworkBaseUrl = () => {
   const explicitBase =
     process.env.REACT_APP_COVER_ASSETS_NETWORK_BASE_URL ||
@@ -247,6 +271,7 @@ const CoverPageWorkflow = ({
   const svgPreviewRef = useRef(null);
   const svgCarouselRef = useRef(null);
   const coverAssetsNetworkBaseUrl = useMemo(resolveCoverAssetsNetworkBaseUrl, []);
+  const coverAssetsSvgBaseUrl = useMemo(() => joinUrl(API_BASE_URL, 'cover-assets/svg'), []);
   const previousGradeLabelRef = useRef(gradeLabel);
   const coverStateKeyRef = useRef('');
   const previousGradeDetailsRef = useRef('');
@@ -509,12 +534,15 @@ const CoverPageWorkflow = ({
               ? asset.fileName.trim()
               : `Cover-${selectionKey}-${index + 1}.svg`;
 
+          const svgUrl = buildCoverAssetSvgUrl(coverAssetsSvgBaseUrl, relativePath);
+
           sanitizedAssets.push({
             fileName,
             relativePath,
             svgMarkup,
             personalisedMarkup:
-              typeof asset?.personalisedMarkup === 'string' ? asset.personalisedMarkup.trim() : ''
+              typeof asset?.personalisedMarkup === 'string' ? asset.personalisedMarkup.trim() : '',
+            svgUrl
           });
 
           if (dedupeKey) {
@@ -526,7 +554,7 @@ const CoverPageWorkflow = ({
       assetCacheRef.current.set(selectionKey, sanitizedAssets);
       return sanitizedAssets;
     },
-    [coverAssetsNetworkBaseUrl]
+    [coverAssetsNetworkBaseUrl, coverAssetsSvgBaseUrl]
   );
 
   const handlePreviewRequest = useCallback(async () => {
@@ -1055,9 +1083,11 @@ const CoverPageWorkflow = ({
                     key={`${asset.fileName}-${index}`}
                     className="group rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm transition hover:-translate-y-1 hover:shadow-md"
                   >
-                    <InlineSvg
-                      markup={asset.personalisedMarkup || asset.svgMarkup}
+                    <NetworkSvgImage
+                      src={asset.svgUrl}
+                      fallbackMarkup={asset.personalisedMarkup || asset.svgMarkup}
                       className="aspect-[3/4] w-full overflow-hidden rounded-xl bg-slate-50 shadow-inner"
+                      svgClassName="h-full w-full"
                       ariaLabel={`${selectedTheme.label} theme artwork ${index + 1}`}
                       sanitize={false}
                     />
@@ -1121,9 +1151,11 @@ const CoverPageWorkflow = ({
                 >
                   <div className="relative overflow-hidden rounded-xl bg-slate-50">
                     {previewAsset ? (
-                      <InlineSvg
-                        markup={previewAsset.personalisedMarkup || previewAsset.svgMarkup}
+                      <NetworkSvgImage
+                        src={previewAsset.svgUrl}
+                        fallbackMarkup={previewAsset.personalisedMarkup || previewAsset.svgMarkup}
                         className="aspect-[3/4] w-full overflow-hidden"
+                        svgClassName="h-full w-full"
                         ariaLabel={`${colour.label} preview`}
                         sanitize={false}
                       />
