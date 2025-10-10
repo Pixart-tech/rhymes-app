@@ -106,48 +106,80 @@ const prefetchImageAssets = async (urls, signal) => {
     return;
   }
 
+  if (typeof window === 'undefined' || typeof window.Image === 'undefined') {
+    return;
+  }
+
   const tasks = urls
     .map((url) => {
       if (!url || assetPrefetchCache.has(url)) {
         return null;
       }
 
-      const controller = new AbortController();
-      const linkedSignal = signal;
+      return new Promise((resolve, reject) => {
+        let aborted = false;
+        const image = new window.Image();
+        image.decoding = 'async';
 
-      const fetchSignal = linkedSignal
-        ? (() => {
-            if (linkedSignal.aborted) {
-              controller.abort();
-            } else {
-              linkedSignal.addEventListener('abort', () => controller.abort(), { once: true });
-            }
-            return controller.signal;
-          })()
-        : controller.signal;
+        let abortHandler;
 
-      const request = fetch(url, {
-        method: 'GET',
-        mode: 'cors',
-        cache: 'force-cache',
-        signal: fetchSignal
-      })
-        .then(() => {
-          assetPrefetchCache.add(url);
-        })
-        .catch((error) => {
-          if (controller.signal.aborted || (linkedSignal && linkedSignal.aborted)) {
+        const cleanup = () => {
+          image.removeEventListener('load', handleLoad);
+          image.removeEventListener('error', handleError);
+          if (signal && abortHandler) {
+            signal.removeEventListener('abort', abortHandler);
+          }
+        };
+
+        const handleLoad = () => {
+          if (aborted) {
             return;
           }
-          console.warn('Unable to prefetch linked SVG asset:', url, error);
-        });
+          cleanup();
+          assetPrefetchCache.add(url);
+          resolve();
+        };
 
-      return request;
+        const handleError = (event) => {
+          cleanup();
+          if (aborted || (signal && signal.aborted)) {
+            resolve();
+            return;
+          }
+          console.warn('Unable to prefetch linked SVG asset:', url, event);
+          reject(event instanceof Error ? event : new Error('Failed to preload image asset.'));
+        };
+
+        abortHandler = () => {
+          aborted = true;
+          cleanup();
+          image.src = '';
+          reject(new DOMException('Aborted', 'AbortError'));
+        };
+
+        image.addEventListener('load', handleLoad, { once: true });
+        image.addEventListener('error', handleError, { once: true });
+
+        if (signal) {
+          if (signal.aborted) {
+            abortHandler();
+            return;
+          }
+          signal.addEventListener('abort', abortHandler, { once: true });
+        }
+
+        try {
+          image.src = url;
+        } catch (error) {
+          cleanup();
+          reject(error);
+        }
+      });
     })
     .filter(Boolean);
 
   if (tasks.length > 0) {
-    await Promise.allSettled(tasks);
+    await Promise.all(tasks);
   }
 };
 
@@ -235,13 +267,18 @@ const NetworkSvgImage = ({
           return;
         }
         const { markup: rewrittenMarkup, assets } = rewriteSvgMarkup(svgText, src);
+        if (assets.length > 0) {
+          await prefetchImageAssets(assets, controller.signal);
+        }
+
+        if (!isMounted || controller.signal.aborted) {
+          return;
+        }
+
         svgMarkupCache.set(src, rewrittenMarkup);
         setMarkup(rewrittenMarkup);
         setStatus('success');
         setErrorMessage('');
-        if (assets.length > 0) {
-          await prefetchImageAssets(assets, controller.signal);
-        }
       })
       .catch((error) => {
         if (!isMounted || controller.signal.aborted) {
