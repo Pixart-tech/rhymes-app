@@ -1322,6 +1322,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         }
 
         const candidates = [
+          node.getAttribute('data-rhyme-asset-url'),
           node.getAttribute('href'),
           node.getAttribute('xlink:href'),
           node.getAttribute('data-href'),
@@ -1346,6 +1347,30 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
           if (/^https?:/i.test(trimmed)) {
             urls.add(trimmed);
+            return;
+          }
+
+          if (trimmed.startsWith('/')) {
+            if (typeof window !== 'undefined' && window.location) {
+              try {
+                const resolved = new URL(trimmed, window.location.origin);
+                urls.add(resolved.toString());
+              } catch (error) {
+                console.warn('Unable to resolve relative SVG asset URL:', error);
+              }
+            } else {
+              urls.add(trimmed);
+            }
+            return;
+          }
+
+          if (typeof window !== 'undefined' && window.location) {
+            try {
+              const resolved = new URL(trimmed, window.location.href);
+              urls.add(resolved.toString());
+            } catch (error) {
+              // Ignore malformed relative URLs.
+            }
           }
         });
       });

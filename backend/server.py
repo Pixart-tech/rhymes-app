@@ -14,7 +14,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
 
 from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -719,10 +719,45 @@ async def get_rhyme_svg(rhyme_code: str):
             raise HTTPException(status_code=404, detail="Rhyme not found")
     else:
         svg_content = _localize_svg_image_assets(
-            svg_content, svg_path, rhyme_code, inline_mode=True
+            svg_content, svg_path, rhyme_code, inline_mode=False
         )
 
     return Response(content=svg_content, media_type="image/svg+xml")
+
+
+@api_router.get("/rhymes/svg-assets/{asset_name}")
+async def get_rhyme_svg_asset(asset_name: str):
+    """Return a cached bitmap asset referenced by rhyme SVG markup."""
+
+    try:
+        cache_dir = _ensure_image_cache_dir()
+    except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+        logger.error("Unable to ensure image cache directory: %s", exc)
+        raise HTTPException(status_code=500, detail="Image cache unavailable") from exc
+
+    sanitized_name = asset_name.strip().replace("\\", "/")
+    sanitized_name = sanitized_name.split("/")[-1]
+
+    if not sanitized_name:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    try:
+        cache_root = cache_dir.resolve()
+        asset_path = (cache_dir / sanitized_name).resolve()
+    except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+        logger.error("Unable to resolve cached rhyme asset '%s': %s", asset_name, exc)
+        raise HTTPException(status_code=404, detail="Asset not found") from exc
+
+    try:
+        if asset_path == cache_root or cache_root not in asset_path.parents:
+            raise HTTPException(status_code=404, detail="Asset not found")
+    except ValueError:  # pragma: no cover - defensive: invalid path comparisons
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    if not asset_path.exists() or not asset_path.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    return FileResponse(asset_path)
 
 
 # @api_router.get("/cover-assets/manifest")

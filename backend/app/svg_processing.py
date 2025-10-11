@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 import mimetypes
+import re
 import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
@@ -405,6 +406,9 @@ def localize_svg_image_assets(
         if parsed.scheme in {"http", "https", "data"}:
             continue
 
+        if href_value:
+            image.set("data-original-href", href_value)
+
         asset_path = (source_path.parent / Path(unquote(parsed.path))).resolve()
         try:
             asset_path.relative_to(source_path.parent)
@@ -431,7 +435,12 @@ def localize_svg_image_assets(
             continue
 
         cache_directory = ensure_image_cache_dir(cache_dir)
-        cache_file = cache_directory / asset_path.name
+        safe_rhyme_code = re.sub(r"[^A-Za-z0-9._-]+", "-", rhyme_code or "").strip("-")
+        cache_name = asset_path.name
+        if safe_rhyme_code:
+            cache_name = f"{safe_rhyme_code}--{asset_path.name}"
+
+        cache_file = cache_directory / cache_name
         try:
             copy2(asset_path, cache_file)
         except OSError as exc:
@@ -444,6 +453,7 @@ def localize_svg_image_assets(
             )
             continue
 
+        image.set("data-rhyme-asset", cache_file.name)
         new_href = cache_file.name
         image.set("href", new_href)
         image.set(f"{{{config.XLINK_NS}}}href", new_href)

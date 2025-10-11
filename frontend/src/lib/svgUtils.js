@@ -1,5 +1,52 @@
+import { API_BASE_URL } from './utils';
+
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink';
+
+const resolveApiBase = () => {
+  const base = (API_BASE_URL || '/api').toString();
+  return base.replace(/\/+$/, '');
+};
+
+const encodeAssetPath = (assetName) => {
+  if (typeof assetName !== 'string') {
+    return '';
+  }
+
+  return assetName
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+};
+
+const buildRhymeAssetUrls = (assetName) => {
+  const encodedPath = encodeAssetPath(assetName);
+
+  if (!encodedPath) {
+    return null;
+  }
+
+  const apiBase = resolveApiBase();
+  const relativeUrl = `${apiBase}/rhymes/svg-assets/${encodedPath}`;
+
+  if (/^https?:/i.test(relativeUrl)) {
+    return { relativeUrl, absoluteUrl: relativeUrl };
+  }
+
+  if (typeof window !== 'undefined' && window.location) {
+    try {
+      const resolved = new URL(relativeUrl, window.location.origin);
+      return { relativeUrl, absoluteUrl: resolved.toString() };
+    } catch (error) {
+      console.warn('Unable to resolve rhyme asset URL relative to window.location:', error);
+    }
+  }
+
+  return { relativeUrl, absoluteUrl: relativeUrl };
+};
 
 const getHeaderValue = (headers, key) => {
   if (!headers) {
@@ -435,6 +482,72 @@ const removeRhymeCodeText = (svgElement, rhymeCode) => {
   });
 };
 
+const updateImageAssetReferences = (svgElement, rhymeCode) => {
+  if (!svgElement || !rhymeCode) {
+    return;
+  }
+
+  const imageNodes = svgElement.querySelectorAll('image, img');
+
+  imageNodes.forEach((node) => {
+    if (!node) {
+      return;
+    }
+
+    const candidateAttributes = [
+      node.getAttribute('data-rhyme-asset'),
+      node.getAttribute('href'),
+      node.getAttribute('xlink:href'),
+      node.getAttribute('data-href'),
+      node.getAttribute('src')
+    ];
+
+    let assetReference = null;
+
+    for (const candidate of candidateAttributes) {
+      if (typeof candidate !== 'string') {
+        continue;
+      }
+
+      const trimmed = candidate.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      if (/^data:/i.test(trimmed) || /^https?:/i.test(trimmed) || /^\/\//.test(trimmed)) {
+        continue;
+      }
+
+      assetReference = trimmed;
+      break;
+    }
+
+    if (!assetReference) {
+      return;
+    }
+
+    const urls = buildRhymeAssetUrls(assetReference);
+    if (!urls) {
+      return;
+    }
+
+    node.setAttribute('data-rhyme-asset', assetReference);
+    node.setAttribute('data-rhyme-asset-url', urls.absoluteUrl);
+
+    if (typeof node.setAttributeNS === 'function') {
+      try {
+        node.setAttributeNS(XLINK_NAMESPACE, 'href', urls.relativeUrl);
+      } catch (error) {
+        node.setAttribute('xlink:href', urls.relativeUrl);
+      }
+    } else {
+      node.setAttribute('xlink:href', urls.relativeUrl);
+    }
+
+    node.setAttribute('href', urls.relativeUrl);
+  });
+};
+
 export const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
   if (!svgContent || typeof svgContent !== 'string') {
     return svgContent;
@@ -493,6 +606,7 @@ export const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
     svgElement.setAttribute('overflow', 'visible');
 
     removeRhymeCodeText(svgElement, rhymeCode);
+    updateImageAssetReferences(svgElement, rhymeCode);
 
     if (typeof window.XMLSerializer === 'undefined') {
       return svgElement.outerHTML;
