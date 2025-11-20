@@ -2,6 +2,16 @@
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
+## Firebase Configuration
+
+Authentication now relies on Firebase + Google Sign-In. Before running the app locally, copy `.env.example` to `.env` and fill it with your Firebase project's values:
+
+```
+cp .env.example .env
+```
+
+The variables include the API key, auth domain, project id, storage bucket, sender id, and app id that you can find in the Firebase console under *Project Settings → General*. Without these values the sign-in flow will fail at runtime.
+
 ## Available Scripts
 
 In the project directory, you can run:

@@ -130,33 +130,60 @@ const buildCoverGradeNames = (source) =>
 
 // Authentication Page
 const AuthPage = ({ onAuth }) => {
-  const [schoolId, setSchoolId] = useState('');
-  const [schoolName, setSchoolName] = useState('');
-  const [loading, setLoading] = useState(false);
+  const { user, signIn, loading: authLoading } = useAuth();
+  const [syncingSchool, setSyncingSchool] = useState(false);
+  const syncAttemptRef = useRef(false);
 
-  const handleAuth = async (e) => {
-    e.preventDefault();
-    if (!schoolId.trim() || !schoolName.trim()) {
-      toast.error('Please fill in both School ID and School Name');
+  useEffect(() => {
+    if (!user || syncAttemptRef.current) {
       return;
     }
 
-    setLoading(true);
-    try {
-      const response = await axios.post(`${API}/auth/login`, {
-        school_id: schoolId.trim(),
-        school_name: schoolName.trim()
-      });
+    let isMounted = true;
+    syncAttemptRef.current = true;
 
-      onAuth(response.data);
-      toast.success('Successfully logged in!');
+    const syncSchoolProfile = async () => {
+      setSyncingSchool(true);
+      try {
+        const response = await axios.post(`${API}/auth/login`, {
+          school_id: user.schoolId,
+          school_name: user.name
+        });
+
+        if (isMounted) {
+          toast.success('Signed in with Google');
+          onAuth(response.data);
+        }
+      } catch (error) {
+        console.error('Auth error:', error);
+        if (isMounted) {
+          syncAttemptRef.current = false;
+          toast.error('Unable to open your workspace. Please try again.');
+        }
+      } finally {
+        if (isMounted) {
+          setSyncingSchool(false);
+        }
+      }
+    };
+
+    void syncSchoolProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user, onAuth]);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      await signIn();
     } catch (error) {
-      console.error('Auth error:', error);
-      toast.error('Failed to authenticate. Please try again.');
-    } finally {
-      setLoading(false);
+      console.error('Failed to start Google sign-in', error);
+      toast.error('Google sign-in was cancelled or failed. Please try again.');
     }
   };
+
+  const isProcessing = authLoading || syncingSchool;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center p-4">
@@ -166,39 +193,37 @@ const AuthPage = ({ onAuth }) => {
             <School className="w-10 h-10 text-white" />
           </div>
           <CardTitle className="text-2xl font-bold text-gray-800 mb-2">Personalised Circulum generator</CardTitle>
-          <p className="text-gray-600 text-sm">Customise circum for your school grades</p>
+          <p className="text-gray-600 text-sm">Sign in with your Google account to continue</p>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleAuth} className="space-y-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">School ID</label>
-              <Input
-                type="text"
-                placeholder="Enter your school ID"
-                value={schoolId}
-                onChange={(e) => setSchoolId(e.target.value)}
-                className="h-12 bg-white/70 border-gray-200 focus:border-orange-400 focus:ring-orange-400"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">School Name</label>
-              <Input
-                type="text"
-                placeholder="Enter your school name"
-                value={schoolName}
-                onChange={(e) => setSchoolName(e.target.value)}
-                className="h-12 bg-white/70 border-gray-200 focus:border-orange-400 focus:ring-orange-400"
-              />
-            </div>
+          <div className="space-y-4">
             <Button
-              type="submit"
-              disabled={loading}
-              className="w-full h-12 bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white font-semibold rounded-xl transition-all duration-300 transform hover:scale-105"
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={isProcessing}
+              className="w-full h-12 bg-white text-gray-800 border border-gray-200 hover:bg-gray-50 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all duration-200 disabled:opacity-70"
             >
-              {loading ? 'Authenticating...' : 'Enter School'}
+              {isProcessing ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin text-primary-600" />
+                  Getting your workspace ready...
+                </>
+              ) : (
+                <>
+                  <svg className="h-5 w-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
+                    <path fill="#4285f4" d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.2H272v95.1h147.3c-6.4 34.7-25.6 64.1-54.6 83.7v68h88.4c51.7-47.6 80.4-117.8 80.4-196.6z" />
+                    <path fill="#34a853" d="M272 544.3c73.8 0 135.8-24.5 181.1-66.3l-88.4-68c-24.5 16.4-55.7 26-92.7 26-71.3 0-131.7-48.2-153.4-113.1H28.1v70.9c45 87 137 150.5 243.9 150.5z" />
+                    <path fill="#fbbc04" d="M118.6 322.9c-8.6-25.4-8.6-52.6 0-78l.1-70.9H28.1C3.1 208.5-7.5 250.6-7.5 294s10.6 85.4 35.6 120.1l90.5-69.1z" />
+                    <path fill="#ea4335" d="M272 107.7c39.9-.6 78.3 14.6 107.5 41.6l80-80C417.6 24.2 346.5-3.5 272 0 165.1 0 73.1 63.5 28.1 150.5l90.5 70.9C140.3 155.9 200.7 107.7 272 107.7z" />
+                  </svg>
+                  Continue with Google
+                </>
+              )}
             </Button>
-
-          </form>
+            <p className="text-sm text-gray-600 text-center">
+              No manual email entry needed—just choose your Google account and we&apos;ll get your school dashboard ready.
+            </p>
+          </div>
         </CardContent>
       </Card>
     </div>
@@ -2524,6 +2549,7 @@ export function RhymesWorkflowApp() {
   const [isCoverDetailsStepComplete, setIsCoverDetailsStepComplete] = useState(
     () => Boolean(persistedState.isCoverDetailsStepComplete)
   );
+  const { signOut: authSignOut } = useAuth();
 
   useEffect(() => {
     if (!school) {
@@ -2647,6 +2673,9 @@ export function RhymesWorkflowApp() {
     setSchool(null);
     setCoverDefaults(mergeCoverDefaults());
     setIsCoverDetailsStepComplete(false);
+    void authSignOut().catch((error) => {
+      console.error('Failed to sign out from Google', error);
+    });
   };
 
   return (
