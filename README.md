@@ -33,15 +33,21 @@ The FastAPI service is defined in [`backend/server.py`](backend/server.py) and e
 Before starting the FastAPI service, make sure a MongoDB server is available. You can run it locally at `mongodb://localhost:27017` or supply a hosted MongoDB URL via `MONGO_URL`.
 
 ## Frontend Setup
-The React client automatically targets the same origin as the page serving it. When you need to talk to a backend hosted at a
-different URL, provide an override through `frontend/.env`:
+The UI is built with Vite and expects the backend location to be provided via an environment variable:
 
-1. (Optional) Create `frontend/.env` with the following entry to point the UI at a different backend host:
+1. Create `frontend/.env.local` (or `.env`) and set the backend override and Firebase auth values:
    ```env
-   REACT_APP_BACKEND_URL=http://localhost:8000
+   VITE_BACKEND_URL=http://localhost:8000
+   VITE_FIREBASE_API_KEY=your-api-key
+   VITE_FIREBASE_AUTH_DOMAIN=your-auth-domain
+   VITE_FIREBASE_PROJECT_ID=your-project-id
+   VITE_FIREBASE_STORAGE_BUCKET=your-storage-bucket
+   VITE_FIREBASE_MESSAGING_SENDER_ID=your-messaging-sender-id
+   VITE_FIREBASE_APP_ID=your-app-id
    ```
+   The `VITE_BACKEND_URL` value ensures login requests target the FastAPI service instead of the Vite dev server.
 2. Install frontend dependencies with `yarn install` inside the `frontend/` directory.
-3. Launch the development server with `yarn start`, which serves the UI on port 3000 as defined in `frontend/package.json`.
+3. Launch the development server with `yarn dev`. The Vite server defaults to port `5173`.
 
 ## Running the Application
-Keep both the backend (`uvicorn server:app --reload`) and frontend (`yarn start`) processes running. With both services active, open your browser to `http://localhost:3000` to interact with the Rhymes App.
+Run the backend (`uvicorn server:app --reload`) and the Vite frontend (`yarn dev`) at the same time. Open `http://localhost:5173/#/` in a private/incognito window or after clearing `localStorage` to see the embedded login form in `RhymesWorkflowApp`.
