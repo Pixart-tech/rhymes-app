@@ -13,6 +13,7 @@ else:
 print("Forced working directory:", os.getcwd())
 
 
+import json
 import logging
 import os
 import sys
@@ -146,10 +147,46 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# Firebase connection
-cred = credentials.ApplicationDefault()
-firebase_admin.initialize_app(cred)
-db = firestore.client()
+
+def _initialize_firestore_client():
+    """Initialize a Firestore client using explicit credentials when available.
+
+    The previous implementation relied on Application Default Credentials (ADC),
+    which raises an error in environments where ADC is not configured. To avoid
+    that failure mode, we prefer explicit credentials provided through
+    environment variables and fall back to anonymous credentials when the
+    Firestore emulator is being used.
+    """
+
+    if firebase_admin._apps:  # pragma: no cover - defensive guard
+        return firestore.client()
+
+    emulator_host = os.environ.get("FIRESTORE_EMULATOR_HOST")
+    credentials_json = os.environ.get("FIREBASE_CREDENTIALS")
+    credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+
+    if emulator_host:
+        cred = credentials.AnonymousCredentials()
+    elif credentials_json:
+        try:
+            cred_data = json.loads(credentials_json)
+        except json.JSONDecodeError:
+            cred_data = credentials_json
+        cred = credentials.Certificate(cred_data)
+    elif credentials_path:
+        cred = credentials.Certificate(credentials_path)
+    else:
+        raise RuntimeError(
+            "Firebase credentials are not configured. Set FIREBASE_CREDENTIALS to"
+            " a JSON blob or GOOGLE_APPLICATION_CREDENTIALS to a service account"
+            " path."
+        )
+
+    firebase_admin.initialize_app(cred)
+    return firestore.client()
+
+
+db = _initialize_firestore_client()
 
 
 app = FastAPI()
