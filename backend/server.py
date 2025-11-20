@@ -27,7 +27,6 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, 
 
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import Response
-from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
 
@@ -143,10 +142,15 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
         )
         return svg_markup
 
-# MongoDB connection
-mongo_url = os.environ["MONGO_URL"]
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ["DB_NAME"]]
+# Firebase connection
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+# Firebase connection
+cred = credentials.ApplicationDefault()
+firebase_admin.initialize_app(cred)
+db = firestore.client()
+
 
 app = FastAPI()
 app.add_middleware(
@@ -322,15 +326,15 @@ async def get_all_rhymes():
 
 
 @api_router.get("/rhymes/available/{school_id}/{grade}")
-async def get_available_rhymes(
+def get_available_rhymes(
     school_id: str, grade: str, include_selected: bool = False
 ):
     """Get available rhymes for a specific grade"""
     if not include_selected:
         # Get already selected rhymes for ALL grades in this school
-        selected_rhymes = await db.rhyme_selections.find(
-            {"school_id": school_id}
-        ).to_list(None)
+        selections_ref = db.collection("rhyme_selections")
+        query = selections_ref.where("school_id", "==", school_id)
+        selected_rhymes = [doc.to_dict() for doc in query.stream()]
 
         selected_codes = {selection["rhyme_code"] for selection in selected_rhymes}
     else:
@@ -360,9 +364,11 @@ async def get_available_rhymes(
 
 
 @api_router.get("/rhymes/selected/{school_id}")
-async def get_selected_rhymes(school_id: str):
+def get_selected_rhymes(school_id: str):
     """Get all selected rhymes for a school organized by grade"""
-    selections = await db.rhyme_selections.find({"school_id": school_id}).to_list(None)
+    selections_ref = db.collection("rhyme_selections")
+    query = selections_ref.where("school_id", "==", school_id)
+    selections = [doc.to_dict() for doc in query.stream()]
 
     result = {}
     for selection in selections:
@@ -388,11 +394,11 @@ async def get_selected_rhymes(school_id: str):
 
 
 @api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
-async def get_selected_rhymes_other_grades(school_id: str, grade: str):
+def get_selected_rhymes_other_grades(school_id: str, grade: str):
     """Get rhymes selected in other grades that can be reused"""
-    selections = await db.rhyme_selections.find(
-        {"school_id": school_id, "grade": {"$ne": grade}}  # Exclude current grade
-    ).to_list(None)
+    selections_ref = db.collection("rhyme_selections")
+    query = selections_ref.where("school_id", "==", school_id).where("grade", "!=", grade)
+    selections = [doc.to_dict() for doc in query.stream()]
 
     # Get unique rhymes from other grades
     selected_rhymes = {}
@@ -441,7 +447,8 @@ async def select_rhyme(input: RhymeSelectionCreate):
         "page_index": input.page_index,
     }
 
-    existing_selections = await db.rhyme_selections.find(page_query).to_list(None)
+    existing_selections_query = db.collection("rhyme_selections").where("school_id", "==", input.school_id).where("grade", "==", input.grade).where("page_index", "==", input.page_index)
+    existing_selections = [doc.to_dict() for doc in existing_selections_query.stream()]
 
     for existing in existing_selections:
         existing_pages = float(existing.get("pages", 1))
@@ -463,7 +470,7 @@ async def select_rhyme(input: RhymeSelectionCreate):
                 should_remove = True
 
         if should_remove:
-            await db.rhyme_selections.delete_one({"_id": existing["_id"]})
+            db.collection("rhyme_selections").document(existing["id"]).delete()
 
     # Create new selection
     selection_dict = input.dict()
@@ -472,7 +479,7 @@ async def select_rhyme(input: RhymeSelectionCreate):
     )
 
     selection_obj = RhymeSelection(**selection_dict)
-    await db.rhyme_selections.insert_one(selection_obj.dict())
+    db.collection("rhyme_selections").document(selection_obj.id).set(selection_obj.dict())
 
     return selection_obj
 
@@ -498,13 +505,8 @@ async def remove_specific_rhyme_selection(
 ):
     """Remove a specific rhyme selection for a position (top/bottom)"""
     # Get all selections for this page
-    selections = await db.rhyme_selections.find(
-        {
-            "school_id": school_id,
-            "grade": grade,
-            "page_index": page_index,
-        }
-    ).to_list(None)
+    selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade).where("page_index", "==", page_index)
+    selections = [doc.to_dict() for doc in selections_query.stream()]
 
     if not selections:
         # raise HTTPException(status_code=404, detail="No selections found for this page")
@@ -545,10 +547,7 @@ async def remove_specific_rhyme_selection(
         )
 
     # Remove the selection
-    result = await db.rhyme_selections.delete_one({"_id": selection_to_remove["_id"]})
-
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Selection not found")
+    db.collection("rhyme_selections").document(selection_to_remove["id"]).delete()
 
     return {"message": f"{position.capitalize()} selection removed successfully"}
 
@@ -560,9 +559,8 @@ async def get_grade_status(school_id: str):
     status = []
 
     for grade in grades:
-        selections = await db.rhyme_selections.find(
-            {"school_id": school_id, "grade": grade}
-        ).to_list(None)
+        selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade)
+        selections = [doc.to_dict() for doc in selections_query.stream()]
 
         selected_count = len(selections)
 
@@ -580,7 +578,8 @@ async def get_grade_status(school_id: str):
 @api_router.get("/admin/schools", response_model=List[SchoolWithSelections])
 async def get_all_schools_with_selections():
     """Return all schools with their rhyme selections grouped by grade."""
-    school_docs = await db.schools.find().sort("timestamp", -1).to_list(None)
+    school_docs_query = db.collection("schools").order_by("timestamp", direction=firestore.Query.DESCENDING)
+    school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
 
     if not school_docs:
         return []
@@ -589,9 +588,8 @@ async def get_all_schools_with_selections():
 
     selection_docs = []
     if school_ids:
-        selection_docs = await db.rhyme_selections.find(
-            {"school_id": {"$in": school_ids}}
-        ).to_list(None)
+        selection_docs_query = db.collection("rhyme_selections").where("school_id", "in", school_ids)
+        selection_docs = [doc.to_dict() for doc in selection_docs_query.stream()]
 
     selections_by_school: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     latest_selection_timestamp: Dict[str, datetime] = {}
@@ -687,16 +685,25 @@ async def get_all_schools_with_selections():
 @api_router.delete("/admin/schools/{school_id}")
 async def delete_school(school_id: str):
     """Delete a school and all of its rhyme selections."""
-    school_result = await db.schools.delete_one({"school_id": school_id})
-    selection_result = await db.rhyme_selections.delete_many({"school_id": school_id})
+    school_query = db.collection("schools").where("school_id", "==", school_id)
+    school_docs = [doc for doc in school_query.stream()]
+    for doc in school_docs:
+        doc.reference.delete()
+    school_result_deleted_count = len(school_docs)
 
-    if school_result.deleted_count == 0 and selection_result.deleted_count == 0:
+    selection_query = db.collection("rhyme_selections").where("school_id", "==", school_id)
+    selection_docs = [doc for doc in selection_query.stream()]
+    for doc in selection_docs:
+        doc.reference.delete()
+    selection_result_deleted_count = len(selection_docs)
+
+    if school_result_deleted_count == 0 and selection_result_deleted_count == 0:
         raise HTTPException(status_code=404, detail="School not found")
 
     return {
         "message": "School and associated rhymes removed successfully",
-        "removed_school": school_result.deleted_count,
-        "removed_selections": selection_result.deleted_count,
+        "removed_school": school_result_deleted_count,
+        "removed_selections": selection_result_deleted_count,
     }
 
 
@@ -1157,12 +1164,8 @@ async def download_rhyme_binder(school_id: str, grade: str):
     except PDFDependencyUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    selections = await db.rhyme_selections.find(
-        {
-            "school_id": school_id,
-            "grade": grade,
-        }
-    ).to_list(None)
+    selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade)
+    selections = [doc.to_dict() for doc in selections_query.stream()]
 
     if not selections:
         raise HTTPException(status_code=404, detail="No rhymes selected for this grade")
@@ -1293,7 +1296,3 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()

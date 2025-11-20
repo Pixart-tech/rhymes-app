@@ -31,17 +31,20 @@ def create_auth_router(db) -> APIRouter:
     router = APIRouter(prefix="/auth", tags=["auth"])
 
     @router.post("/login", response_model=School)
-    async def login_school(input: SchoolCreate):
+    def login_school(input: SchoolCreate):
         """Register a school if it does not exist and return its record."""
 
-        existing_school = await db.schools.find_one({"school_id": input.school_id})
+        schools_ref = db.collection("schools")
+        query = schools_ref.where("school_id", "==", input.school_id).limit(1)
+        results = list(query.stream())
+        existing_school_doc = results[0] if results else None
 
-        if existing_school:
-            return School(**existing_school)
+        if existing_school_doc:
+            return School(**existing_school_doc.to_dict())
 
         school_dict = input.dict()
         school_obj = School(**school_dict)
-        await db.schools.insert_one(school_obj.dict())
+        db.collection("schools").document(school_obj.id).set(school_obj.dict())
         return school_obj
 
     return router
