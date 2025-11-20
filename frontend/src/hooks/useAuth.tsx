@@ -14,45 +14,19 @@ interface AuthContextType {
   loading: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  getIdToken: () => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const getSchoolIdForUser = (email: string): string => {
-  const stored = localStorage.getItem('schoolMappings');
-  let schoolMappings: Record<string, string> = {};
-
-  if (stored) {
-    try {
-      schoolMappings = JSON.parse(stored);
-    } catch (error) {
-      console.warn('Failed to parse school mappings, resetting storage', error);
-      schoolMappings = {};
-    }
-  }
-
-  if (schoolMappings[email]) {
-    return schoolMappings[email];
-  }
-
-  const existingIds = Object.values(schoolMappings).map((id) => parseInt(id as string, 10)).filter((value) => !Number.isNaN(value));
-  const maxId = existingIds.length > 0 ? Math.max(...existingIds) : 1000;
-  const newId = (maxId + 1).toString();
-
-  schoolMappings[email] = newId;
-  localStorage.setItem('schoolMappings', JSON.stringify(schoolMappings));
-  return newId;
-};
-
 const buildUserFromFirebase = (firebaseUser: FirebaseUser): User => {
   const fallbackEmail = `${firebaseUser.uid}@no-email.firebaseapp`;
   const email = firebaseUser.email ?? fallbackEmail;
-  const schoolId = getSchoolIdForUser(email);
 
   return {
     name: firebaseUser.displayName || firebaseUser.email || 'School Admin',
     email,
-    schoolId
+    schoolId: firebaseUser.uid
   };
 };
 
@@ -97,8 +71,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
+  const getIdToken = useCallback(async () => {
+    if (!auth.currentUser) {
+      return null;
+    }
+
+    return auth.currentUser.getIdToken();
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signOut, getIdToken }}>
       {children}
     </AuthContext.Provider>
   );
