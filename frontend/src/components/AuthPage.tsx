@@ -21,7 +21,7 @@ interface AuthPageProps {
 }
 
 const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
-  const { user, signIn, loading: authLoading } = useAuth();
+  const { user, signIn, loading: authLoading, getIdToken } = useAuth();
   const [syncingSchool, setSyncingSchool] = useState(false);
   const syncAttemptRef = useRef(false);
 
@@ -36,9 +36,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     const syncSchoolProfile = async () => {
       setSyncingSchool(true);
       try {
+        const idToken = await getIdToken();
+
+        if (!idToken) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+
         const response = await axios.post(`${API}/auth/login`, {
-          school_id: user.schoolId,
-          school_name: user.name
+          id_token: idToken
         });
 
         if (isMounted) {
@@ -63,7 +68,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     return () => {
       isMounted = false;
     };
-  }, [user, onAuth]);
+  }, [user, onAuth, getIdToken]);
 
   const handleGoogleSignIn = async () => {
     try {
