@@ -5,6 +5,7 @@ import { QuestionnaireAnswers } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { saveSelection } from '../services/api';
 import { CATALOG } from '../data/catalog';
+import { Button } from '../components/ui/button';
 
 type ClassLevel = 'Nursery' | 'LKG' | 'UKG';
 
@@ -438,6 +439,7 @@ const QuestionnairePage: React.FC = () => {
         } else {
             setShowClassIntro(true);
             setSummaryReturnTarget(null);
+            
         }
     };
 
@@ -813,6 +815,10 @@ const QuestionnairePage: React.FC = () => {
     const renderClassSelection = () => (
         <div className="flex flex-col items-center gap-10 text-center">
             <div className="space-y-4 max-w-2xl">
+                <div>
+                   <a href='HomePage'>Return to dashboard</a>                 
+
+                    </div>
                 <h1 className="text-4xl md:text-5xl font-extrabold text-gray-900">
                     Customise your perfect early curriculum
                 </h1>

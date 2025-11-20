@@ -34,7 +34,8 @@ const deriveApiBaseUrl = (backendUrl) => {
   return `${sanitized}/api`;
 };
 
-export const API_BASE_URL = deriveApiBaseUrl(process.env.REACT_APP_BACKEND_URL);
+export const API_BASE_URL = deriveApiBaseUrl(import.meta.env.VITE_BACKEND_URL);
+
 
 export function cn(...inputs) {
   return twMerge(clsx(inputs));

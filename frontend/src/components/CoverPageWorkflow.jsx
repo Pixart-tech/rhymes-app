@@ -156,9 +156,13 @@ const buildCoverAssetSvgUrl = (baseUrl, relativePath) => {
 };
 
 const resolveCoverAssetsNetworkBaseUrl = () => {
-  const explicitBase =
-    process.env.REACT_APP_COVER_ASSETS_NETWORK_BASE_URL ||
-    process.env.REACT_APP_COVER_ASSETS_BASE_URL;
+  // Prefer Vite env vars (import.meta.env). Fallback to API_BASE_URL network path.
+  let explicitBase = '';
+  try {
+    explicitBase = import.meta?.env?.VITE_COVER_ASSETS_NETWORK_BASE_URL || import.meta?.env?.VITE_COVER_ASSETS_BASE_URL || '';
+  } catch (err) {
+    explicitBase = '';
+  }
 
   if (explicitBase && explicitBase.trim()) {
     return explicitBase.trim();

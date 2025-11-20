@@ -8,6 +8,8 @@ import QuestionnairePage from './pages/QuestionnairePage';
 import AdminUploadPage from './pages/AdminUploadPage';
 import PdfViewerPage from './pages/PdfViewerPage';
 import GridPage from './pages/GridPage';
+import RhymePicker, { RhymesWorkflowApp } from './pages/Rhymepicker';
+
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
@@ -29,43 +31,46 @@ const App: React.FC = () => {
     <AuthProvider>
       <HashRouter>
         <div className="min-h-screen bg-gray-50 text-gray-800">
-          <Header />
+          
           <main className="p-4 sm:p-6 md:p-8">
             <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route
-                path="/questionnaire"
-                element={
-                  <ProtectedRoute>
-                    <QuestionnairePage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/grid"
-                element={
-                  <ProtectedRoute>
-                    <GridPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/admin/upload"
-                element={
-                  <ProtectedRoute>
-                    <AdminUploadPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/pdf/:id"
-                element={
-                  <ProtectedRoute>
-                    <PdfViewerPage />
-                  </ProtectedRoute>
-                }
-              />
-            </Routes>
+  <Route path="/" element={<RhymesWorkflowApp />} />
+  <Route path='/Home' element={<HomePage/>}/>
+  <Route
+    path="/questionnaire"
+    element={
+      <ProtectedRoute>
+        <QuestionnairePage />
+      </ProtectedRoute>
+    }
+  />
+  {/* <Route path="/rhymes" element={<RhymesWorkflowApp />} /> */}
+  <Route
+    path="/grid"
+    element={
+      <ProtectedRoute>
+        <GridPage />
+      </ProtectedRoute>
+    }
+  />
+  <Route
+    path="/admin/upload"
+    element={
+      <ProtectedRoute>
+        <AdminUploadPage />
+      </ProtectedRoute>
+    }
+  />
+  <Route
+    path="/pdf/:id"
+    element={
+      <ProtectedRoute>
+        <PdfViewerPage />
+      </ProtectedRoute>
+    }
+  />
+</Routes>
+
           </main>
         </div>
       </HashRouter>

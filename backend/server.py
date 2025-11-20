@@ -1,6 +1,18 @@
 
 from __future__ import annotations
 
+import os, sys
+
+# Force working directory to the folder where EXE is running
+if getattr(sys, "frozen", False):
+    exe_dir = os.path.dirname(sys.executable)
+    os.chdir(exe_dir)
+else:
+    exe_dir = os.path.dirname(os.path.abspath(__file__))
+
+print("Forced working directory:", os.getcwd())
+
+
 import logging
 import os
 import sys

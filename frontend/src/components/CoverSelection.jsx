@@ -183,7 +183,7 @@ const CoverSelection = () => {
     setShouldShowPreview(false);
   }, [selectedThemeId]);
 
-  const handleSelectTheme = useCallback((event) => {
+  const handleSelectTheme = useCallback((event) => { 
     setSelectedThemeId(event.target.value);
     setValidationError('');
   }, []);

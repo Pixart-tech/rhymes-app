@@ -1,10 +1,23 @@
 
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
+import { Button } from '../components/ui/button';
 
-const HomePage: React.FC = () => {
+interface HomePageProps {
+  onBackToMode?: () => void;
+}
+
+const HomePage: React.FC<HomePageProps> = ({ onBackToMode }) => {
   const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const handleBackToMenu = () => {
+    if (typeof onBackToMode === 'function') {
+      onBackToMode();
+    }
+    navigate('/');
+  };
 
   if (loading) {
     return <div className="text-center p-12">Loading...</div>;
@@ -12,10 +25,12 @@ const HomePage: React.FC = () => {
 
   return (
     <div className="container mx-auto max-w-4xl text-center py-16">
+      <Button onClick={handleBackToMenu}>Back to  menu </Button>
+      <br></br>
       <h1 className="text-4xl md:text-5xl font-extrabold text-primary-800 mb-4">Welcome to the Book Selector</h1>
       <p className="text-lg text-gray-600 mb-8">
         Your one-stop solution for customizing school book packages for Nursery, LKG, and UKG.
-      </p>
+      </p>  
       {user ? (
         <div className="bg-white p-8 rounded-lg shadow-md border border-primary-200">
           <h2 className="text-2xl font-bold text-gray-800">Hello, {user.name}!</h2>
@@ -29,6 +44,7 @@ const HomePage: React.FC = () => {
               Start Your Selection
             </Link>
           </div>
+          
         </div>
       ) : (
         <div className="mt-10">

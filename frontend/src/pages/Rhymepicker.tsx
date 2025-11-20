@@ -1,24 +1,27 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import './App.css';
+import '../App.css';
+import { NavLink } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 
 
 // Components
-import { Button } from './components/ui/button';
-import { Input } from './components/ui/input';
-import { Label } from './components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
-import { Badge } from './components/ui/badge';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { toast } from 'sonner';
-import { Toaster } from './components/ui/sonner';
-import CoverPageWorkflow from './components/CoverPageWorkflow';
-import BookWorkflow from './components/BookWorkflow';
-import InlineSvg from './components/InlineSvg';
-import { API_BASE_URL } from './lib/utils';
-import { decodeSvgPayload, sanitizeRhymeSvgContent } from './lib/svgUtils';
-import { readFileAsDataUrl } from './lib/fileUtils';
+import { Toaster } from '../components/ui/sonner';
+import CoverPageWorkflow from '../components/CoverPageWorkflow';
+import HomePage from '../pages/HomePage';
+import BookWorkflow from '../components/BookWorkflow';
+import InlineSvg from '../components/InlineSvg';
+import { API_BASE_URL } from '../lib/utils';
+import { decodeSvgPayload, sanitizeRhymeSvgContent } from '../lib/svgUtils';
+import { readFileAsDataUrl } from '../lib/fileUtils';
 import {
   clearPersistedAppState,
   loadPersistedAppState,
@@ -26,7 +29,7 @@ import {
   clearCoverWorkflowState,
   clearBookWorkflowState,
   loadBookWorkflowState
-} from './lib/storage';
+} from '../lib/storage';
 
 
 // Icons
@@ -46,6 +49,7 @@ import {
   Clock,
   Loader2
 } from 'lucide-react';
+
 
 const API = API_BASE_URL || '/api';
 
@@ -161,8 +165,8 @@ const AuthPage = ({ onAuth }) => {
           <div className="w-20 h-20 bg-gradient-to-r from-orange-400 to-red-400 rounded-full flex items-center justify-center mx-auto mb-4">
             <School className="w-10 h-10 text-white" />
           </div>
-          <CardTitle className="text-2xl font-bold text-gray-800 mb-2">Rhyme Picker</CardTitle>
-          <p className="text-gray-600 text-sm">Select rhymes for your school grades</p>
+          <CardTitle className="text-2xl font-bold text-gray-800 mb-2">Personalised Circulum generator</CardTitle>
+          <p className="text-gray-600 text-sm">Customise circum for your school grades</p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAuth} className="space-y-6">
@@ -288,7 +292,83 @@ const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
     </div>
   );
 };
+// const Header: React.FC = ({onBackToMode}) => {
+//   const { user, signIn, signOut } = useAuth();
+//   const navigate = useNavigate();
 
+//   const activeLinkClass = "text-white bg-primary-700";
+//   const inactiveLinkClass = "text-gray-300 hover:bg-primary-600 hover:text-white";
+//   const linkBaseClass = "px-3 py-2 rounded-md text-sm font-medium transition-colors";
+
+//   const handleBackToMenu = () => {
+//     if (typeof onBackToMode === 'function') {
+//       onBackToMode();
+//     }
+//     navigate('/');
+//   };
+
+//   return (
+//     <header className="bg-primary-800 shadow-md">
+//       <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+//         <div className="flex items-center justify-between h-16">
+//           <div className="flex items-center">
+//             <div className="flex-shrink-0">
+//                <NavLink to="/" className="text-white text-xl font-bold">Book Selector</NavLink>
+//             </div>
+//             <div className="hidden md:block">
+//               <div className="ml-10 flex items-baseline space-x-4">
+                
+//                 {user && (
+//                   <>
+//                     <NavLink to="/questionnaire" className={({isActive}) => `${linkBaseClass} ${isActive ? activeLinkClass : inactiveLinkClass}`}>Questionnaire</NavLink>
+//                     <NavLink to="/grid" className={({isActive}) => `${linkBaseClass} ${isActive ? activeLinkClass : inactiveLinkClass}`}>View Grid</NavLink>
+//                     <NavLink to="/admin/upload" className={({isActive}) => `${linkBaseClass} ${isActive ? activeLinkClass : inactiveLinkClass}`}>Upload PDF</NavLink>
+                   
+
+
+
+
+
+
+
+                    
+//                   </>
+//                 )}
+//                  <Button
+//                 onClick={handleBackToMenu}
+//                 variant="outline"
+//                 className="bg-white/80 hover:bg-white border-gray-200"
+//               >
+//                 Back to Menu
+//               </Button>
+//               </div>
+//             </div>
+//           </div>
+//           <div className="flex items-center">
+//             {user ? (
+//               <>
+//                 <span className="text-gray-300 text-sm mr-4 hidden sm:inline">School ID: {user.schoolId}</span>
+//                 <button
+//                   onClick={signOut}
+//                   className="bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
+//                 >
+//                   Sign Out
+//                 </button>
+//               </>
+//             ) : (
+//               <button
+//                 onClick={signIn}
+//                 className="bg-primary-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-primary-700 transition-colors"
+//               >
+//                 Sign in with Google
+//               </button>
+//             )}
+//           </div>
+//         </div>
+//       </nav>
+//     </header>
+//   );
+// };
 // Cover Details Page
 const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout }) => {
   const navigate = useNavigate();
@@ -2427,7 +2507,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 };
 
 // Main App Component
-function App() {
+export function RhymesWorkflowApp() {
   const persistedStateRef = useRef(null);
   if (persistedStateRef.current === null) {
     persistedStateRef.current = loadPersistedAppState();
@@ -2572,79 +2652,78 @@ function App() {
   return (
     <div className="App">
       <Toaster position="top-right" />
-      <BrowserRouter>
-        <Routes>
-
-          <Route path="/" element={
-            !school ? (
-              <AuthPage onAuth={handleAuth} />
-            ) : !selectedMode ? (
-              <ModeSelectionPage
-                school={school}
-                onModeSelect={handleModeSelect}
-                onLogout={handleLogout}
-              />
-            ) : selectedMode === 'cover' && !isCoverDetailsStepComplete ? (
-              <CoverDetailsPage
-                school={school}
-                coverDetails={coverDefaults}
-                onSave={handleCoverDetailsSave}
-                onBackToMenu={handleBackToModeSelection}
-                onLogout={handleLogout}
-              />
-            ) : !selectedGrade ? (
-              <GradeSelectionPage
-                school={school}
-                mode={selectedMode}
-                onGradeSelect={handleGradeSelect}
-                onLogout={handleLogout}
-                onBackToMode={handleBackToModeSelection}
-                coverDefaults={coverDefaults}
-                onEditCoverDetails={handleEditCoverDetails}
-              />
-            ) : selectedMode === 'rhymes' ? (
-              <RhymeSelectionPage
-                school={school}
-                grade={selectedGrade}
-                customGradeName={resolveStoredGradeName(selectedGrade)}
-                onBack={handleBackToGrades}
-                onLogout={handleLogout}
-              />
-            ) : selectedMode === 'cover' ? (
-              <CoverPageWorkflow
-                school={school}
-                grade={selectedGrade}
-                customGradeName={resolveStoredGradeName(selectedGrade)}
-                gradeDetails={coverDefaults}
-                onBackToGrades={handleBackToGrades}
-                onBackToMode={handleBackToModeSelection}
-                onLogout={handleLogout}
-                coverDefaults={coverDefaults}
-              />
-            ) : selectedMode === 'books' ? (
-              <BookWorkflow
-                school={school}
-                grade={selectedGrade}
-                customGradeName={resolveStoredGradeName(selectedGrade)}
-                onBackToGrades={handleBackToGrades}
-                onBackToMode={handleBackToModeSelection}
-                onLogout={handleLogout}
-              />
-            ) : (
-              <FeaturePlaceholderPage
-                school={school}
-                mode={selectedMode}
-                grade={selectedGrade}
-                onBackToGrades={handleBackToGrades}
-                onBackToMode={handleBackToModeSelection}
-                onLogout={handleLogout}
-              />
-            )
-          } />
-        </Routes>
-      </BrowserRouter>
+      {!school ? (
+        <AuthPage onAuth={handleAuth} />
+      ) : !selectedMode ? (
+        <ModeSelectionPage
+          school={school}
+          onModeSelect={handleModeSelect}
+          onLogout={handleLogout}
+        />
+      ) : selectedMode === 'cover' && !isCoverDetailsStepComplete ? (
+        <CoverDetailsPage
+          school={school}
+          coverDetails={coverDefaults}
+          onSave={handleCoverDetailsSave}
+          onBackToMenu={handleBackToModeSelection}
+          onLogout={handleLogout}
+        />
+      ) : !selectedGrade ? (
+        <GradeSelectionPage
+          school={school}
+          mode={selectedMode}
+          onGradeSelect={handleGradeSelect}
+          onLogout={handleLogout}
+          onBackToMode={handleBackToModeSelection}
+          coverDefaults={coverDefaults}
+          onEditCoverDetails={handleEditCoverDetails}
+        />
+      ) : selectedMode === 'rhymes' ? (
+        <RhymeSelectionPage
+          school={school}
+          grade={selectedGrade}
+          customGradeName={resolveStoredGradeName(selectedGrade)}
+          onBack={handleBackToGrades}
+          onLogout={handleLogout}
+        />
+      ) : selectedMode === 'cover' ? (
+        <CoverPageWorkflow
+          school={school}
+          grade={selectedGrade}
+          customGradeName={resolveStoredGradeName(selectedGrade)}
+          gradeDetails={coverDefaults}
+          onBackToGrades={handleBackToGrades}
+          onBackToMode={handleBackToModeSelection}
+          onLogout={handleLogout}
+          coverDefaults={coverDefaults}
+        />
+      ) : selectedMode === 'books' ? (
+        // <BookWorkflow
+        //   school={school}
+        //   grade={selectedGrade}
+        //   customGradeName={resolveStoredGradeName(selectedGrade)}
+        //   onBackToGrades={handleBackToGrades}
+        //   onBackToMode={handleBackToModeSelection}
+        //   onLogout={handleLogout}
+        // />
+        <HomePage
+        onBackToMode={handleBackToModeSelection}/>
+        // <Header
+        // onBackToMode={handleBackToModeSelection}
+        
+        // />
+      ) : (
+        <FeaturePlaceholderPage
+          school={school}
+          mode={selectedMode}
+          grade={selectedGrade}
+          onBackToGrades={handleBackToGrades}
+          onBackToMode={handleBackToModeSelection}
+          onLogout={handleLogout}
+        />
+      )}
     </div>
   );
 }
 
-export default App;
+export default RhymeSelectionPage;
