@@ -2,12 +2,12 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: "AIzaSyAcu52UUBUwJYb_wNhFr14IrcsEKgEl8P4",
+  authDomain: "sales-catelogue.firebaseapp.com",
+  projectId: "sales-catelogue",
+  storageBucket: "sales-catelogue.firebasestorage.app",
+  messagingSenderId: "595821344222",
+  appId: "1:595821344222:web:91fac7c9ddcff9bc7cd94f",
 };
 
 const missingKeys = Object.entries(firebaseConfig)

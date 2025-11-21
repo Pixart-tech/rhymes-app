@@ -1,23 +1,50 @@
 
 import React, { createContext, useState, useContext, useEffect, useCallback, ReactNode } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut, User as FirebaseUser } from 'firebase/auth';
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+  updateProfile,
+  User as FirebaseUser
+} from 'firebase/auth';
 import { auth, googleAuthProvider } from '../lib/firebase';
 
 interface User {
   name: string;
   email: string;
   schoolId: string;
+  role: UserRole;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signIn: () => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string, displayName?: string) => Promise<void>;
   signOut: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
+  /**
+   * @deprecated Use signInWithGoogle instead. Kept for compatibility.
+   */
+  signIn: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export type UserRole = 'super_admin' | 'user';
+
+const SUPER_ADMIN_EMAIL = 'admin@edplore.org';
+
+const deriveRoleFromEmail = (email: string | null | undefined): UserRole => {
+  if (!email) {
+    return 'user';
+  }
+
+  return email.toLowerCase() === SUPER_ADMIN_EMAIL ? 'super_admin' : 'user';
+};
 
 const buildUserFromFirebase = (firebaseUser: FirebaseUser): User => {
   const fallbackEmail = `${firebaseUser.uid}@no-email.firebaseapp`;
@@ -26,7 +53,8 @@ const buildUserFromFirebase = (firebaseUser: FirebaseUser): User => {
   return {
     name: firebaseUser.displayName || firebaseUser.email || 'School Admin',
     email,
-    schoolId: firebaseUser.uid
+    schoolId: firebaseUser.uid,
+    role: deriveRoleFromEmail(email)
   };
 };
 
@@ -59,6 +87,33 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
+  const signInWithGoogle = signIn;
+
+  const signInWithEmail = useCallback(async (email: string, password: string) => {
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+    } catch (error) {
+      console.error('Email/password sign-in failed', error);
+      throw error;
+    }
+  }, []);
+
+  const signUpWithEmail = useCallback(
+    async (email: string, password: string, displayName?: string) => {
+      try {
+        const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+
+        if (displayName) {
+          await updateProfile(credential.user, { displayName });
+        }
+      } catch (error) {
+        console.error('Email/password sign-up failed', error);
+        throw error;
+      }
+    },
+    []
+  );
+
   const signOut = useCallback(async () => {
     try {
       await firebaseSignOut(auth);
@@ -80,7 +135,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, getIdToken }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        signIn,
+        signInWithGoogle,
+        signInWithEmail,
+        signUpWithEmail,
+        signOut,
+        getIdToken
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

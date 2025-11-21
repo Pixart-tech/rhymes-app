@@ -21,17 +21,23 @@ interface AuthPageProps {
 }
 
 const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
-  const { user, signIn, loading: authLoading, getIdToken } = useAuth();
+  const { user, signInWithGoogle, loading: authLoading, getIdToken } = useAuth();
   const [syncingSchool, setSyncingSchool] = useState(false);
-  const syncAttemptRef = useRef(false);
+  const lastSyncedUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!user || syncAttemptRef.current) {
+    if (!user) {
+      lastSyncedUserIdRef.current = null;
+      setSyncingSchool(false);
+      return;
+    }
+
+    if (lastSyncedUserIdRef.current === user.schoolId) {
       return;
     }
 
     let isMounted = true;
-    syncAttemptRef.current = true;
+    lastSyncedUserIdRef.current = user.schoolId;
 
     const syncSchoolProfile = async () => {
       setSyncingSchool(true);
@@ -47,13 +53,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
         });
 
         if (isMounted) {
-          toast.success('Signed in with Google');
-          onAuth(response.data);
+          const roleLabel = user.role === 'super_admin' ? 'Super Admin' : 'User';
+          toast.success(`Signed in as ${roleLabel}`);
+          onAuth({ ...response.data, role: user.role });
         }
       } catch (error) {
         console.error('Auth error:', error);
         if (isMounted) {
-          syncAttemptRef.current = false;
+          lastSyncedUserIdRef.current = null;
           toast.error('Unable to open your workspace. Please try again.');
         }
       } finally {
@@ -72,7 +79,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
 
   const handleGoogleSignIn = async () => {
     try {
-      await signIn();
+      await signInWithGoogle();
     } catch (error) {
       console.error('Failed to start Google sign-in', error);
       toast.error('Google sign-in was cancelled or failed. Please try again.');
@@ -117,7 +124,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
               )}
             </Button>
             <p className="text-sm text-gray-600 text-center">
-              No manual email entry needed—just choose your Google account and we&apos;ll get your school dashboard ready.
+              Choose your Google account to access your workspace. Roles are detected automatically—no manual email entry needed.
             </p>
           </div>
         </CardContent>

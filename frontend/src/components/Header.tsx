@@ -4,7 +4,7 @@ import { NavLink } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
 const Header: React.FC = () => {
-  const { user, signIn, signOut } = useAuth();
+  const { user, signInWithGoogle, signOut } = useAuth();
 
   const activeLinkClass = "text-white bg-primary-700";
   const inactiveLinkClass = "text-gray-300 hover:bg-primary-600 hover:text-white";
@@ -43,7 +43,7 @@ const Header: React.FC = () => {
               </>
             ) : (
               <button
-                onClick={signIn}
+                onClick={signInWithGoogle}
                 className="bg-primary-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-primary-700 transition-colors"
               >
                 Sign in with Google
