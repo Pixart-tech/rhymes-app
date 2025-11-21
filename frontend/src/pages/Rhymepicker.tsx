@@ -127,7 +127,7 @@ const buildCoverGradeNames = (source) =>
     return acc;
   }, {});
 
-const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
+const ModeSelectionPage = ({ school, onModeSelect, onLogout, isSuperAdmin = false }) => {
   const options = [
     {
       id: 'books',
@@ -160,13 +160,24 @@ const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
             <h1 className="text-3xl font-bold text-gray-800">Welcome, {school.school_name}</h1>
             <p className="text-gray-600">School ID: {school.school_id}</p>
           </div>
-          <Button
-            onClick={onLogout}
-            variant="outline"
-            className="bg-white/80 hover:bg-white border-gray-200"
-          >
-            Logout
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            {isSuperAdmin && (
+              <Button
+                asChild
+                variant="outline"
+                className="bg-white/80 hover:bg-white border-gray-200"
+              >
+                <a href="#/admin/upload">Admin dashboard</a>
+              </Button>
+            )}
+            <Button
+              onClick={onLogout}
+              variant="outline"
+              className="bg-white/80 hover:bg-white border-gray-200"
+            >
+              Logout
+            </Button>
+          </div>
         </div>
 
         <Card className="border-0 bg-white/80 backdrop-blur-md shadow-xl">
@@ -2437,6 +2448,7 @@ export function RhymesWorkflowApp() {
 
   const persistedState = persistedStateRef.current || {};
 
+  const [workspaceUser, setWorkspaceUser] = useState(() => persistedState.workspaceUser ?? null);
   const [school, setSchool] = useState(() => persistedState.school ?? null);
   const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
   const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
@@ -2455,6 +2467,7 @@ export function RhymesWorkflowApp() {
 
     if (!user) {
       clearPersistedAppState();
+      setWorkspaceUser(null);
       setSchool(null);
       setSelectedMode(null);
       setSelectedGrade(null);
@@ -2470,13 +2483,14 @@ export function RhymesWorkflowApp() {
     }
 
     savePersistedAppState({
+      workspaceUser,
       school,
       selectedMode,
       selectedGrade,
       coverDefaults,
       isCoverDetailsStepComplete
     });
-  }, [school, selectedMode, selectedGrade, coverDefaults, isCoverDetailsStepComplete]);
+  }, [workspaceUser, school, selectedMode, selectedGrade, coverDefaults, isCoverDetailsStepComplete]);
 
   const clearCoverWorkflowForSchool = useCallback((schoolId) => {
     if (!schoolId) {
@@ -2537,12 +2551,13 @@ export function RhymesWorkflowApp() {
     [coverDefaults]
   );
 
-  const handleAuth = (schoolData) => {
-    if (school?.school_id && school?.school_id !== schoolData?.school_id) {
+  const handleAuth = ({ school: nextSchool, user: nextWorkspaceUser }) => {
+    if (school?.school_id && school?.school_id !== nextSchool?.school_id) {
       clearCoverWorkflowForSchool(school.school_id);
     }
 
-    setSchool(schoolData);
+    setWorkspaceUser(nextWorkspaceUser);
+    setSchool(nextSchool);
     setSelectedMode(null);
     setSelectedGrade(null);
     setCoverDefaults(mergeCoverDefaults());
@@ -2580,6 +2595,7 @@ export function RhymesWorkflowApp() {
       clearCoverWorkflowForSchool(currentSchoolId);
     }
     clearPersistedAppState();
+    setWorkspaceUser(null);
     setSelectedGrade(null);
     setSelectedMode(null);
     setSchool(null);
@@ -2600,6 +2616,7 @@ export function RhymesWorkflowApp() {
           school={school}
           onModeSelect={handleModeSelect}
           onLogout={handleLogout}
+          isSuperAdmin={workspaceUser?.role === 'super-admin'}
         />
       ) : selectedMode === 'cover' && !isCoverDetailsStepComplete ? (
         <CoverDetailsPage

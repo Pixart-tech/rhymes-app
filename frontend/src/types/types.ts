@@ -1,4 +1,36 @@
 
+export type SchoolServiceType = 'id_cards' | 'report_cards' | 'certificates';
+
+export interface SchoolProfile {
+  school_id: string;
+  school_name: string;
+  logo_blob_base64?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  tagline?: string | null;
+  principal_name?: string | null;
+  principal_email?: string | null;
+  principal_phone?: string | null;
+  service_type?: SchoolServiceType[];
+  created_by_user_id?: string | null;
+  created_by_email?: string | null;
+  timestamp?: string;
+}
+
+export interface SchoolFormValues {
+  school_name: string;
+  logo_blob_base64?: string | null;
+  email: string;
+  phone: string;
+  address: string;
+  tagline?: string;
+  principal_name: string;
+  principal_email: string;
+  principal_phone: string;
+  service_type: Record<SchoolServiceType, boolean>;
+}
+
 export interface Book {
   id: string;
   class_level: string;

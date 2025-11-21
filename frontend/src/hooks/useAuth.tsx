@@ -34,16 +34,16 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export type UserRole = 'super_admin' | 'user';
+export type UserRole = 'super-admin' | 'user';
 
-const SUPER_ADMIN_EMAIL = 'admin@edplore.org';
+const SUPER_ADMIN_EMAIL = 'unplugstories2@gmail.com';
 
 const deriveRoleFromEmail = (email: string | null | undefined): UserRole => {
   if (!email) {
     return 'user';
   }
 
-  return email.toLowerCase() === SUPER_ADMIN_EMAIL ? 'super_admin' : 'user';
+  return email.toLowerCase() === SUPER_ADMIN_EMAIL ? 'super-admin' : 'user';
 };
 
 const buildUserFromFirebase = (firebaseUser: FirebaseUser): User => {

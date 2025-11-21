@@ -24,13 +24,14 @@ from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path, PureWindowsPath
-from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
-
-from fastapi import APIRouter, FastAPI, HTTPException
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+from dotenv import load_dotenv
+from fastapi import APIRouter, FastAPI, HTTPException, Header
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
 
+load_dotenv()
 
 if __package__ in {None, ""}:
     # Allow ``python backend/server.py`` to work by ensuring the project root is
@@ -39,13 +40,15 @@ if __package__ in {None, ""}:
     project_root = current_dir.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from backend.app import auth, config, rhymes, svg_processing, unc_path_utils  # type: ignore
+    from backend.app import auth, config, rhymes, school_profiles, svg_processing, unc_path_utils  # type: ignore
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
-    from .app import auth, config, rhymes, svg_processing, unc_path_utils
+    from .app import auth, config, rhymes, school_profiles, svg_processing, unc_path_utils
     from .app.svg_processing import SvgDocument as _SvgDocument
 
 School = auth.School
+SchoolCreatePayload = school_profiles.SchoolCreatePayload
+SchoolUpdatePayload = school_profiles.SchoolUpdatePayload
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +148,7 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
 
 # Firebase connection
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import auth as firebase_auth, credentials, firestore
 
 
 def _initialize_firestore_client():
@@ -163,7 +166,7 @@ def _initialize_firestore_client():
 
     emulator_host = os.environ.get("FIRESTORE_EMULATOR_HOST")
     credentials_json = os.environ.get("FIREBASE_CREDENTIALS")
-    credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    credentials_path = "C:/WORKSPACE/rhymes-app/backend/firebase_key.json"
 
     if emulator_host:
         cred = credentials.AnonymousCredentials()
@@ -187,6 +190,80 @@ def _initialize_firestore_client():
 
 
 db = _initialize_firestore_client()
+
+
+DEFAULT_USER_ROLE = "user"
+
+def _verify_and_decode_token(authorization: Optional[str]) -> Dict[str, Any]:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Authorization header must be a Bearer token")
+
+    try:
+        return firebase_auth.verify_id_token(token)
+    except Exception as exc:  # pragma: no cover - firebase library raises many subclasses
+        raise HTTPException(status_code=401, detail="Invalid or expired Firebase token") from exc
+
+
+def _ensure_user_document(decoded_token: Dict[str, Any]) -> Dict[str, Any]:
+    uid = decoded_token.get("uid")
+    if not uid:
+        raise HTTPException(status_code=400, detail="Firebase token is missing a user id")
+
+    doc_ref = db.collection("users").document(uid)
+    snapshot = doc_ref.get()
+    now = datetime.utcnow()
+    email = decoded_token.get("email")
+    display_name = decoded_token.get("name")
+
+    if snapshot.exists:
+        data = snapshot.to_dict() or {}
+        updates: Dict[str, Any] = {}
+
+        if email and not data.get("email"):
+            updates["email"] = email
+        if display_name and not data.get("display_name"):
+            updates["display_name"] = display_name
+
+        if updates:
+            updates["updated_at"] = now
+            doc_ref.update(updates)
+            data.update(updates)
+
+        data.setdefault("uid", uid)
+        data.setdefault("school_ids", [])
+        data.setdefault("role", data.get("role") or DEFAULT_USER_ROLE)
+        data.setdefault("created_at", data.get("created_at") or now)
+        data.setdefault("updated_at", data.get("updated_at") or now)
+        return data
+
+    default_payload = {
+        "uid": uid,
+        "email": email,
+        "display_name": display_name,
+        "role": DEFAULT_USER_ROLE,
+        "school_ids": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    doc_ref.set(default_payload)
+    return default_payload
+
+
+def _build_workspace_user(record: Dict[str, Any]) -> "WorkspaceUser":
+    return WorkspaceUser(
+        uid=record["uid"],
+        email=record.get("email"),
+        display_name=record.get("display_name"),
+        role=record.get("role", DEFAULT_USER_ROLE),
+        school_ids=list(record.get("school_ids", [])),
+        created_at=record.get("created_at") or datetime.utcnow(),
+        updated_at=record.get("updated_at") or datetime.utcnow(),
+    )
+
 
 
 app = FastAPI()
@@ -340,6 +417,105 @@ class SchoolWithSelections(School):
     total_selections: int = 0
     last_updated: Optional[datetime] = None
     grades: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
+
+
+class WorkspaceUser(BaseModel):
+    uid: str
+    email: Optional[EmailStr] = None
+    display_name: Optional[str] = None
+    role: Literal["super-admin", "user"] = DEFAULT_USER_ROLE
+    school_ids: List[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class UserSessionResponse(BaseModel):
+    user: WorkspaceUser
+    schools: List[School] = Field(default_factory=list)
+
+
+# Workspace endpoints
+@api_router.get("/users/me", response_model=UserSessionResponse)
+def get_current_workspace_user(authorization: Optional[str] = Header(None)):
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    workspace_user = _build_workspace_user(user_record)
+
+    schools: List[School] = []
+    for school_id in workspace_user.school_ids:
+        if not school_id:
+            continue
+        doc_ref = db.collection("schools").document(school_id)
+        snapshot = doc_ref.get()
+        if not snapshot.exists:
+            continue
+        record = snapshot.to_dict() or {}
+        record.setdefault("id", snapshot.id)
+        record.setdefault("school_id", record.get("school_id") or snapshot.id)
+        schools.append(school_profiles.build_school_from_record(record))
+
+    return UserSessionResponse(user=workspace_user, schools=schools)
+
+
+@api_router.post("/schools", response_model=School)
+def create_school_profile(payload: SchoolCreatePayload, authorization: Optional[str] = Header(None)):
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    return school_profiles.create_school_profile(db, payload, user_record)
+
+
+@api_router.put("/schools/{school_id}", response_model=School)
+def update_school_profile(
+    school_id: str, payload: SchoolUpdatePayload, authorization: Optional[str] = Header(None)
+):
+    decoded_token = _verify_and_decode_token(authorization)
+    uid = decoded_token.get("uid")
+    if not uid:
+        raise HTTPException(status_code=400, detail="Firebase token is missing a user id")
+
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    existing = snapshot.to_dict() or {}
+    if existing.get("created_by_user_id") != uid:
+        raise HTTPException(status_code=403, detail="You do not have permission to edit this school")
+
+    raw_updates = payload.dict(exclude_unset=True)
+    if "logo_blob_base64" in raw_updates:
+        decoded_logo = school_profiles.decode_logo_blob_base64(raw_updates.pop("logo_blob_base64"))
+        raw_updates["logo_blob"] = decoded_logo
+
+    def _clean(value: Optional[str]) -> Optional[str]:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    updates: Dict[str, Any] = {}
+    for key, value in raw_updates.items():
+        if key == "logo_blob":
+            updates[key] = value
+        elif key == "service_type":
+            updates[key] = school_profiles.normalize_service_types(value)
+        else:
+            updates[key] = _clean(value)
+
+    if not updates:
+        existing.setdefault("id", snapshot.id)
+        existing.setdefault("school_id", snapshot.id)
+        return school_profiles.build_school_from_record(existing)
+
+    now = datetime.utcnow()
+    updates["updated_at"] = now
+    updates["timestamp"] = now
+    doc_ref.update(updates)
+    existing.update(updates)
+    existing.setdefault("id", snapshot.id)
+    existing.setdefault("school_id", snapshot.id)
+
+    return school_profiles.build_school_from_record(existing)
 
 
 # Rhymes data endpoints

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 from firebase_admin import auth as firebase_auth
@@ -15,6 +16,19 @@ class School(BaseModel):
     id: str
     school_id: str
     school_name: str
+    logo_blob_base64: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    tagline: Optional[str] = None
+    principal_name: Optional[str] = None
+    principal_email: Optional[str] = None
+    principal_phone: Optional[str] = None
+    service_type: Optional[List[str]] = None
+    created_by_user_id: Optional[str] = None
+    created_by_email: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
