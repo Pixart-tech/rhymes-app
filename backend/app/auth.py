@@ -16,7 +16,7 @@ class School(BaseModel):
     id: str
     school_id: str
     school_name: str
-    logo_blob_base64: Optional[str] = None
+    logo_url: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None

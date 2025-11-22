@@ -2,14 +2,23 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
-import { Loader2, School, Edit3, Eye, Plus } from 'lucide-react';
+import { Loader2, School, Edit3, Eye, Plus, RefreshCw, Trash2, UserRoundPen } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth';
 import { API_BASE_URL } from '../lib/utils';
 import { Button } from './ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from './ui/card';
-import { SchoolProfile, SchoolFormValues, SchoolServiceType } from '../types/types';
+import {
+  AdminSchoolProfile,
+  SchoolProfile,
+  SchoolFormValues,
+  SchoolServiceType,
+  WorkspaceUserUpdatePayload
+} from '../types/types';
 import { SchoolForm, SchoolFormSubmitPayload } from './SchoolProfileForm';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { Label } from './ui/label';
+import { Input } from './ui/input';
 
 const API = API_BASE_URL || '/api';
 
@@ -40,11 +49,23 @@ const selectionFromServicesArray = (
   return selection;
 };
 
-const getLogoSrc = (school: SchoolProfile): string | null => {
-  if (school.logo_blob_base64) {
-    return `data:image/jpeg;base64,${school.logo_blob_base64}`;
+const getLogoSrc = (school: SchoolProfile): string | null => school.logo_url ?? null;
+
+const buildSchoolFormData = (values: SchoolFormValues, selectedServices: SchoolServiceType[]): FormData => {
+  const formData = new FormData();
+  formData.append('school_name', values.school_name);
+  formData.append('email', values.email);
+  formData.append('phone', values.phone);
+  formData.append('address', values.address);
+  formData.append('tagline', values.tagline ?? '');
+  formData.append('principal_name', values.principal_name);
+  formData.append('principal_email', values.principal_email);
+  formData.append('principal_phone', values.principal_phone);
+  selectedServices.forEach((service) => formData.append('service_type', service));
+  if (values.logo_file) {
+    formData.append('logo_file', values.logo_file);
   }
-  return school.logo_url ?? null;
+  return formData;
 };
 
 
@@ -74,6 +95,13 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
   const [view, setView] = useState<'list' | 'create' | 'edit'>('list');
   const [editingSchool, setEditingSchool] = useState<SchoolProfile | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [adminSchools, setAdminSchools] = useState<AdminSchoolProfile[]>([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState({ display_name: '', email: '' });
+  const [profileSubmitting, setProfileSubmitting] = useState(false);
+  const [deletingSchoolId, setDeletingSchoolId] = useState<string | null>(null);
 
   const fetchWorkspace = useCallback(async () => {
     if (!user) {
@@ -91,9 +119,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
       const response = await axios.get<WorkspaceSession>(`${API}/users/me`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setWorkspaceUser(response.data.user);
+      const nextUser = response.data.user;
+      setWorkspaceUser(nextUser);
       setSchools(response.data.schools);
-      setView(response.data.schools.length === 0 ? 'create' : 'list');
+      const shouldStartInCreate = nextUser.role !== 'super-admin' && response.data.schools.length === 0;
+      setView(shouldStartInCreate ? 'create' : 'list');
     } catch (error) {
       console.error('Failed to load workspace', error);
       setWorkspaceError('Unable to load your workspace. Please try again.');
@@ -114,10 +144,58 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     void fetchWorkspace();
   }, [user, fetchWorkspace]);
 
+  useEffect(() => {
+    if (workspaceUser) {
+      setProfileForm({
+        display_name: workspaceUser.display_name ?? '',
+        email: workspaceUser.email ?? ''
+      });
+    } else {
+      setProfileForm({ display_name: '', email: '' });
+    }
+    setProfileDialogOpen(false);
+  }, [workspaceUser]);
+
+  const fetchAdminSchools = useCallback(async () => {
+    if (!workspaceUser || workspaceUser.role !== 'super-admin') {
+      return;
+    }
+    setAdminLoading(true);
+    setAdminError(null);
+    try {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error('Unable to fetch Firebase token');
+      }
+      const response = await axios.get<AdminSchoolProfile[]>(`${API}/admin/schools`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAdminSchools(response.data);
+    } catch (error) {
+      console.error('Failed to load admin schools', error);
+      setAdminError('Unable to load the admin school list. Please try again.');
+      toast.error('Unable to load the admin school list. Please try again.');
+    } finally {
+      setAdminLoading(false);
+    }
+  }, [workspaceUser, getIdToken]);
+
+  useEffect(() => {
+    if (workspaceUser?.role === 'super-admin') {
+      void fetchAdminSchools();
+    } else {
+      setAdminSchools([]);
+      setAdminError(null);
+      setAdminLoading(false);
+      setDeletingSchoolId(null);
+    }
+  }, [workspaceUser, fetchAdminSchools]);
+
   const buildFormValues = useCallback(
     (school?: SchoolProfile): SchoolFormValues => ({
       school_name: school?.school_name ?? '',
-      logo_blob_base64: school?.logo_blob_base64 ?? null,
+      logo_url: school?.logo_url ?? null,
+      logo_file: null,
       email: school?.email ?? workspaceUser?.email ?? user?.email ?? '',
       phone: school?.phone ?? '',
       address: school?.address ?? '',
@@ -137,12 +215,89 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     return buildFormValues();
   }, [view, editingSchool, buildFormValues]);
 
+  const handleProfileInputChange = (field: 'display_name' | 'email') =>
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value;
+      setProfileForm((prev) => ({ ...prev, [field]: value }));
+    };
+
+  const handleProfileSave = useCallback(async () => {
+    if (!workspaceUser) {
+      return;
+    }
+
+    const payload: WorkspaceUserUpdatePayload = {};
+    const trimmedName = profileForm.display_name.trim();
+    const trimmedEmail = profileForm.email.trim();
+
+    if (trimmedName !== (workspaceUser.display_name ?? '')) {
+      payload.display_name = trimmedName;
+    }
+    if (trimmedEmail !== (workspaceUser.email ?? '')) {
+      payload.email = trimmedEmail;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      setProfileDialogOpen(false);
+      return;
+    }
+
+    setProfileSubmitting(true);
+    try {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error('Unable to fetch Firebase token');
+      }
+      const response = await axios.patch<WorkspaceUserProfile>(`${API}/users/me`, payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setWorkspaceUser(response.data);
+      toast.success('Profile updated');
+      setProfileDialogOpen(false);
+    } catch (error) {
+      console.error('Failed to update profile', error);
+      toast.error('Unable to update your profile. Please try again.');
+    } finally {
+      setProfileSubmitting(false);
+    }
+  }, [workspaceUser, profileForm, getIdToken]);
+
   const handleSchoolSelect = (school: SchoolProfile) => {
     if (!workspaceUser) {
       return;
     }
     onAuth({ school, user: workspaceUser });
   };
+
+  const handleAdminDelete = useCallback(
+    async (schoolId: string) => {
+      if (!workspaceUser || workspaceUser.role !== 'super-admin') {
+        return;
+      }
+      const confirmed = window.confirm('Are you sure you want to delete this school? This action cannot be undone.');
+      if (!confirmed) {
+        return;
+      }
+      setDeletingSchoolId(schoolId);
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+        await axios.delete(`${API}/admin/schools/${schoolId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        toast.success('School deleted');
+        setAdminSchools((prev) => prev.filter((school) => school.school_id !== schoolId));
+      } catch (error) {
+        console.error('Failed to delete school', error);
+        toast.error('Unable to delete school. Please try again.');
+      } finally {
+        setDeletingSchoolId(null);
+      }
+    },
+    [workspaceUser, getIdToken]
+  );
 
   const handleCreateSubmit = useCallback(
     async ({ values }: SchoolFormSubmitPayload) => {
@@ -154,7 +309,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
         toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
         return;
       }
-      const { service_type: _ignored, ...restValues } = values;
       setSubmitting(true);
       try {
         const token = await getIdToken();
@@ -162,15 +316,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
           throw new Error('Unable to fetch Firebase token');
         }
 
-        const response = await axios.post<SchoolProfile>(
-          `${API}/schools`,
-          {
-            ...restValues,
-            service_type: selectedServices,
-            logo_blob_base64: values.logo_blob_base64 ?? null,
-          },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        const formData = buildSchoolFormData(values, selectedServices);
+        const response = await axios.post<SchoolProfile>(`${API}/schools`, formData, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
 
         const createdSchool = response.data;
         toast.success('School created successfully');
@@ -182,6 +331,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
             : [...workspaceUser.school_ids, createdSchool.school_id]
         };
         setWorkspaceUser(updatedUser);
+        if (workspaceUser.role === 'super-admin') {
+          void fetchAdminSchools();
+        }
         onAuth({ school: createdSchool, user: updatedUser });
       } catch (error) {
         console.error('Failed to create school', error);
@@ -190,7 +342,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
         setSubmitting(false);
       }
     },
-    [workspaceUser, getIdToken, onAuth]
+    [workspaceUser, getIdToken, onAuth, fetchAdminSchools]
   );
 
   const handleEditSubmit = useCallback(
@@ -203,7 +355,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
         toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
         return;
       }
-      const { service_type: _ignored, ...restValues } = values;
       setSubmitting(true);
       try {
         const token = await getIdToken();
@@ -211,21 +362,23 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
           throw new Error('Unable to fetch Firebase token');
         }
 
-        const response = await axios.put<SchoolProfile>(
-          `${API}/schools/${editingSchool.school_id}`,
-          {
-            ...restValues,
-            service_type: selectedServices,
-            logo_blob_base64: values.logo_blob_base64 ?? editingSchool.logo_blob_base64 ?? null,
-          },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        const formData = buildSchoolFormData(values, selectedServices);
+        const response = await axios.put<SchoolProfile>(`${API}/schools/${editingSchool.school_id}`, formData, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
 
         const updatedSchool = response.data;
         toast.success('School details updated');
         setSchools((prev) =>
           prev.map((school) => (school.school_id === updatedSchool.school_id ? updatedSchool : school))
         );
+        if (workspaceUser?.role === 'super-admin') {
+          setAdminSchools((prev) =>
+            prev.map((school) =>
+              school.school_id === updatedSchool.school_id ? { ...school, ...updatedSchool } : school
+            )
+          );
+        }
         setEditingSchool(null);
         setView('list');
       } catch (error) {
@@ -235,7 +388,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
         setSubmitting(false);
       }
     },
-    [editingSchool, getIdToken]
+    [editingSchool, getIdToken, workspaceUser]
   );
 
   const handleGoogleSignIn = async () => {
@@ -248,8 +401,251 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
   };
 
   const isSuperAdmin = workspaceUser?.role === 'super-admin';
-  const isCreateView = view === 'create' || schools.length === 0;
+  const isCreateView = view === 'create' || (!isSuperAdmin && schools.length === 0);
   const isEditView = view === 'edit' && Boolean(editingSchool);
+
+  const renderUserDashboard = () => (
+    <Card className="w-full max-w-5xl border-0 bg-white/85 backdrop-blur">
+      <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-sm text-gray-500">Signed in as</p>
+          <CardTitle className="text-2xl text-gray-800">
+            {workspaceUser?.display_name || user?.name || 'School Admin'}
+          </CardTitle>
+          <p className="text-gray-600">{workspaceUser?.email}</p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="outline" onClick={() => setProfileDialogOpen(true)}>
+            <UserRoundPen className="h-4 w-4" />
+            Edit profile
+          </Button>
+          <Button
+            onClick={() => {
+              setEditingSchool(null);
+              setView('create');
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            Create new school
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {schools.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-gray-600">
+            <p>No schools found yet.</p>
+            <Button className="mt-4" onClick={() => setView('create')}>
+              Create your first school
+            </Button>
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {schools.map((school) => {
+              const logoSrc = getLogoSrc(school);
+              const canEdit = school.created_by_user_id === workspaceUser?.uid;
+              return (
+                <Card key={school.school_id} className="border border-orange-100 shadow-sm">
+                  <CardHeader className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 text-orange-600">
+                        {logoSrc ? (
+                          <img
+                            src={logoSrc}
+                            alt={school.school_name}
+                            className="h-12 w-12 rounded-full object-cover"
+                          />
+                        ) : (
+                          <School className="h-6 w-6" />
+                        )}
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg text-gray-800">{school.school_name}</CardTitle>
+                        <p className="text-xs uppercase tracking-wide text-gray-500">ID: {school.school_id}</p>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm text-gray-600">
+                    {school.email && <p>Email: {school.email}</p>}
+                    {school.phone && <p>Phone: {school.phone}</p>}
+                    {school.address && <p className="line-clamp-2">Address: {school.address}</p>}
+                    {school.tagline && <p className="italic text-gray-500">{school.tagline}</p>}
+                  </CardContent>
+                  <CardFooter className="flex items-center gap-2">
+                    <Button variant="secondary" className="flex-1" onClick={() => handleSchoolSelect(school)}>
+                      <Eye className="h-4 w-4" />
+                      View
+                    </Button>
+                    {canEdit && (
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => {
+                          setEditingSchool(school);
+                          setView('edit');
+                        }}
+                      >
+                        <Edit3 className="h-4 w-4" />
+                        Edit
+                      </Button>
+                    )}
+                  </CardFooter>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const renderAdminDashboard = () => (
+    <Card className="w-full max-w-6xl border-0 bg-white/85 backdrop-blur">
+      <CardHeader className="space-y-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm text-gray-500">Signed in as</p>
+            <CardTitle className="text-2xl text-gray-800">
+              {workspaceUser?.display_name || user?.name || 'Admin'}
+            </CardTitle>
+            <p className="text-gray-600">{workspaceUser?.email}</p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" onClick={() => setProfileDialogOpen(true)}>
+              <UserRoundPen className="h-4 w-4" />
+              Edit profile
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/admin/upload">Admin tools</Link>
+            </Button>
+            <Button
+              onClick={() => {
+                setEditingSchool(null);
+                setView('create');
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              Create new school
+            </Button>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="rounded-xl border border-gray-200 bg-white px-6 py-4 text-center shadow-sm">
+            <p className="text-sm text-gray-500">Total schools</p>
+            <p className="text-3xl font-bold text-gray-900">{adminSchools.length}</p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => {
+              void fetchAdminSchools();
+            }}
+            disabled={adminLoading}
+          >
+            <RefreshCw className={`h-4 w-4 ${adminLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {adminError && (
+          <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{adminError}</div>
+        )}
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">S.No</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Logo</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  School Name
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Unique ID
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Edit</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Delete</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 bg-white">
+              {adminLoading ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-gray-500">
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading schools…
+                    </div>
+                  </td>
+                </tr>
+              ) : adminSchools.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-gray-500">
+                    No schools available yet.
+                  </td>
+                </tr>
+              ) : (
+                adminSchools.map((school, index) => {
+                  const logoSrc = getLogoSrc(school);
+                  const isDeleting = deletingSchoolId === school.school_id;
+                  return (
+                    <tr key={school.school_id} className="hover:bg-orange-50/40">
+                      <td className="px-4 py-4 text-gray-700">{index + 1}</td>
+                      <td className="px-4 py-4">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 text-orange-600">
+                          {logoSrc ? (
+                            <img
+                              src={logoSrc}
+                              alt={school.school_name}
+                              className="h-12 w-12 rounded-full object-cover"
+                            />
+                          ) : (
+                            <School className="h-6 w-6" />
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="font-semibold text-gray-800">{school.school_name}</div>
+                        <Button
+                          variant="link"
+                          className="h-auto p-0 text-xs"
+                          onClick={() => handleSchoolSelect(school)}
+                        >
+                          Open workspace
+                        </Button>
+                      </td>
+                      <td className="px-4 py-4 text-gray-700">{school.school_id}</td>
+                      <td className="px-4 py-4">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditingSchool(school);
+                            setView('edit');
+                          }}
+                        >
+                          <Edit3 className="h-4 w-4" />
+                          Edit
+                        </Button>
+                      </td>
+                      <td className="px-4 py-4">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => void handleAdminDelete(school.school_id)}
+                          disabled={isDeleting}
+                        >
+                          {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                          Delete
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
 
   if (authLoading) {
     return <div className="flex min-h-screen items-center justify-center text-lg">Loading session...</div>;
@@ -342,7 +738,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
           initialValues={currentFormValues}
           submitting={submitting}
           onSubmit={handleCreateSubmit}
-          onCancel={schools.length > 0 ? () => setView('list') : undefined}
+          onCancel={isSuperAdmin || schools.length > 0 ? () => setView('list') : undefined}
         />
       ) : isEditView && editingSchool ? (
         <SchoolForm
@@ -355,99 +751,63 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
             setView('list');
           }}
         />
+      ) : isSuperAdmin ? (
+        renderAdminDashboard()
       ) : (
-        <Card className="w-full max-w-5xl border-0 bg-white/85 backdrop-blur">
-          <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Signed in as</p>
-              <CardTitle className="text-2xl text-gray-800">
-                {workspaceUser.display_name || user.name || 'School Admin'}
-              </CardTitle>
-              <p className="text-gray-600">{workspaceUser.email}</p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              {isSuperAdmin && (
-                <Button asChild variant="outline">
-                  <Link to="/admin/upload">Admin dashboard</Link>
-                </Button>
-              )}
-              <Button onClick={() => { setEditingSchool(null); setView('create'); }}>
-                <Plus className="h-4 w-4" />
-                Create new school
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {schools.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-gray-600">
-                <p>No schools found yet.</p>
-                <Button className="mt-4" onClick={() => setView('create')}>
-                  Create your first school
-                </Button>
-              </div>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2">
-                {schools.map((school) => {
-                  const logoSrc = getLogoSrc(school);
-                  const canEdit = school.created_by_user_id === workspaceUser.uid;
-                  return (
-                    <Card key={school.school_id} className="border border-orange-100 shadow-sm">
-                      <CardHeader className="space-y-2">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 text-orange-600">
-                            {logoSrc ? (
-                              <img
-                                src={logoSrc}
-                                alt={school.school_name}
-                                className="h-12 w-12 rounded-full object-cover"
-                              />
-                            ) : (
-                              <School className="h-6 w-6" />
-                            )}
-                          </div>
-                          <div>
-                            <CardTitle className="text-lg text-gray-800">{school.school_name}</CardTitle>
-                            <p className="text-xs uppercase tracking-wide text-gray-500">ID: {school.school_id}</p>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-2 text-sm text-gray-600">
-                        {school.email && <p>Email: {school.email}</p>}
-                        {school.phone && <p>Phone: {school.phone}</p>}
-                        {school.address && <p className="line-clamp-2">Address: {school.address}</p>}
-                        {school.tagline && <p className="italic text-gray-500">{school.tagline}</p>}
-                      </CardContent>
-                      <CardFooter className="flex items-center gap-2">
-                        <Button
-                          variant="secondary"
-                          className="flex-1"
-                          onClick={() => handleSchoolSelect(school)}
-                        >
-                          <Eye className="h-4 w-4" />
-                          View
-                        </Button>
-                        {canEdit && (
-                          <Button
-                            variant="outline"
-                            className="flex-1"
-                            onClick={() => {
-                              setEditingSchool(school);
-                              setView('edit');
-                            }}
-                          >
-                            <Edit3 className="h-4 w-4" />
-                            Edit
-                          </Button>
-                        )}
-                      </CardFooter>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        renderUserDashboard()
       )}
+      <Dialog
+        open={profileDialogOpen}
+        onOpenChange={(open) => {
+          if (!profileSubmitting) {
+            setProfileDialogOpen(open);
+          }
+        }}
+      >
+        <DialogContent>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleProfileSave();
+            }}
+            className="space-y-6"
+          >
+            <DialogHeader>
+              <DialogTitle>Edit profile</DialogTitle>
+              <p className="text-sm text-gray-500">Update the name and email associated with your workspace.</p>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="profile_name">Display name</Label>
+                <Input
+                  id="profile_name"
+                  value={profileForm.display_name}
+                  onChange={handleProfileInputChange('display_name')}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profile_email">Email</Label>
+                <Input
+                  id="profile_email"
+                  type="email"
+                  required
+                  value={profileForm.email}
+                  onChange={handleProfileInputChange('email')}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setProfileDialogOpen(false)} disabled={profileSubmitting}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={profileSubmitting}>
+                {profileSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save changes
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

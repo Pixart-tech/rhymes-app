@@ -12,12 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { SchoolFormValues, SchoolServiceType } from '../types/types';
 import { compressImageFile } from '../lib/imageCompression';
 
-const getLogoPreview = (vals: SchoolFormValues) => {
-  if (vals.logo_blob_base64) {
-    return `data:image/jpeg;base64,${vals.logo_blob_base64}`;
-  }
-  return vals.logo_url || '';
-};
+const getLogoPreview = (vals: SchoolFormValues) => vals.logo_url || '';
 
 const SERVICE_OPTIONS: { value: SchoolServiceType; prompt: string }[] = [
   { value: 'id_cards', prompt: 'Are you taking ID cards?'},
@@ -78,20 +73,24 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
     const file = event.target.files?.[0];
     if (!file) {
       setLogoPreview(getLogoPreview(initialValues));
-      setValues((prev) => ({ ...prev, logo_blob_base64: initialValues.logo_blob_base64 ?? null }));
+      setValues((prev) => ({ ...prev, logo_file: null, logo_url: initialValues.logo_url ?? null }));
       return;
     }
 
     setIsCompressingLogo(true);
     try {
-      const { dataUrl, base64 } = await compressImageFile(file);
+      const { dataUrl, blob, mimeType } = await compressImageFile(file);
       setLogoPreview(dataUrl);
-      setValues((prev) => ({ ...prev, logo_blob_base64: base64 }));
+      const extension = file.name?.split('.').pop();
+      const normalizedName = extension ? file.name.replace(/\.[^/.]+$/, '') : file.name;
+      const filename = `${normalizedName || 'school-logo'}.jpg`;
+      const compressedFile = new File([blob], filename, { type: mimeType });
+      setValues((prev) => ({ ...prev, logo_file: compressedFile, logo_url: null }));
     } catch (error) {
       console.error('Failed to compress logo', error);
       toast.error('Unable to compress that image. Please try a different file.');
       setLogoPreview(getLogoPreview(initialValues));
-      setValues((prev) => ({ ...prev, logo_blob_base64: initialValues.logo_blob_base64 ?? null }));
+      setValues((prev) => ({ ...prev, logo_file: null, logo_url: initialValues.logo_url ?? null }));
     } finally {
       setIsCompressingLogo(false);
     }

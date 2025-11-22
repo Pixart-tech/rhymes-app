@@ -4,7 +4,7 @@ export type SchoolServiceType = 'id_cards' | 'report_cards' | 'certificates';
 export interface SchoolProfile {
   school_id: string;
   school_name: string;
-  logo_blob_base64?: string | null;
+  logo_url?: string | null;
   email?: string | null;
   phone?: string | null;
   address?: string | null;
@@ -20,7 +20,8 @@ export interface SchoolProfile {
 
 export interface SchoolFormValues {
   school_name: string;
-  logo_blob_base64?: string | null;
+  logo_url?: string | null;
+  logo_file?: File | null;
   email: string;
   phone: string;
   address: string;
@@ -29,6 +30,27 @@ export interface SchoolFormValues {
   principal_email: string;
   principal_phone: string;
   service_type: Record<SchoolServiceType, boolean>;
+}
+
+export interface RhymeSelectionDetail {
+  id?: string | null;
+  page_index: number;
+  rhyme_code?: string | null;
+  rhyme_name?: string | null;
+  pages: number;
+  position?: string | null;
+  timestamp?: string | null;
+}
+
+export interface AdminSchoolProfile extends SchoolProfile {
+  total_selections: number;
+  last_updated?: string | null;
+  grades: Record<string, RhymeSelectionDetail[]>;
+}
+
+export interface WorkspaceUserUpdatePayload {
+  display_name?: string;
+  email?: string;
 }
 
 export interface Book {

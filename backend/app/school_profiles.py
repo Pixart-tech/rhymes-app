@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import base64
-import binascii
 import random
 import string
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
-from fastapi import HTTPException
+from fastapi import Form, HTTPException
 from firebase_admin import firestore
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from .auth import School
 
@@ -20,64 +18,6 @@ SERVICE_TYPE_VALUES: Tuple[SchoolServiceType, ...] = (
     "certificates",
 )
 SCHOOL_ID_ALPHABET = string.ascii_uppercase + string.digits
-
-
-class SchoolCreatePayload(BaseModel):
-    school_name: str = Field(..., min_length=2)
-    logo_blob_base64: Optional[str] = None
-    email: EmailStr
-    phone: str = Field(..., min_length=5)
-    address: str = Field(..., min_length=5)
-    tagline: Optional[str] = None
-    principal_name: str = Field(..., min_length=2)
-    principal_email: EmailStr
-    principal_phone: str = Field(..., min_length=5)
-    service_type: List[SchoolServiceType] = Field(default_factory=list)
-
-
-class SchoolUpdatePayload(BaseModel):
-    school_name: Optional[str] = Field(default=None, min_length=2)
-    logo_blob_base64: Optional[str] = None
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(default=None, min_length=5)
-    address: Optional[str] = Field(default=None, min_length=5)
-    tagline: Optional[str] = None
-    principal_name: Optional[str] = Field(default=None, min_length=2)
-    principal_email: Optional[EmailStr] = None
-    principal_phone: Optional[str] = Field(default=None, min_length=5)
-    service_type: Optional[List[SchoolServiceType]] = None
-
-
-def _clean_optional_string(value: Optional[str]) -> Optional[str]:
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    return value
-
-
-def decode_logo_blob_base64(value: Optional[str]) -> Optional[bytes]:
-    if not value:
-        return None
-    if isinstance(value, str) and value.startswith("data:"):
-        value = value.split(",", 1)[-1]
-    try:
-        return base64.b64decode(value, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="Logo image payload is invalid") from exc
-
-
-def encode_logo_blob(blob: Optional[Any]) -> Optional[str]:
-    if isinstance(blob, memoryview):
-        blob = blob.tobytes()
-    if isinstance(blob, bytearray):
-        blob = bytes(blob)
-    if not blob:
-        return None
-    if isinstance(blob, str):
-        return blob
-    if isinstance(blob, bytes):
-        return base64.b64encode(blob).decode("ascii")
-    return None
 
 
 def normalize_service_types(values: Optional[Iterable[SchoolServiceType]]) -> List[SchoolServiceType]:
@@ -104,17 +44,115 @@ def extract_service_type(value: Any) -> List[SchoolServiceType]:
     return []
 
 
+class SchoolCreatePayload(BaseModel):
+    school_name: str = Field(..., min_length=2)
+    email: EmailStr
+    phone: str = Field(..., min_length=5)
+    address: str = Field(..., min_length=5)
+    tagline: Optional[str] = None
+    principal_name: str = Field(..., min_length=2)
+    principal_email: EmailStr
+    principal_phone: str = Field(..., min_length=5)
+    service_type: List[SchoolServiceType] = Field(default_factory=list)
+
+    @field_validator("service_type", mode="before")
+    @classmethod
+    def _coerce_service_type(cls, value: Any) -> List[SchoolServiceType]:
+        if value is None or value == "":
+            return []
+        return extract_service_type(value)
+
+    @classmethod
+    def as_form(
+        cls,
+        school_name: str = Form(...),
+        email: EmailStr = Form(...),
+        phone: str = Form(...),
+        address: str = Form(...),
+        tagline: Optional[str] = Form(default=None),
+        principal_name: str = Form(...),
+        principal_email: EmailStr = Form(...),
+        principal_phone: str = Form(...),
+        service_type: Optional[Any] = Form(default=None),
+    ) -> "SchoolCreatePayload":
+        return cls(
+            school_name=school_name,
+            email=email,
+            phone=phone,
+            address=address,
+            tagline=tagline,
+            principal_name=principal_name,
+            principal_email=principal_email,
+            principal_phone=principal_phone,
+            service_type=service_type,
+        )
+
+
+class SchoolUpdatePayload(BaseModel):
+    school_name: Optional[str] = Field(default=None, min_length=2)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(default=None, min_length=5)
+    address: Optional[str] = Field(default=None, min_length=5)
+    tagline: Optional[str] = None
+    principal_name: Optional[str] = Field(default=None, min_length=2)
+    principal_email: Optional[EmailStr] = None
+    principal_phone: Optional[str] = Field(default=None, min_length=5)
+    service_type: Optional[List[SchoolServiceType]] = None
+
+    @field_validator("service_type", mode="before")
+    @classmethod
+    def _coerce_service_type(cls, value: Any) -> Optional[List[SchoolServiceType]]:
+        if value is None or value == "":
+            return None
+        return extract_service_type(value)
+
+    @classmethod
+    def as_form(
+        cls,
+        school_name: Optional[str] = Form(default=None),
+        email: Optional[EmailStr] = Form(default=None),
+        phone: Optional[str] = Form(default=None),
+        address: Optional[str] = Form(default=None),
+        tagline: Optional[str] = Form(default=None),
+        principal_name: Optional[str] = Form(default=None),
+        principal_email: Optional[EmailStr] = Form(default=None),
+        principal_phone: Optional[str] = Form(default=None),
+        service_type: Optional[Any] = Form(default=None),
+    ) -> "SchoolUpdatePayload":
+        return cls(
+            school_name=school_name,
+            email=email,
+            phone=phone,
+            address=address,
+            tagline=tagline,
+            principal_name=principal_name,
+            principal_email=principal_email,
+            principal_phone=principal_phone,
+            service_type=service_type,
+        )
+
+
+def _clean_optional_string(value: Optional[str]) -> Optional[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return value
+
+
 def build_school_from_record(record: Dict[str, Any]) -> School:
     now = datetime.utcnow()
     school_id = record.get("school_id") or record.get("id")
     if not school_id:
         raise HTTPException(status_code=500, detail="School record is missing an id")
+    logo_url: Optional[str] = None
+    if record.get("logo_blob"):
+        logo_url = f"/api/schools/{school_id}/logo"
 
     return School(
         id=record.get("id") or school_id,
         school_id=school_id,
         school_name=record.get("school_name") or "School",
-        logo_blob_base64=encode_logo_blob(record.get("logo_blob")),
+        logo_url=logo_url,
         email=record.get("email"),
         phone=record.get("phone"),
         address=record.get("address"),
@@ -144,6 +182,8 @@ def create_school_profile(
     db: firestore.Client,
     payload: SchoolCreatePayload,
     user_record: Dict[str, Any],
+    logo_blob: Optional[bytes] = None,
+    logo_mime_type: Optional[str] = None,
 ) -> School:
     user_id = user_record.get("uid")
     if not user_id:
@@ -156,7 +196,8 @@ def create_school_profile(
         "id": school_id,
         "school_id": school_id,
         "school_name": payload.school_name.strip(),
-        "logo_blob": decode_logo_blob_base64(payload.logo_blob_base64),
+        "logo_blob": logo_blob,
+        "logo_mime_type": logo_mime_type,
         "email": _clean_optional_string(str(payload.email) if payload.email else None),
         "phone": _clean_optional_string(payload.phone),
         "address": _clean_optional_string(payload.address),
@@ -191,8 +232,6 @@ __all__ = [
     "SchoolUpdatePayload",
     "build_school_from_record",
     "create_school_profile",
-    "decode_logo_blob_base64",
-    "encode_logo_blob",
     "extract_service_type",
     "normalize_service_types",
 ]

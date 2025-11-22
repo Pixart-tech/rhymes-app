@@ -26,7 +26,7 @@ from io import BytesIO
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 from dotenv import load_dotenv
-from fastapi import APIRouter, FastAPI, HTTPException, Header
+from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -145,6 +145,15 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
             exc,
         )
         return svg_markup
+
+
+async def _read_upload_file(upload_file: Optional[UploadFile]) -> Tuple[Optional[bytes], Optional[str]]:
+    if not upload_file:
+        return None, None
+    contents = await upload_file.read()
+    if not contents:
+        return None, None
+    return contents, upload_file.content_type or "application/octet-stream"
 
 # Firebase connection
 import firebase_admin
@@ -434,6 +443,11 @@ class UserSessionResponse(BaseModel):
     schools: List[School] = Field(default_factory=list)
 
 
+class WorkspaceUserUpdatePayload(BaseModel):
+    display_name: Optional[str] = Field(default=None, min_length=2)
+    email: Optional[EmailStr] = None
+
+
 # Workspace endpoints
 @api_router.get("/users/me", response_model=UserSessionResponse)
 def get_current_workspace_user(authorization: Optional[str] = Header(None)):
@@ -457,21 +471,56 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
     return UserSessionResponse(user=workspace_user, schools=schools)
 
 
-@api_router.post("/schools", response_model=School)
-def create_school_profile(payload: SchoolCreatePayload, authorization: Optional[str] = Header(None)):
+@api_router.patch("/users/me", response_model=WorkspaceUser)
+def update_current_workspace_user(
+    payload: WorkspaceUserUpdatePayload, authorization: Optional[str] = Header(None)
+):
     decoded_token = _verify_and_decode_token(authorization)
     user_record = _ensure_user_document(decoded_token)
-    return school_profiles.create_school_profile(db, payload, user_record)
+
+    updates: Dict[str, Any] = {}
+    if payload.display_name is not None:
+        display_name = payload.display_name.strip()
+        if not display_name:
+            raise HTTPException(status_code=400, detail="Display name cannot be empty")
+        updates["display_name"] = display_name
+
+    if payload.email is not None:
+        updates["email"] = str(payload.email)
+
+    if not updates:
+        return _build_workspace_user(user_record)
+
+    updates["updated_at"] = datetime.utcnow()
+    uid = user_record["uid"]
+    db.collection("users").document(uid).update(updates)
+    user_record.update(updates)
+    return _build_workspace_user(user_record)
+
+
+@api_router.post("/schools", response_model=School)
+async def create_school_profile(
+    payload: SchoolCreatePayload = Depends(SchoolCreatePayload.as_form),
+    logo_file: Optional[UploadFile] = File(None),
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    logo_blob, logo_mime_type = await _read_upload_file(logo_file)
+    return school_profiles.create_school_profile(db, payload, user_record, logo_blob, logo_mime_type)
 
 
 @api_router.put("/schools/{school_id}", response_model=School)
-def update_school_profile(
-    school_id: str, payload: SchoolUpdatePayload, authorization: Optional[str] = Header(None)
+async def update_school_profile(
+    school_id: str,
+    payload: SchoolUpdatePayload = Depends(SchoolUpdatePayload.as_form),
+    logo_file: Optional[UploadFile] = File(None),
+    authorization: Optional[str] = Header(None),
 ):
     decoded_token = _verify_and_decode_token(authorization)
-    uid = decoded_token.get("uid")
-    if not uid:
-        raise HTTPException(status_code=400, detail="Firebase token is missing a user id")
+    user_record = _ensure_user_document(decoded_token)
+    uid = user_record["uid"]
+    role = user_record.get("role", DEFAULT_USER_ROLE)
 
     doc_ref = db.collection("schools").document(school_id)
     snapshot = doc_ref.get()
@@ -479,13 +528,11 @@ def update_school_profile(
         raise HTTPException(status_code=404, detail="School not found")
 
     existing = snapshot.to_dict() or {}
-    if existing.get("created_by_user_id") != uid:
+    if existing.get("created_by_user_id") != uid and role != "super-admin":
         raise HTTPException(status_code=403, detail="You do not have permission to edit this school")
 
     raw_updates = payload.dict(exclude_unset=True)
-    if "logo_blob_base64" in raw_updates:
-        decoded_logo = school_profiles.decode_logo_blob_base64(raw_updates.pop("logo_blob_base64"))
-        raw_updates["logo_blob"] = decoded_logo
+    logo_blob, logo_mime_type = await _read_upload_file(logo_file)
 
     def _clean(value: Optional[str]) -> Optional[str]:
         if isinstance(value, str):
@@ -495,12 +542,14 @@ def update_school_profile(
 
     updates: Dict[str, Any] = {}
     for key, value in raw_updates.items():
-        if key == "logo_blob":
-            updates[key] = value
-        elif key == "service_type":
+        if key == "service_type":
             updates[key] = school_profiles.normalize_service_types(value)
         else:
             updates[key] = _clean(value)
+
+    if logo_blob is not None:
+        updates["logo_blob"] = logo_blob
+        updates["logo_mime_type"] = logo_mime_type
 
     if not updates:
         existing.setdefault("id", snapshot.id)
@@ -516,6 +565,31 @@ def update_school_profile(
     existing.setdefault("school_id", snapshot.id)
 
     return school_profiles.build_school_from_record(existing)
+
+
+@api_router.get("/schools/{school_id}/logo")
+def get_school_logo(school_id: str):
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    record = snapshot.to_dict() or {}
+    logo_blob = record.get("logo_blob")
+    if logo_blob is None:
+        raise HTTPException(status_code=404, detail="Logo not found")
+
+    if isinstance(logo_blob, memoryview):
+        logo_blob = logo_blob.tobytes()
+    elif isinstance(logo_blob, bytearray):
+        logo_blob = bytes(logo_blob)
+
+    if not isinstance(logo_blob, (bytes, bytearray)):
+        raise HTTPException(status_code=404, detail="Logo not found")
+
+    media_type = record.get("logo_mime_type") or "image/jpeg"
+    headers = {"Cache-Control": "no-store"}
+    return Response(content=bytes(logo_blob), media_type=media_type, headers=headers)
 
 
 # Rhymes data endpoints
@@ -789,8 +863,13 @@ async def get_grade_status(school_id: str):
 
 
 @api_router.get("/admin/schools", response_model=List[SchoolWithSelections])
-async def get_all_schools_with_selections():
+async def get_all_schools_with_selections(authorization: Optional[str] = Header(None)):
     """Return all schools with their rhyme selections grouped by grade."""
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    if user_record.get("role") != "super-admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+
     school_docs_query = db.collection("schools").order_by("timestamp", direction=firestore.Query.DESCENDING)
     school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
 
@@ -896,8 +975,13 @@ async def get_all_schools_with_selections():
 
 
 @api_router.delete("/admin/schools/{school_id}")
-async def delete_school(school_id: str):
+async def delete_school(school_id: str, authorization: Optional[str] = Header(None)):
     """Delete a school and all of its rhyme selections."""
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    if user_record.get("role") != "super-admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+
     school_query = db.collection("schools").where("school_id", "==", school_id)
     school_docs = [doc for doc in school_query.stream()]
     for doc in school_docs:
