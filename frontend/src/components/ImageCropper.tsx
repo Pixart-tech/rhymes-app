@@ -15,7 +15,7 @@ import { getCroppedImg } from './cropImage';
 
 interface ImageCropperProps {
   imageSrc: string | null;
-  onCropComplete: (croppedImage: string) => void;
+  onCropComplete: (croppedImage: Blob) => void;
   onClose: () => void;
 }
 

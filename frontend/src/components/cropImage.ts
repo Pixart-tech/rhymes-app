@@ -1,12 +1,13 @@
-export const getCroppedImg = (imageSrc: string, pixelCrop: any): Promise<string> => {
+export const getCroppedImg = (imageSrc: string, pixelCrop: any): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     const image = new Image();
+    image.crossOrigin = 'anonymous';
     image.src = imageSrc;
     image.onload = () => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) {
-        reject('Could not get canvas context');
+        reject(new Error('Could not get canvas context'));
         return;
       }
 
@@ -25,31 +26,16 @@ export const getCroppedImg = (imageSrc: string, pixelCrop: any): Promise<string>
         pixelCrop.height
       );
 
-      resolve(canvas.toDataURL('image/jpeg'));
-    };
-    image.onerror = (error) => {
-      reject(error);
-    };
-  });
-};
-
-export const compressImage = (dataUrl: string, quality = 0.8): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.src = dataUrl;
-    image.onload = () => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        reject('Could not get canvas context');
-        return;
-      }
-
-      canvas.width = image.width;
-      canvas.height = image.height;
-      ctx.drawImage(image, 0, 0);
-
-      resolve(canvas.toDataURL('image/jpeg', quality));
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Failed to generate cropped image'));
+          }
+        },
+        'image/jpeg'
+      );
     };
     image.onerror = (error) => {
       reject(error);

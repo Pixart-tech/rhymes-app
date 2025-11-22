@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -11,7 +11,6 @@ import { Label } from '@/components/ui/label';
 
 import { SchoolFormValues, SchoolServiceType, SchoolProfile } from '../types/types';
 import ImageCropperDialog from './ImageCropper';
-import { compressImage } from './cropImage';
 
 const getLogoPreview = (vals: SchoolFormValues) => vals.logo_url || '';
 const TOTAL_SECTIONS = 3;
@@ -167,7 +166,9 @@ export interface SchoolFormProps {
 
 export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, submitting, onSubmit, onCancel }) => {
   const [values, setValues] = useState<SchoolFormValues>(initialValues);
-  const [logoPreview, setLogoPreview] = useState<string>(getLogoPreview(initialValues));
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string>(getLogoPreview(initialValues));
+  const logoPreviewUrlRef = useRef<string | null>(null);
+  const imageSrcUrlRef = useRef<string | null>(null);
   const [isCompressingLogo, setIsCompressingLogo] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [currentSection, setCurrentSection] = useState(1);
@@ -196,7 +197,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
 
   useEffect(() => {
     setValues(initialValues);
-    setLogoPreview(getLogoPreview(initialValues));
+    setLogoPreviewUrl(getLogoPreview(initialValues));
     setLinkPrincipalEmail(Boolean(initialValues.email && initialValues.email === initialValues.principal_email));
     setLinkPrincipalPhone(Boolean(initialValues.phone && initialValues.phone === initialValues.principal_phone));
     setAddressFields(parseAddressFields(initialValues.address));
@@ -230,6 +231,30 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
     }
   }, [linkPrincipalPhone, values.phone]);
 
+  useEffect(() => {
+    if (values.logo_file) {
+      const previewUrl = URL.createObjectURL(values.logo_file);
+      if (logoPreviewUrlRef.current) {
+        URL.revokeObjectURL(logoPreviewUrlRef.current);
+      }
+      logoPreviewUrlRef.current = previewUrl;
+      setLogoPreviewUrl(previewUrl);
+
+      return () => {
+        if (logoPreviewUrlRef.current === previewUrl) {
+          URL.revokeObjectURL(previewUrl);
+          logoPreviewUrlRef.current = null;
+        }
+      };
+    }
+
+    if (logoPreviewUrlRef.current) {
+      URL.revokeObjectURL(logoPreviewUrlRef.current);
+      logoPreviewUrlRef.current = null;
+    }
+    setLogoPreviewUrl(values.logo_url ?? '');
+  }, [values.logo_file, values.logo_url]);
+
     const handleInputChange =
     (field: keyof SchoolFormValues) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -261,36 +286,73 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
     }
   };
 
-  const handleLogoChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const allowedTypes = ['image/jpeg', 'image/png'];
-    if (!allowedTypes.includes(file.type)) {
-      toast.error('Invalid file type. Please select a PNG or JPEG image.');
-      return;
+  const handleCropperClose = useCallback(() => {
+    if (imageSrcUrlRef.current) {
+      URL.revokeObjectURL(imageSrcUrlRef.current);
+      imageSrcUrlRef.current = null;
     }
+    setImageSrc(null);
+  }, []);
 
-    const maxSizeInBytes = 20 * 1024 * 1024; // 20MB
-    if (file.size > maxSizeInBytes) {
-      toast.error('File is too large. Please select an image smaller than 20MB.');
-      return;
-    }
+  const handleLogoChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const input = event.target;
+      const file = input?.files?.[0] ?? null;
+      if (!file) {
+        handleCropperClose();
+        return;
+      }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImageSrc(reader.result as string);
+      const allowedTypes = ['image/jpeg', 'image/png'];
+      if (!allowedTypes.includes(file.type)) {
+        toast.error('Invalid file type. Please select a PNG or JPEG image.');
+        handleCropperClose();
+        setValues((prev) => ({ ...prev, logo_file: null }));
+        input.value = '';
+        return;
+      }
+
+      const maxSizeInBytes = 20 * 1024 * 1024; // 20MB
+      if (file.size > maxSizeInBytes) {
+        toast.error('File is too large. Please select an image smaller than 20MB.');
+        handleCropperClose();
+        setValues((prev) => ({ ...prev, logo_file: null }));
+        input.value = '';
+        return;
+      }
+
+      if (imageSrcUrlRef.current) {
+        URL.revokeObjectURL(imageSrcUrlRef.current);
+      }
+
+      const objectUrl = URL.createObjectURL(file);
+      imageSrcUrlRef.current = objectUrl;
+      setImageSrc(objectUrl);
+      input.value = '';
+    },
+    [handleCropperClose]
+  );
+
+  const onCropComplete = useCallback(
+    async (croppedImage: Blob) => {
+      const file = new File([croppedImage], 'logo.jpg', { type: 'image/jpeg' });
+      setValues((prev) => ({ ...prev, logo_file: file, logo_url: null }));
+    },
+    []
+  );
+
+  useEffect(() => {
+    return () => {
+      if (imageSrcUrlRef.current) {
+        URL.revokeObjectURL(imageSrcUrlRef.current);
+        imageSrcUrlRef.current = null;
+      }
+      if (logoPreviewUrlRef.current) {
+        URL.revokeObjectURL(logoPreviewUrlRef.current);
+        logoPreviewUrlRef.current = null;
+      }
     };
-    reader.readAsDataURL(file);
-  };
-
-  const onCropComplete = async (croppedImage: string) => {
-    setLogoPreview(croppedImage);
-    const blob = await(await fetch(croppedImage)).blob();
-    const file = new File([blob], 'logo.jpg', { type: 'image/jpeg' });
-    setValues((prev) => ({ ...prev, logo_file: file, logo_url: null }));
-    setImageSrc(null); // Close the dialog
-  };
+  }, []);
 
   const handleServiceSelection = (service: SchoolServiceType, checked: boolean) => {
     setValues((prev) => ({
@@ -382,7 +444,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
       <ImageCropperDialog
         imageSrc={imageSrc}
         onCropComplete={onCropComplete}
-        onClose={() => setImageSrc(null)}
+        onClose={handleCropperClose}
       />
       <CardHeader className="space-y-6">
         <div className="space-y-2">
@@ -448,13 +510,13 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                       accept="image/png, image/jpeg"
                       onChange={handleLogoChange}
                       disabled={submitting}
-                      required={!logoPreview}
+                      required={!logoPreviewUrl}
                       className={cn(invalidFields.has('logo') && 'border-red-500')}
                     />
-                    {logoPreview && (
+                    {logoPreviewUrl && (
                       <div className="mt-2 flex items-center gap-4">
                         <img
-                          src={logoPreview}
+                          src={logoPreviewUrl}
                           alt="School logo preview"
                           className="h-16 w-16 border object-cover bg-white"
                         />
