@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import '../App.css';
 import { useAuth } from '../hooks/useAuth';
-import AuthPage from '../components/AuthPage';
+import AuthPage, { type WorkspaceUserProfile } from '../components/AuthPage';
 
 
 // Components
@@ -19,6 +19,13 @@ import CoverPageWorkflow from '../components/CoverPageWorkflow';
 import HomePage from '../pages/HomePage';
 import BookWorkflow from '../components/BookWorkflow';
 import InlineSvg from '../components/InlineSvg';
+import {
+  SchoolForm,
+  type SchoolFormSubmitPayload,
+  buildSchoolFormValuesFromProfile,
+  servicesArrayFromSelection,
+  buildSchoolFormData
+} from '../components/SchoolProfileForm';
 import { API_BASE_URL } from '../lib/utils';
 import { decodeSvgPayload, sanitizeRhymeSvgContent } from '../lib/svgUtils';
 import { readFileAsDataUrl } from '../lib/fileUtils';
@@ -46,8 +53,10 @@ import {
   LayoutTemplate,
   BookMarked,
   Clock,
-  Loader2
+  Loader2,
+  UserRoundPen
 } from 'lucide-react';
+import type { SchoolProfile } from '../types/types';
 
 
 const API = API_BASE_URL || '/api';
@@ -127,7 +136,14 @@ const buildCoverGradeNames = (source) =>
     return acc;
   }, {});
 
-const ModeSelectionPage = ({ school, onModeSelect, onLogout, isSuperAdmin = false }) => {
+const ModeSelectionPage = ({
+  school,
+  onModeSelect,
+  onLogout,
+  isSuperAdmin = false,
+  onBackToAdmin,
+  onEditProfile
+}) => {
   const options = [
     {
       id: 'books',
@@ -161,14 +177,34 @@ const ModeSelectionPage = ({ school, onModeSelect, onLogout, isSuperAdmin = fals
             <p className="text-gray-600">School ID: {school.school_id}</p>
           </div>
           <div className="flex flex-wrap gap-3">
-            {isSuperAdmin && (
+            {onEditProfile && (
               <Button
-                asChild
                 variant="outline"
                 className="bg-white/80 hover:bg-white border-gray-200"
+                onClick={onEditProfile}
               >
-                <a href="#/admin/upload">Admin dashboard</a>
+                <UserRoundPen className="mr-2 h-4 w-4" />
+                Edit profile
               </Button>
+            )}
+            {isSuperAdmin && (
+              <>
+                <Button
+                  variant="outline"
+                  className="bg-white/80 hover:bg-white border-gray-200"
+                  onClick={onBackToAdmin}
+                >
+                  <ChevronLeft className="mr-2 h-4 w-4" />
+                  Back to admin dashboard
+                </Button>
+                <Button
+                  asChild
+                  variant="outline"
+                  className="bg-white/80 hover:bg-white border-gray-200"
+                >
+                  <a href="#/admin/upload">Admin tools</a>
+                </Button>
+              </>
             )}
             <Button
               onClick={onLogout}
@@ -2448,8 +2484,10 @@ export function RhymesWorkflowApp() {
 
   const persistedState = persistedStateRef.current || {};
 
-  const [workspaceUser, setWorkspaceUser] = useState(() => persistedState.workspaceUser ?? null);
-  const [school, setSchool] = useState(() => persistedState.school ?? null);
+  const [workspaceUser, setWorkspaceUser] = useState<WorkspaceUserProfile | null>(
+    () => persistedState.workspaceUser ?? null
+  );
+  const [school, setSchool] = useState<SchoolProfile | null>(() => persistedState.school ?? null);
   const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
   const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
   const [coverDefaults, setCoverDefaults] = useState(() =>
@@ -2458,7 +2496,9 @@ export function RhymesWorkflowApp() {
   const [isCoverDetailsStepComplete, setIsCoverDetailsStepComplete] = useState(
     () => Boolean(persistedState.isCoverDetailsStepComplete)
   );
-  const { user, loading: authLoading, signOut: authSignOut } = useAuth();
+  const { user, loading: authLoading, signOut: authSignOut, getIdToken } = useAuth();
+  const [isEditingSchoolProfile, setIsEditingSchoolProfile] = useState(false);
+  const [schoolFormSubmitting, setSchoolFormSubmitting] = useState(false);
 
   useEffect(() => {
     if (authLoading) {
@@ -2492,6 +2532,12 @@ export function RhymesWorkflowApp() {
     });
   }, [workspaceUser, school, selectedMode, selectedGrade, coverDefaults, isCoverDetailsStepComplete]);
 
+  useEffect(() => {
+    if (!school) {
+      setIsEditingSchoolProfile(false);
+    }
+  }, [school]);
+
   const clearCoverWorkflowForSchool = useCallback((schoolId) => {
     if (!schoolId) {
       return;
@@ -2502,6 +2548,42 @@ export function RhymesWorkflowApp() {
       clearBookWorkflowState(schoolId, option.id);
     });
   }, []);
+
+  const handleSchoolProfileSubmit = useCallback(
+    async ({ values }: SchoolFormSubmitPayload) => {
+      if (!school) {
+        return;
+      }
+      const selectedServices = servicesArrayFromSelection(values.service_type);
+      if (selectedServices.length === 0) {
+        toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
+        return;
+      }
+      setSchoolFormSubmitting(true);
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+        const formData = buildSchoolFormData(values, selectedServices);
+        const response = await axios.put<SchoolProfile>(`${API}/schools/${school.school_id}`, formData, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setSchool(response.data);
+        toast.success('School profile updated');
+        setIsEditingSchoolProfile(false);
+      } catch (error) {
+        console.error('Failed to update school profile', error);
+        toast.error('Unable to update school. Please try again.');
+      } finally {
+        setSchoolFormSubmitting(false);
+      }
+    },
+    [school, getIdToken]
+  );
+
+  const isSuperAdminUser = workspaceUser?.role === 'super-admin';
+  const schoolFormInitialValues = useMemo(() => buildSchoolFormValuesFromProfile(school), [school]);
 
   const handleCoverDetailsSave = useCallback((details) => {
     const sanitizedGradeNames = GRADE_OPTIONS.reduce((acc, grade) => {
@@ -2562,6 +2644,7 @@ export function RhymesWorkflowApp() {
     setSelectedGrade(null);
     setCoverDefaults(mergeCoverDefaults());
     setIsCoverDetailsStepComplete(false);
+    setIsEditingSchoolProfile(false);
   };
 
   const handleModeSelect = (mode) => {
@@ -2601,22 +2684,50 @@ export function RhymesWorkflowApp() {
     setSchool(null);
     setCoverDefaults(mergeCoverDefaults());
     setIsCoverDetailsStepComplete(false);
+    setIsEditingSchoolProfile(false);
     void authSignOut().catch((error) => {
       console.error('Failed to sign out from Google', error);
     });
   };
+
+  const handleReturnToAdminDashboard = useCallback(() => {
+    if (!isSuperAdminUser) {
+      return;
+    }
+    const currentSchoolId = school?.school_id;
+    if (currentSchoolId) {
+      clearCoverWorkflowForSchool(currentSchoolId);
+    }
+    clearPersistedAppState();
+    setSelectedGrade(null);
+    setSelectedMode(null);
+    setCoverDefaults(mergeCoverDefaults());
+    setIsCoverDetailsStepComplete(false);
+    setSchool(null);
+    setIsEditingSchoolProfile(false);
+  }, [isSuperAdminUser, school, clearCoverWorkflowForSchool]);
 
   return (
     <div className="App">
       <Toaster position="top-right" />
       {!school ? (
         <AuthPage onAuth={handleAuth} />
+      ) : isEditingSchoolProfile ? (
+        <SchoolForm
+          mode="edit"
+          initialValues={schoolFormInitialValues}
+          submitting={schoolFormSubmitting}
+          onSubmit={handleSchoolProfileSubmit}
+          onCancel={() => setIsEditingSchoolProfile(false)}
+        />
       ) : !selectedMode ? (
         <ModeSelectionPage
           school={school}
           onModeSelect={handleModeSelect}
           onLogout={handleLogout}
-          isSuperAdmin={workspaceUser?.role === 'super-admin'}
+          isSuperAdmin={isSuperAdminUser}
+          onBackToAdmin={handleReturnToAdminDashboard}
+          onEditProfile={() => setIsEditingSchoolProfile(true)}
         />
       ) : selectedMode === 'cover' && !isCoverDetailsStepComplete ? (
         <CoverDetailsPage

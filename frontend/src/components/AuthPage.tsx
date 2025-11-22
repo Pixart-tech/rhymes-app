@@ -2,9 +2,24 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
-import { Loader2, School, Edit3, Eye, Plus, RefreshCw, Trash2, UserRoundPen } from 'lucide-react';
+import { getDownloadURL, ref } from 'firebase/storage';
+import {
+  Loader2,
+  School,
+  Edit3,
+  Eye,
+  Plus,
+  RefreshCw,
+  Trash2,
+  UserRoundPen,
+  Search,
+  Filter,
+  Clock,
+  TrendingUp
+} from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth';
+import { storage } from '../lib/firebase';
 import { API_BASE_URL } from '../lib/utils';
 import { Button } from './ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from './ui/card';
@@ -15,7 +30,13 @@ import {
   SchoolServiceType,
   WorkspaceUserUpdatePayload
 } from '../types/types';
-import { SchoolForm, SchoolFormSubmitPayload } from './SchoolProfileForm';
+import {
+  SchoolForm,
+  SchoolFormSubmitPayload,
+  servicesArrayFromSelection,
+  selectionFromServicesArray,
+  buildSchoolFormData
+} from './SchoolProfileForm';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
@@ -23,49 +44,18 @@ import { Input } from './ui/input';
 const API = API_BASE_URL || '/api';
 
 const SERVICE_KEYS: SchoolServiceType[] = ['id_cards', 'report_cards', 'certificates'];
-
-const createEmptyServiceSelection = (): Record<SchoolServiceType, boolean> => ({
-  id_cards: false,
-  report_cards: false,
-  certificates: false
-});
-
-const servicesArrayFromSelection = (selection: Record<SchoolServiceType, boolean>): SchoolServiceType[] => {
-  return SERVICE_KEYS.filter((key) => Boolean(selection?.[key]));
+const SERVICE_LABELS: Record<SchoolServiceType, string> = {
+  id_cards: 'ID cards',
+  report_cards: 'Report cards',
+  certificates: 'Certificates'
 };
+type AdminServiceFilter = 'all' | SchoolServiceType;
 
-const selectionFromServicesArray = (
-  services?: SchoolServiceType[] | null
-): Record<SchoolServiceType, boolean> => {
-  const selection = createEmptyServiceSelection();
-  if (!services) {
-    return selection;
+const getLogoSrc = (school: SchoolProfile, resolvedLogos?: Record<string, string>): string | null => {
+  if (resolvedLogos?.[school.school_id]) {
+    return resolvedLogos[school.school_id];
   }
-  services.forEach((service) => {
-    if (SERVICE_KEYS.includes(service)) {
-      selection[service] = true;
-    }
-  });
-  return selection;
-};
-
-const getLogoSrc = (school: SchoolProfile): string | null => school.logo_url ?? null;
-
-const buildSchoolFormData = (values: SchoolFormValues, selectedServices: SchoolServiceType[]): FormData => {
-  const formData = new FormData();
-  formData.append('school_name', values.school_name);
-  formData.append('email', values.email);
-  formData.append('phone', values.phone);
-  formData.append('address', values.address);
-  formData.append('tagline', values.tagline ?? '');
-  formData.append('principal_name', values.principal_name);
-  formData.append('principal_email', values.principal_email);
-  formData.append('principal_phone', values.principal_phone);
-  selectedServices.forEach((service) => formData.append('service_type', service));
-  if (values.logo_file) {
-    formData.append('logo_file', values.logo_file);
-  }
-  return formData;
+  return school.logo_url ?? null;
 };
 
 
@@ -102,6 +92,37 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
   const [profileForm, setProfileForm] = useState({ display_name: '', email: '' });
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   const [deletingSchoolId, setDeletingSchoolId] = useState<string | null>(null);
+  const [logoMap, setLogoMap] = useState<Record<string, string>>({});
+  const [adminSearch, setAdminSearch] = useState('');
+  const [serviceFilter, setServiceFilter] = useState<AdminServiceFilter>('all');
+  const allSchoolsForLogos = useMemo(() => {
+    const deduped: Record<string, SchoolProfile> = {};
+    [...schools, ...adminSchools].forEach((school) => {
+      if (school?.school_id) {
+        deduped[school.school_id] = school;
+      }
+    });
+    return Object.values(deduped);
+  }, [schools, adminSchools]);
+  const resolveDirectLogoUrl = useCallback((value?: string | null) => {
+    if (!value) {
+      return null;
+    }
+    if (/^data:/i.test(value) || /^https?:\/\//i.test(value)) {
+      return value;
+    }
+    if (value.startsWith('/')) {
+      if (API_BASE_URL && /^https?:\/\//i.test(API_BASE_URL)) {
+        try {
+          return new URL(value, API_BASE_URL).toString();
+        } catch (error) {
+          console.warn('Unable to build absolute logo url', error);
+        }
+      }
+      return value;
+    }
+    return null;
+  }, []);
 
   const fetchWorkspace = useCallback(async () => {
     if (!user) {
@@ -191,6 +212,72 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     }
   }, [workspaceUser, fetchAdminSchools]);
 
+  useEffect(() => {
+    if (allSchoolsForLogos.length === 0) {
+      return;
+    }
+
+    const directUpdates: Record<string, string> = {};
+    const firebaseTargets: SchoolProfile[] = [];
+
+    allSchoolsForLogos.forEach((school) => {
+      if (!school.logo_url || logoMap[school.school_id]) {
+        return;
+      }
+      const directUrl = resolveDirectLogoUrl(school.logo_url);
+      if (directUrl) {
+        directUpdates[school.school_id] = directUrl;
+      } else {
+        firebaseTargets.push(school);
+      }
+    });
+
+    if (Object.keys(directUpdates).length > 0) {
+      setLogoMap((prev) => ({ ...prev, ...directUpdates }));
+    }
+
+    if (firebaseTargets.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const fetchFirebaseLogos = async () => {
+      const entries = await Promise.all(
+        firebaseTargets.map(async (school) => {
+          if (!school.logo_url) {
+            return null;
+          }
+          try {
+            const storageRef = ref(storage, school.logo_url);
+            const downloadUrl = await getDownloadURL(storageRef);
+            return [school.school_id, downloadUrl] as const;
+          } catch (error) {
+            console.warn('Failed to fetch logo from Firebase storage', { schoolId: school.school_id, error });
+            return null;
+          }
+        })
+      );
+
+      const updates: Record<string, string> = {};
+      entries.forEach((entry) => {
+        if (!entry) {
+          return;
+        }
+        const [schoolId, downloadUrl] = entry;
+        updates[schoolId] = downloadUrl;
+      });
+
+      if (!cancelled && Object.keys(updates).length > 0) {
+        setLogoMap((prev) => ({ ...prev, ...updates }));
+      }
+    };
+
+    void fetchFirebaseLogos();
+    return () => {
+      cancelled = true;
+    };
+  }, [allSchoolsForLogos, logoMap, resolveDirectLogoUrl]);
+
   const buildFormValues = useCallback(
     (school?: SchoolProfile): SchoolFormValues => ({
       school_name: school?.school_name ?? '',
@@ -214,6 +301,53 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     }
     return buildFormValues();
   }, [view, editingSchool, buildFormValues]);
+  const filteredAdminSchools = useMemo(() => {
+    if (adminSchools.length === 0) {
+      return [];
+    }
+    const normalizedSearch = adminSearch.trim().toLowerCase();
+    return adminSchools.filter((school) => {
+      const matchesSearch = normalizedSearch
+        ? Boolean(
+            school.school_name?.toLowerCase().includes(normalizedSearch) ||
+              school.school_id?.toLowerCase().includes(normalizedSearch) ||
+              school.email?.toLowerCase().includes(normalizedSearch)
+          )
+        : true;
+      const matchesService =
+        serviceFilter === 'all' ||
+        Boolean(school.service_type && school.service_type.includes(serviceFilter));
+      return matchesSearch && matchesService;
+    });
+  }, [adminSchools, adminSearch, serviceFilter]);
+  const adminStats = useMemo(() => {
+    const totalSelections = adminSchools.reduce((sum, school) => sum + (school.total_selections || 0), 0);
+    const lastUpdated = adminSchools.reduce<Date | null>((latest, school) => {
+      const timestamp = school.last_updated ?? school.timestamp;
+      if (!timestamp) {
+        return latest;
+      }
+      const nextDate = new Date(timestamp);
+      if (!latest || nextDate > latest) {
+        return nextDate;
+      }
+      return latest;
+    }, null);
+    return {
+      totalSelections,
+      lastUpdated
+    };
+  }, [adminSchools]);
+  const formatDate = useCallback((value?: string | Date | null) => {
+    if (!value) {
+      return 'No activity yet';
+    }
+    const dateValue = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(dateValue.getTime())) {
+      return 'No activity yet';
+    }
+    return dateValue.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }, []);
 
   const handleProfileInputChange = (field: 'display_name' | 'email') =>
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -441,7 +575,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {schools.map((school) => {
-              const logoSrc = getLogoSrc(school);
+              const logoSrc = getLogoSrc(school, logoMap);
               const canEdit = school.created_by_user_id === workspaceUser?.uid;
               return (
                 <Card key={school.school_id} className="border border-orange-100 shadow-sm">
@@ -498,154 +632,232 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     </Card>
   );
 
-  const renderAdminDashboard = () => (
-    <Card className="w-full max-w-6xl border-0 bg-white/85 backdrop-blur">
-      <CardHeader className="space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm text-gray-500">Signed in as</p>
-            <CardTitle className="text-2xl text-gray-800">
-              {workspaceUser?.display_name || user?.name || 'Admin'}
-            </CardTitle>
-            <p className="text-gray-600">{workspaceUser?.email}</p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button variant="outline" onClick={() => setProfileDialogOpen(true)}>
-              <UserRoundPen className="h-4 w-4" />
-              Edit profile
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/admin/upload">Admin tools</Link>
-            </Button>
-            <Button
-              onClick={() => {
-                setEditingSchool(null);
-                setView('create');
-              }}
-            >
-              <Plus className="h-4 w-4" />
-              Create new school
-            </Button>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="rounded-xl border border-gray-200 bg-white px-6 py-4 text-center shadow-sm">
-            <p className="text-sm text-gray-500">Total schools</p>
-            <p className="text-3xl font-bold text-gray-900">{adminSchools.length}</p>
-          </div>
-          <Button
-            variant="outline"
-            onClick={() => {
-              void fetchAdminSchools();
-            }}
-            disabled={adminLoading}
-          >
-            <RefreshCw className={`h-4 w-4 ${adminLoading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {adminError && (
-          <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{adminError}</div>
-        )}
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">S.No</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Logo</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  School Name
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Unique ID
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Edit</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Delete</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 bg-white">
-              {adminLoading ? (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-gray-500">
-                    <div className="flex items-center justify-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Loading schools…
-                    </div>
-                  </td>
-                </tr>
-              ) : adminSchools.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-gray-500">
-                    No schools available yet.
-                  </td>
-                </tr>
-              ) : (
-                adminSchools.map((school, index) => {
-                  const logoSrc = getLogoSrc(school);
-                  const isDeleting = deletingSchoolId === school.school_id;
-                  return (
-                    <tr key={school.school_id} className="hover:bg-orange-50/40">
-                      <td className="px-4 py-4 text-gray-700">{index + 1}</td>
-                      <td className="px-4 py-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 text-orange-600">
-                          {logoSrc ? (
-                            <img
-                              src={logoSrc}
-                              alt={school.school_name}
-                              className="h-12 w-12 rounded-full object-cover"
-                            />
-                          ) : (
-                            <School className="h-6 w-6" />
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="font-semibold text-gray-800">{school.school_name}</div>
-                        <Button
-                          variant="link"
-                          className="h-auto p-0 text-xs"
-                          onClick={() => handleSchoolSelect(school)}
-                        >
-                          Open workspace
-                        </Button>
-                      </td>
-                      <td className="px-4 py-4 text-gray-700">{school.school_id}</td>
-                      <td className="px-4 py-4">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setEditingSchool(school);
-                            setView('edit');
-                          }}
-                        >
-                          <Edit3 className="h-4 w-4" />
-                          Edit
-                        </Button>
-                      </td>
-                      <td className="px-4 py-4">
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => void handleAdminDelete(school.school_id)}
-                          disabled={isDeleting}
-                        >
-                          {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                          Delete
-                        </Button>
-                      </td>
+  const renderAdminDashboard = () => {
+    const serviceFilterOptions: { label: string; value: AdminServiceFilter }[] = [
+      { label: 'All services', value: 'all' },
+      ...SERVICE_KEYS.map((key) => ({ value: key, label: SERVICE_LABELS[key] }))
+    ];
+    const schoolsToRender = filteredAdminSchools;
+    const emptyStateMessage =
+      adminSchools.length === 0 ? 'No schools available yet.' : 'No schools match the current filters.';
+
+    return (
+      <div className="flex w-full max-w-6xl flex-col gap-6">
+        <Card className="border-0 bg-gradient-to-br from-orange-500 via-red-500 to-rose-500 text-white shadow-2xl">
+          <CardHeader className="space-y-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-sm uppercase tracking-wide text-white/80">Super admin</p>
+                <CardTitle className="text-3xl font-semibold">
+                  {workspaceUser?.display_name || user?.name || 'Admin'}
+                </CardTitle>
+                <p className="text-sm text-white/80">{workspaceUser?.email}</p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  variant="outline"
+                  className="border-white/40 text-white hover:bg-white/10"
+                  onClick={() => setProfileDialogOpen(true)}
+                >
+                  <UserRoundPen className="h-4 w-4" />
+                  Edit profile
+                </Button>
+                <Button asChild variant="outline" className="border-white/40 text-white hover:bg-white/10">
+                  <Link to="/admin/upload">Admin tools</Link>
+                </Button>
+                <Button
+                  className="bg-white text-orange-600 hover:bg-white/90"
+                  onClick={() => {
+                    setEditingSchool(null);
+                    setView('create');
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Create school
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl bg-white/20 p-4 backdrop-blur">
+              <p className="text-sm text-white/80">Total selections</p>
+              <p className="text-3xl font-semibold">{adminStats.totalSelections}</p>
+              <span className="mt-2 inline-flex items-center gap-1 text-xs text-white/80">
+                <TrendingUp className="h-3.5 w-3.5" />
+                Last update {formatDate(adminStats.lastUpdated)}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 bg-white/95 shadow-2xl backdrop-blur">
+          <CardHeader className="space-y-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="relative w-full flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Input
+                  placeholder="Search by school name, email, or ID"
+                  className="pl-10"
+                  value={adminSearch}
+                  onChange={(event) => setAdminSearch(event.target.value)}
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {serviceFilterOptions.map((option) => (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    size="sm"
+                    variant={serviceFilter === option.value ? 'default' : 'outline'}
+                    className={serviceFilter === option.value ? 'bg-orange-500 hover:bg-orange-500/90' : ''}
+                    onClick={() => setServiceFilter(option.value)}
+                  >
+                    {option.value === 'all' ? (
+                      <>
+                        <Filter className="h-4 w-4" />
+                        {option.label}
+                      </>
+                    ) : (
+                      option.label
+                    )}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    void fetchAdminSchools();
+                  }}
+                  disabled={adminLoading}
+                >
+                  <RefreshCw className={`h-4 w-4 ${adminLoading ? 'animate-spin' : ''}`} />
+                  Sync now
+                </Button>
+              </div>
+            </div>
+            {adminError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{adminError}</div>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {adminLoading ? (
+              <div className="flex items-center justify-center gap-3 rounded-xl border border-dashed border-gray-200 px-6 py-10 text-gray-600">
+                <Loader2 className="h-5 w-5 animate-spin text-orange-500" />
+                Fetching the latest schools…
+              </div>
+            ) : schoolsToRender.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 px-6 py-12 text-center text-gray-500">
+                {emptyStateMessage}
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-gray-100">
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        School
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Services
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Selections
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Grades
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Last updated
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Actions
+                      </th>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </CardContent>
-    </Card>
-  );
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {schoolsToRender.map((school) => {
+                      const logoSrc = getLogoSrc(school, logoMap);
+                      const gradeCount = Object.keys(school.grades || {}).length;
+                      const isDeleting = deletingSchoolId === school.school_id;
+                      const services = school.service_type ?? [];
+
+                      return (
+                        <tr key={school.school_id} className="hover:bg-orange-50/40">
+                          <td className="px-4 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-50 text-orange-500">
+                                {logoSrc ? (
+                                  <img
+                                    src={logoSrc}
+                                    alt={school.school_name}
+                                    className="h-11 w-11 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <School className="h-5 w-5" />
+                                )}
+                              </div>
+                              <div>
+                                <div className="font-semibold text-gray-800">{school.school_name}</div>
+                                <p className="text-xs text-gray-500">ID: {school.school_id}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="flex flex-wrap gap-1">
+                              {services.length === 0
+                                ? '—'
+                                : services.map((service) => (
+                                    <span key={service} className="rounded-full bg-orange-50 px-2 py-0.5 text-xs text-orange-700">
+                                      {SERVICE_LABELS[service]}
+                                    </span>
+                                  ))}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 text-gray-700">{school.total_selections ?? 0}</td>
+                          <td className="px-4 py-4 text-gray-700">{gradeCount}</td>
+                          <td className="px-4 py-4 text-gray-700">{formatDate(school.last_updated ?? school.timestamp ?? null)}</td>
+                          <td className="px-4 py-4">
+                            <div className="flex flex-wrap gap-2">
+                              <Button variant="secondary" size="sm" onClick={() => handleSchoolSelect(school)}>
+                                <Eye className="h-4 w-4" />
+                                Open
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingSchool(school);
+                                  setView('edit');
+                                }}
+                              >
+                                <Edit3 className="h-4 w-4" />
+                                Edit
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => void handleAdminDelete(school.school_id)}
+                                disabled={isDeleting}
+                              >
+                                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                Delete
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
 
   if (authLoading) {
     return <div className="flex min-h-screen items-center justify-center text-lg">Loading session...</div>;

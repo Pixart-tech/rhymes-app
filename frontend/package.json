@@ -45,6 +45,7 @@
     "react": "^19.1.1",
     "react-day-picker": "8.10.1",
     "react-dom": "^19.1.1",
+    "react-easy-crop": "^5.5.5",
     "react-hook-form": "^7.56.2",
     "react-resizable-panels": "^3.0.1",
     "react-router-dom": "^7.9.1",

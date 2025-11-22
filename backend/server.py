@@ -13,7 +13,6 @@ else:
 print("Forced working directory:", os.getcwd())
 
 
-import json
 import logging
 import os
 import sys
@@ -41,9 +40,23 @@ if __package__ in {None, ""}:
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
     from backend.app import auth, config, rhymes, school_profiles, svg_processing, unc_path_utils  # type: ignore
+    from backend.app.firebase_service import (  # type: ignore
+        DEFAULT_USER_ROLE,
+        db,
+        ensure_user_document as _ensure_user_document,
+        firestore,
+        verify_and_decode_token as _verify_and_decode_token,
+    )
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
     from .app import auth, config, rhymes, school_profiles, svg_processing, unc_path_utils
+    from .app.firebase_service import (
+        DEFAULT_USER_ROLE,
+        db,
+        ensure_user_document as _ensure_user_document,
+        firestore,
+        verify_and_decode_token as _verify_and_decode_token,
+    )
     from .app.svg_processing import SvgDocument as _SvgDocument
 
 School = auth.School
@@ -154,112 +167,6 @@ async def _read_upload_file(upload_file: Optional[UploadFile]) -> Tuple[Optional
     if not contents:
         return None, None
     return contents, upload_file.content_type or "application/octet-stream"
-
-# Firebase connection
-import firebase_admin
-from firebase_admin import auth as firebase_auth, credentials, firestore
-
-
-def _initialize_firestore_client():
-    """Initialize a Firestore client using explicit credentials when available.
-
-    The previous implementation relied on Application Default Credentials (ADC),
-    which raises an error in environments where ADC is not configured. To avoid
-    that failure mode, we prefer explicit credentials provided through
-    environment variables and fall back to anonymous credentials when the
-    Firestore emulator is being used.
-    """
-
-    if firebase_admin._apps:  # pragma: no cover - defensive guard
-        return firestore.client()
-
-    emulator_host = os.environ.get("FIRESTORE_EMULATOR_HOST")
-    credentials_json = os.environ.get("FIREBASE_CREDENTIALS")
-    credentials_path = "C:/WORKSPACE/rhymes-app/backend/firebase_key.json"
-
-    if emulator_host:
-        cred = credentials.AnonymousCredentials()
-    elif credentials_json:
-        try:
-            cred_data = json.loads(credentials_json)
-        except json.JSONDecodeError:
-            cred_data = credentials_json
-        cred = credentials.Certificate(cred_data)
-    elif credentials_path:
-        cred = credentials.Certificate(credentials_path)
-    else:
-        raise RuntimeError(
-            "Firebase credentials are not configured. Set FIREBASE_CREDENTIALS to"
-            " a JSON blob or GOOGLE_APPLICATION_CREDENTIALS to a service account"
-            " path."
-        )
-
-    firebase_admin.initialize_app(cred)
-    return firestore.client()
-
-
-db = _initialize_firestore_client()
-
-
-DEFAULT_USER_ROLE = "user"
-
-def _verify_and_decode_token(authorization: Optional[str]) -> Dict[str, Any]:
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        raise HTTPException(status_code=401, detail="Authorization header must be a Bearer token")
-
-    try:
-        return firebase_auth.verify_id_token(token)
-    except Exception as exc:  # pragma: no cover - firebase library raises many subclasses
-        raise HTTPException(status_code=401, detail="Invalid or expired Firebase token") from exc
-
-
-def _ensure_user_document(decoded_token: Dict[str, Any]) -> Dict[str, Any]:
-    uid = decoded_token.get("uid")
-    if not uid:
-        raise HTTPException(status_code=400, detail="Firebase token is missing a user id")
-
-    doc_ref = db.collection("users").document(uid)
-    snapshot = doc_ref.get()
-    now = datetime.utcnow()
-    email = decoded_token.get("email")
-    display_name = decoded_token.get("name")
-
-    if snapshot.exists:
-        data = snapshot.to_dict() or {}
-        updates: Dict[str, Any] = {}
-
-        if email and not data.get("email"):
-            updates["email"] = email
-        if display_name and not data.get("display_name"):
-            updates["display_name"] = display_name
-
-        if updates:
-            updates["updated_at"] = now
-            doc_ref.update(updates)
-            data.update(updates)
-
-        data.setdefault("uid", uid)
-        data.setdefault("school_ids", [])
-        data.setdefault("role", data.get("role") or DEFAULT_USER_ROLE)
-        data.setdefault("created_at", data.get("created_at") or now)
-        data.setdefault("updated_at", data.get("updated_at") or now)
-        return data
-
-    default_payload = {
-        "uid": uid,
-        "email": email,
-        "display_name": display_name,
-        "role": DEFAULT_USER_ROLE,
-        "school_ids": [],
-        "created_at": now,
-        "updated_at": now,
-    }
-    doc_ref.set(default_payload)
-    return default_payload
 
 
 def _build_workspace_user(record: Dict[str, Any]) -> "WorkspaceUser":
@@ -919,12 +826,13 @@ async def get_all_schools_with_selections(authorization: Optional[str] = Header(
 
     for doc in school_docs:
         school_id = doc.get("school_id")
-        base_payload = {
-            "id": doc.get("id"),
-            "school_id": school_id,
-            "school_name": doc.get("school_name"),
-            "timestamp": doc.get("timestamp"),
-        }
+        if not school_id:
+            continue
+
+        if not doc.get("id"):
+            doc["id"] = school_id
+
+        base_school = school_profiles.build_school_from_record(doc)
 
         grade_map: Dict[str, List[RhymeSelectionDetail]] = {}
 
@@ -964,7 +872,7 @@ async def get_all_schools_with_selections(authorization: Optional[str] = Header(
 
         schools_with_details.append(
             SchoolWithSelections(
-                **base_payload,
+                **base_school.dict(),
                 total_selections=total_selections,
                 last_updated=last_updated,
                 grades=grade_map,
