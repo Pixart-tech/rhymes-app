@@ -189,6 +189,10 @@ export const decodeSvgPayload = (payload, headers) => {
   }
 
   if (typeof payload === 'object') {
+    if (Array.isArray(payload.pages)) {
+      return { pages: payload.pages.map((page) => decodeSvgPayload(page, headers)) };
+    }
+
     if (payload.data !== undefined) {
       return decodeSvgPayload(payload.data, headers);
     }

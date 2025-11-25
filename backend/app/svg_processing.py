@@ -32,10 +32,11 @@ class SvgDocument:
 
 
 def resolve_rhyme_svg_path(base_path: Optional[Path], rhyme_code: str):
-    """Return the network SVG path for ``rhyme_code`` if it exists.
+    """Return the network SVG path(s) for ``rhyme_code`` if they exist.
 
     If a directory named after ``rhyme_code`` contains multiple SVG files,
-    the first (sorted) match is returned. If no match exists, ``None`` is
+    all SVG paths within that directory are returned as a sorted list so the
+    caller can render each page independently. If no match exists, ``None`` is
     returned.
     """
 
@@ -59,7 +60,6 @@ def resolve_rhyme_svg_path(base_path: Optional[Path], rhyme_code: str):
                 if svg.is_file() and svg.suffix.lower() == ".svg"
             ]
         if svg_files:
-            # Return the first match to preserve the expected return type
             return svg_files
 
         if (dir_candidate).exists():

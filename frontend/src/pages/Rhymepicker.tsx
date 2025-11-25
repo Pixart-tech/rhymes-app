@@ -1510,7 +1510,10 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         .get(`${API}/rhymes/svg/${code}`, { responseType: 'arraybuffer' })
         .then((response) => {
           const decoded = decodeSvgPayload(response.data, response.headers);
-          const svgContent = sanitizeRhymeSvgContent(decoded, code);
+          const svgContent =
+            decoded && typeof decoded === 'object' && Array.isArray(decoded.pages)
+              ? decoded.pages.map((page, index) => sanitizeRhymeSvgContent(page, `${code}-${index}`))
+              : sanitizeRhymeSvgContent(decoded, code);
           svgCacheRef.current.set(code, svgContent);
           return svgContent;
         })
