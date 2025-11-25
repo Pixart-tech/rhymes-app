@@ -1972,7 +1972,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     if (pages === 1 || pages === 1.0) {
       return 'top';
     }
-
+    
     if (pages === 0.5) {
       const pageIndex = Number(rhyme?.page_index);
       const normalizedPageIndex = Number.isFinite(pageIndex)
