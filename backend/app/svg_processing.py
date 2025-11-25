@@ -31,19 +31,38 @@ class SvgDocument:
     source_path: Optional[Path]
 
 
-def resolve_rhyme_svg_path(base_path: Optional[Path], rhyme_code: str) -> Optional[Path]:
-    """Return the network SVG path for ``rhyme_code`` if it exists."""
+def resolve_rhyme_svg_path(base_path: Optional[Path], rhyme_code: str):
+    """Return the network SVG path for ``rhyme_code`` if it exists.
+
+    If a directory named after ``rhyme_code`` contains multiple SVG files,
+    the first (sorted) match is returned. If no match exists, ``None`` is
+    returned.
+    """
 
     if base_path is None:
         return None
 
+    # prefer a file named {rhyme_code}.svg but also accept a directory named {rhyme_code}
     candidate = base_path / f"{rhyme_code}.svg"
+    dir_candidate = base_path / f"{rhyme_code}"
+
+   
 
     try:
         if candidate.is_file():
             return candidate
 
-        if candidate.exists():
+        if dir_candidate.is_dir():
+            svg_files = [
+                svg
+                for svg in sorted(dir_candidate.iterdir())
+                if svg.is_file() and svg.suffix.lower() == ".svg"
+            ]
+        if svg_files:
+            # Return the first match to preserve the expected return type
+            return svg_files
+
+        if (dir_candidate).exists():
             logger.warning(
                 "Authored SVG for rhyme %s exists at %s but is not a file.",
                 rhyme_code,

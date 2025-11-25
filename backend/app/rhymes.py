@@ -30,11 +30,11 @@ def generate_rhyme_svg(
     """Create SVG markup for a rhyme card."""
 
     catalogue = rhymes_data or RHYMES_DATA
-
+  
     if rhyme_code not in catalogue:
         raise KeyError("Rhyme not found")
 
-    rhyme_name, pages = catalogue[rhyme_code]
+    rhyme_name, pages,p = catalogue[rhyme_code]
 
     return f"""
     <svg width="400" height="300" xmlns="http://www.w3.org/2000/svg">

@@ -56,6 +56,7 @@ COVER_SVG_BASE_PATH = config.resolve_cover_svg_base_path()
 RHYMES_DATA = rhymes.RHYMES_DATA
 generate_rhyme_svg = rhymes.generate_rhyme_svg
 
+
 _sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
 _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
 _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
@@ -66,7 +67,7 @@ def _ensure_image_cache_dir() -> Path:
     return svg_processing.ensure_image_cache_dir(config.IMAGE_CACHE_DIR)
 
 
-def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]:
+def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]|List[Path]:
     return svg_processing.resolve_rhyme_svg_path(RHYME_SVG_BASE_PATH, rhyme_code)
 
 
@@ -330,7 +331,7 @@ async def get_available_rhymes(
         # Get already selected rhymes for ALL grades in this school
         selected_rhymes = await db.rhyme_selections.find(
             {"school_id": school_id}
-        ).to_list(None)
+        ).to_list(None) 
 
         selected_codes = {selection["rhyme_code"] for selection in selected_rhymes}
     else:
@@ -350,7 +351,7 @@ async def get_available_rhymes(
             rhymes_by_pages[page_key].append(
                 {
                     "code": code,
-                    "name": name,
+                    "name": name, 
                     "pages": pages,
                     "personalized": personalized,
                 }
@@ -715,24 +716,48 @@ async def get_rhyme_svg(rhyme_code: str):
     svg_content: Optional[str] = None
 
     svg_path = _resolve_rhyme_svg_path(rhyme_code)
+    
 
+    svg_source_path: Optional[Path] = None
     if svg_path is not None:
-        try:
-            svg_content = svg_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.error(
-                "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc
-            )
+        # svg_path may be a single Path, a directory Path, or a list of Path
+        candidates: List[Path] = []
 
+        if isinstance(svg_path, list):
+            candidates = svg_path
+        elif isinstance(svg_path, Path):
+            if svg_path.is_dir():
+                candidates = [
+                    p for p in sorted(svg_path.iterdir()) if p.is_file() and p.suffix.lower() == ".svg"
+                ]
+            else:
+                candidates = [svg_path]
+            print(candidates)
+        for candidate in candidates:
+            try:
+                candidate=candidate
+                svg_content = candidate.read_text(encoding="utf-8")
+            except OSError as exc:
+                logger.error(
+                    "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, candidate, exc
+                )
+                continue
+            svg_source_path = candidate
+            
+    
     if svg_content is None:
         try:
             svg_content = generate_rhyme_svg(rhyme_code)
         except KeyError:
             raise HTTPException(status_code=404, detail="Rhyme not found")
     else:
-        svg_content = _localize_svg_image_assets(
-            svg_content, svg_path, rhyme_code, inline_mode=True
-        )
+        # Pass a Path (if available) to the localizer; fall back to base path
+        localize_source = svg_source_path or (svg_path if isinstance(svg_path, Path) else None)
+        if localize_source is None:
+            # No concrete file path available; call localizer with a harmless placeholder
+            svg_content = _localize_svg_image_assets(svg_content, Path("."), rhyme_code, inline_mode=True)
+        else:
+            svg_content = _localize_svg_image_assets(svg_content, localize_source, rhyme_code, inline_mode=True)
 
     return Response(content=svg_content, media_type="image/svg+xml")
 
