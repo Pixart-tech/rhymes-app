@@ -49,6 +49,9 @@ def resolve_rhyme_svg_path(base_path: Optional[Path], rhyme_code: str):
 
    
 
+    # Ensure svg_files is defined for all code paths to avoid UnboundLocalError.
+    svg_files: List[Path] = []
+
     try:
         if candidate.is_file():
             return candidate
