@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -9,12 +9,19 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-import { SchoolFormValues, SchoolServiceType, SchoolProfile } from '../types/types';
+import {
+  GradeKey,
+  GradeMap,
+  SchoolFormValues,
+  SchoolProfile,
+  SchoolServiceType,
+  ServiceStatus,
+  ServiceStatusMap,
+} from '../types/types';
 import ImageCropperDialog from './ImageCropper';
 
 const getLogoPreview = (vals: SchoolFormValues) => vals.logo_url || '';
 const TOTAL_SECTIONS = 3;
-type GradeKey = 'toddler' | 'playgroup' | 'nursery' | 'lkg' | 'ukg';
 const DEFAULT_GRADE_LABELS: Record<GradeKey, string> = {
   toddler: 'Toddler',
   playgroup: 'Playgroup',
@@ -38,62 +45,93 @@ const SERVICE_OPTIONS: { value: SchoolServiceType; prompt: string }[] = [
 
 export const SCHOOL_SERVICE_KEYS: SchoolServiceType[] = ['id_cards', 'report_cards', 'certificates'];
 
-export const createEmptyServiceSelection = (): Record<SchoolServiceType, boolean> => ({
-  id_cards: false,
-  report_cards: false,
-  certificates: false
+const createDefaultServiceStatus = (): ServiceStatusMap => ({
+  id_cards: 'no',
+  report_cards: 'no',
+  certificates: 'no'
 });
 
-export const selectionFromServicesArray = (
-  services?: SchoolServiceType[] | null
-): Record<SchoolServiceType, boolean> => {
-  const selection = createEmptyServiceSelection();
-  services?.forEach((service) => {
-    if (SCHOOL_SERVICE_KEYS.includes(service)) {
-      selection[service] = true;
+const buildServiceStatusFromProfile = (profile?: SchoolProfile | null): ServiceStatusMap => {
+  const base = createDefaultServiceStatus();
+  if (profile?.service_status) {
+    for (const key of SCHOOL_SERVICE_KEYS) {
+      const value = profile.service_status[key];
+      if (value === 'yes' || value === 'no') {
+        base[key] = value;
+      }
     }
-  });
-  return selection;
+  } else if (profile?.service_type) {
+    for (const service of profile.service_type) {
+      if (SCHOOL_SERVICE_KEYS.includes(service)) {
+        base[service] = 'yes';
+      }
+    }
+  }
+  return base;
 };
 
-export const servicesArrayFromSelection = (
-  selection: Record<SchoolServiceType, boolean>
-): SchoolServiceType[] => {
-  return SCHOOL_SERVICE_KEYS.filter((key) => Boolean(selection?.[key]));
+const createDefaultGradeMap = (): GradeMap => {
+  return GRADE_RENDER_ORDER.reduce((acc, grade) => {
+    acc[grade] = { enabled: false, label: '' };
+    return acc;
+  }, {} as GradeMap);
+};
+
+const buildGradeMapFromProfile = (profile?: SchoolProfile | null): GradeMap => {
+  const base = createDefaultGradeMap();
+  if (profile?.grades) {
+    for (const grade of GRADE_RENDER_ORDER) {
+      const entry = profile.grades[grade];
+      if (entry) {
+        base[grade] = {
+          enabled: Boolean(entry.enabled),
+          label: entry.label?.trim() ?? ''
+        };
+      }
+    }
+  }
+  return base;
 };
 
 export const buildSchoolFormValuesFromProfile = (
   profile?: SchoolProfile | null
-): SchoolFormValues => ({
-  school_name: profile?.school_name ?? '',
-  logo_url: profile?.logo_url ?? null,
-  logo_file: null,
-  email: profile?.email ?? '',
-  phone: profile?.phone ?? '',
-  address: profile?.address ?? '',
-  tagline: profile?.tagline ?? '',
-  website: profile?.website ?? '',
-  principal_name: profile?.principal_name ?? '',
-  principal_email: profile?.principal_email ?? '',
-  principal_phone: profile?.principal_phone ?? '',
-  service_type: selectionFromServicesArray(profile?.service_type ?? null)
-});
+): SchoolFormValues => {
+  return {
+    school_name: profile?.school_name ?? '',
+    logo_url: profile?.logo_url ?? null,
+    logo_file: null,
+    email: profile?.email ?? '',
+    phone: profile?.phone ?? '',
+    address_line1: profile?.address_line1 ?? '',
+    city: profile?.city ?? '',
+    state: profile?.state ?? '',
+    pin: profile?.pin ?? '',
+    tagline: profile?.tagline ?? '',
+    website: profile?.website ?? '',
+    principal_name: profile?.principal_name ?? '',
+    principal_email: profile?.principal_email ?? '',
+    principal_phone: profile?.principal_phone ?? '',
+    service_status: buildServiceStatusFromProfile(profile),
+    grades: buildGradeMapFromProfile(profile)
+  };
+};
 
-export const buildSchoolFormData = (
-  values: SchoolFormValues,
-  selectedServices: SchoolServiceType[]
-): FormData => {
+export const buildSchoolFormData = (values: SchoolFormValues): FormData => {
   const formData = new FormData();
   formData.append('school_name', values.school_name);
   formData.append('email', values.email);
   formData.append('phone', values.phone);
-  formData.append('address', values.address);
+  formData.append('address_line1', values.address_line1);
+  formData.append('city', values.city);
+  formData.append('state', values.state);
+  formData.append('pin', values.pin);
   formData.append('tagline', values.tagline ?? '');
   formData.append('website', values.website ?? '');
   formData.append('principal_name', values.principal_name);
   formData.append('principal_email', values.principal_email);
   formData.append('principal_phone', values.principal_phone);
-  selectedServices.forEach((service) => formData.append('service_type', service));
+  formData.append('service_status', JSON.stringify(values.service_status));
+  formData.append('grades', JSON.stringify(values.grades));
   if (values.logo_file) {
     formData.append('logo_file', values.logo_file);
   }
@@ -111,43 +149,23 @@ interface AddressFields {
   pin: string;
 }
 
-const createEmptyAddressFields = (): AddressFields => ({
-  line1: '',
-  city: '',
-  state: '',
-  pin: ''
-});
 
-const parseAddressFields = (address?: string | null): AddressFields => {
-  if (!address) {
-    return createEmptyAddressFields();
-  }
-  const [line1 = '', city = '', stateAndPin = ''] = address.split(',').map((part) => part.trim());
-  let state = '';
-  let pin = '';
-  if (stateAndPin) {
-    const [statePart = '', pinPart = ''] = stateAndPin.split('-').map((part) => part.trim());
-    state = statePart;
-    pin = pinPart;
-  }
-  return {
-    line1,
-    city,
-    state,
-    pin
-  };
-};
 
-const composeAddress = (fields: AddressFields): string => {
+const composeAddress = (
+  line1: string,
+  city: string,
+  state: string,
+  pin: string
+): string => {
   const segments: string[] = [];
-  if (fields.line1.trim()) {
-    segments.push(fields.line1.trim());
+  if (line1.trim()) {
+    segments.push(line1.trim());
   }
-  if (fields.city.trim()) {
-    segments.push(fields.city.trim());
+  if (city.trim()) {
+    segments.push(city.trim());
   }
-  const stateSegment = fields.state.trim();
-  const pinSegment = fields.pin.trim();
+  const stateSegment = state.trim();
+  const pinSegment = pin.trim();
   if (stateSegment || pinSegment) {
     segments.push(
       pinSegment ? `${stateSegment}${stateSegment ? ' - ' : ''}${pinSegment}`.trim() : stateSegment
@@ -172,21 +190,6 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
   const [isCompressingLogo, setIsCompressingLogo] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [currentSection, setCurrentSection] = useState(1);
-  const [addressFields, setAddressFields] = useState<AddressFields>(() => parseAddressFields(initialValues.address));
-  const [gradeLabels, setGradeLabels] = useState<Record<GradeKey, string>>({
-    toddler: '',
-    playgroup: '',
-    nursery: '',
-    lkg: '',
-    ukg: '',
-  });
-  const [enabledGrades, setEnabledGrades] = useState<Record<GradeKey, boolean>>({
-    toddler: false,
-    playgroup: false,
-    nursery: false,
-    lkg: false,
-    ukg: false,
-  });
   const [linkPrincipalEmail, setLinkPrincipalEmail] = useState(
     Boolean(initialValues.email && initialValues.email === initialValues.principal_email)
   );
@@ -200,22 +203,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
     setLogoPreviewUrl(getLogoPreview(initialValues));
     setLinkPrincipalEmail(Boolean(initialValues.email && initialValues.email === initialValues.principal_email));
     setLinkPrincipalPhone(Boolean(initialValues.phone && initialValues.phone === initialValues.principal_phone));
-    setAddressFields(parseAddressFields(initialValues.address));
     setCurrentSection(1);
-    setGradeLabels({
-      toddler: '',
-      playgroup: '',
-      nursery: '',
-      lkg: '',
-      ukg: '',
-    });
-    setEnabledGrades({
-      toddler: false,
-      playgroup: false,
-      nursery: false,
-      lkg: false,
-      ukg: false,
-    });
     setInvalidFields(new Set());
   }, [initialValues]);
 
@@ -262,28 +250,42 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
       setValues((prev) => ({ ...prev, [field]: value }));
     };
 
-  const handleAddressFieldChange = (field: keyof AddressFields) => (event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value;
-    setAddressFields((prev) => {
-      const updated = { ...prev, [field]: value };
-      setValues((prevValues) => ({ ...prevValues, address: composeAddress(updated) }));
-      return updated;
-    });
-  };
+  const handleAddressFieldChange =
+    (field: keyof Pick<SchoolFormValues, 'address_line1' | 'city' | 'state' | 'pin'>) =>
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value;
+      setValues((prev) => ({ ...prev, [field]: value }));
+    };
   const handleGradeLabelChange =
     (grade: GradeKey) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       const value = event.target.value;
-      setGradeLabels((prev) => ({ ...prev, [grade]: value }));
+      setValues((prev) => ({
+        ...prev,
+        grades: {
+          ...prev.grades,
+          [grade]: {
+            ...prev.grades[grade],
+            label: value
+          }
+        }
+      }));
     };
 
   const handleGradeEnabledChange = (grade: GradeKey, checked: boolean) => {
-    setEnabledGrades(prev => ({ ...prev, [grade]: checked }));
-    if (checked) {
-      setGradeLabels(prev => ({ ...prev, [grade]: DEFAULT_GRADE_LABELS[grade] }));
-    } else {
-      setGradeLabels(prev => ({ ...prev, [grade]: '' }));
-    }
+    setValues((prev) => {
+      const current = prev.grades[grade];
+      return {
+        ...prev,
+        grades: {
+          ...prev.grades,
+          [grade]: {
+            enabled: checked,
+            label: checked ? current.label || DEFAULT_GRADE_LABELS[grade] : ''
+          }
+        }
+      };
+    });
   };
 
   const handleCropperClose = useCallback(() => {
@@ -354,12 +356,12 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
     };
   }, []);
 
-  const handleServiceSelection = (service: SchoolServiceType, checked: boolean) => {
+  const handleServiceSelection = (service: SchoolServiceType, status: ServiceStatus) => {
     setValues((prev) => ({
       ...prev,
-      service_type: {
-        ...prev.service_type,
-        [service]: checked
+      service_status: {
+        ...prev.service_status,
+        [service]: status
       }
     }));
   };
@@ -372,16 +374,16 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
   const validateSection1 = () => {
     const errors = new Set<string>();
     const fieldsToValidate: { [key: string]: string | undefined | null } = {
-        'school_name': values.school_name,
-        'email': values.email,
-        'phone': values.phone,
-        'address-line1': addressFields.line1,
-        'address-city': addressFields.city,
-        'address-state': addressFields.state,
-        'address-pin': addressFields.pin,
-        'principal_name': values.principal_name,
-        'principal_phone': values.principal_phone,
-        'principal_email': values.principal_email,
+        school_name: values.school_name,
+        email: values.email,
+        phone: values.phone,
+        'address-line1': values.address_line1,
+        'address-city': values.city,
+        'address-state': values.state,
+        'address-pin': values.pin,
+        principal_name: values.principal_name,
+        principal_phone: values.principal_phone,
+        principal_email: values.principal_email,
     };
 
     for (const [id, value] of Object.entries(fieldsToValidate)) {
@@ -407,7 +409,8 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
   const validateSection2 = () => {
     const errors = new Set<string>();
     for (const grade of GRADE_RENDER_ORDER) {
-        if (enabledGrades[grade] && !gradeLabels[grade]) {
+        const gradeEntry = values.grades[grade];
+        if (gradeEntry.enabled && !gradeEntry.label.trim()) {
             errors.add(`grade-${grade}`);
         }
     }
@@ -447,6 +450,19 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
         onClose={handleCropperClose}
       />
       <CardHeader className="space-y-6">
+        {onCancel && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onCancel}
+            disabled={submitting || isCompressingLogo}
+            className="flex items-center gap-1 text-gray-600 hover:text-gray-900 -ml-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+        )}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm text-gray-600">
             <span>Section {currentSection} of {TOTAL_SECTIONS}</span>
@@ -548,8 +564,8 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                       <Label htmlFor="website">Website</Label>
                       <Input
                         id="website"
-                        value={(values as any).website || ''}
-                        onChange={handleInputChange('website' as any)}
+                        value={values.website}
+                        onChange={handleInputChange('website')}
                         placeholder="https://www.yourschoolwebsite.com"
                         className={cn(invalidFields.has('website') && 'border-red-500')}
                       />
@@ -579,8 +595,8 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                       <Label htmlFor="address-line1">Address line 1</Label>
                       <Input
                         id="address-line1"
-                        value={addressFields.line1}
-                        onChange={handleAddressFieldChange('line1')}
+                        value={values.address_line1}
+                        onChange={handleAddressFieldChange('address_line1')}
                         required
                         placeholder="Door no, Street"
                         className={cn(invalidFields.has('address-line1') && 'border-red-500')}
@@ -591,7 +607,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                         <Label htmlFor="address-city">City</Label>
                         <Input
                           id="address-city"
-                          value={addressFields.city}
+                          value={values.city}
                           onChange={handleAddressFieldChange('city')}
                           required
                           className={cn(invalidFields.has('address-city') && 'border-red-500')}
@@ -601,7 +617,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                         <Label htmlFor="address-state">State</Label>
                         <Input
                           id="address-state"
-                          value={addressFields.state}
+                          value={values.state}
                           onChange={handleAddressFieldChange('state')}
                           required
                           className={cn(invalidFields.has('address-state') && 'border-red-500')}
@@ -611,7 +627,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                         <Label htmlFor="address-pin">PIN code</Label>
                         <Input
                           id="address-pin"
-                          value={addressFields.pin}
+                          value={values.pin}
                           onChange={handleAddressFieldChange('pin')}
                           required
                           className={cn(invalidFields.has('address-pin') && 'border-red-500')}
@@ -701,20 +717,20 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                     {GRADE_RENDER_ORDER.map((grade) => (
                       <div key={grade} className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <Checkbox
-                            id={`enable-grade-${grade}`}
-                            checked={enabledGrades[grade]}
-                            onCheckedChange={(checked: any) => handleGradeEnabledChange(grade, Boolean(checked))}
-                          />
+                        <Checkbox
+                          id={`enable-grade-${grade}`}
+                          checked={values.grades[grade].enabled}
+                          onCheckedChange={(checked: any) => handleGradeEnabledChange(grade, Boolean(checked))}
+                        />
                           <Label htmlFor={`grade-${grade}`}>{formatGradeLabelTitle(grade)}</Label>
                         </div>
                         <Input
                           id={`grade-${grade}`}
-                          value={gradeLabels[grade]}
+                          value={values.grades[grade].label}
                           onChange={handleGradeLabelChange(grade)}
-                          disabled={!enabledGrades[grade]}
+                          disabled={!values.grades[grade].enabled}
                           placeholder="Check to edit name"
-                          required={enabledGrades[grade]}
+                          required={values.grades[grade].enabled}
                           className={cn(invalidFields.has(`grade-${grade}`) && 'border-red-500')}
                         />
                       </div>
@@ -743,8 +759,8 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                             type="radio"
                             name={option.value}
                             value="yes"
-                            checked={values.service_type[option.value] === true}
-                            onChange={() => handleServiceSelection(option.value, true)}
+                            checked={values.service_status[option.value] === 'yes'}
+                            onChange={() => handleServiceSelection(option.value, 'yes')}
                           />
                           Yes
                         </label>
@@ -754,8 +770,8 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                             type="radio"
                             name={option.value}
                             value="no"
-                            checked={values.service_type[option.value] === false}
-                            onChange={() => handleServiceSelection(option.value, false)}
+                            checked={values.service_status[option.value] === 'no'}
+                            onChange={() => handleServiceSelection(option.value, 'no')}
                           />
                           No
                         </label>
@@ -770,6 +786,11 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
 
           <CardFooter className="mt-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-end">
             <div className="flex gap-2">
+              {onCancel && (
+                <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting || isCompressingLogo}>
+                  Cancel
+                </Button>
+              )}
               <Button type="button" variant="outline" onClick={handlePreviousSection} disabled={currentSection === 1}>
                 Previous
               </Button>
@@ -784,11 +805,6 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
             </div>
             {currentSection === TOTAL_SECTIONS && (
               <div className="flex flex-col gap-2 sm:flex-row">
-                {onCancel && (
-                  <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting || isCompressingLogo}>
-                    Cancel
-                  </Button>
-                )}
                 <Button type="submit" disabled={submitting || isCompressingLogo}>
                   {(submitting || isCompressingLogo) && <Loader2 className="h-4 w-4 animate-spin" />}
                   {mode === 'create' ? 'Create School' : 'Save Changes'}

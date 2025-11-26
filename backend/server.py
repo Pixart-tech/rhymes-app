@@ -332,7 +332,7 @@ class RhymeSelectionDetail(BaseModel):
 class SchoolWithSelections(School):
     total_selections: int = 0
     last_updated: Optional[datetime] = None
-    grades: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
+    grade_selections: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
 
 
 class WorkspaceUser(BaseModel):
@@ -353,6 +353,10 @@ class UserSessionResponse(BaseModel):
 class WorkspaceUserUpdatePayload(BaseModel):
     display_name: Optional[str] = Field(default=None, min_length=2)
     email: Optional[EmailStr] = None
+
+class PaginatedSchoolResponse(BaseModel):
+    schools: List[SchoolWithSelections]
+    total_count: int
 
 
 # Workspace endpoints
@@ -447,12 +451,39 @@ async def update_school_profile(
             return stripped or None
         return value
 
+    service_status_raw = raw_updates.pop("service_status", None)
+    grades_raw = raw_updates.pop("grades", None)
+    address_fields = ("address_line1", "city", "state", "pin")
+    address_overrides: Dict[str, Any] = {field: raw_updates.pop(field) for field in address_fields if field in raw_updates}
+
     updates: Dict[str, Any] = {}
     for key, value in raw_updates.items():
         if key == "service_type":
             updates[key] = school_profiles.normalize_service_types(value)
         else:
             updates[key] = _clean(value)
+
+    if address_overrides:
+        cleaned_address = {field: _clean(address_overrides[field]) for field in address_overrides}
+        updates.update(cleaned_address)
+        merged_address = {
+            field: cleaned_address[field] if field in cleaned_address else existing.get(field)
+            for field in address_fields
+        }
+     
+
+    if service_status_raw is not None:
+        normalized_status = school_profiles.normalize_service_status(service_status_raw)
+        updates["service_status"] = normalized_status
+        updates["service_type"] = school_profiles.services_from_status(normalized_status)
+    elif "service_type" in updates:
+        updates["service_status"] = {
+            service: ("yes" if service in updates["service_type"] else "no")
+            for service in school_profiles.SERVICE_TYPE_VALUES
+        }
+
+    if grades_raw is not None:
+        updates["grades"] = school_profiles.normalize_grades(grades_raw)
 
     if logo_blob is not None:
         updates["logo_blob"] = logo_blob
@@ -769,19 +800,32 @@ async def get_grade_status(school_id: str):
     return status
 
 
-@api_router.get("/admin/schools", response_model=List[SchoolWithSelections])
-async def get_all_schools_with_selections(authorization: Optional[str] = Header(None)):
-    """Return all schools with their rhyme selections grouped by grade."""
+@api_router.get("/admin/schools", response_model=PaginatedSchoolResponse)
+async def get_all_schools_with_selections(
+    page: int = 1, limit: int = 10, authorization: Optional[str] = Header(None)
+):
+    """Return all schools with their rhyme selections grouped by grade, with pagination."""
     decoded_token = _verify_and_decode_token(authorization)
     user_record = _ensure_user_document(decoded_token)
     if user_record.get("role") != "super-admin":
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
-    school_docs_query = db.collection("schools").order_by("timestamp", direction=firestore.Query.DESCENDING)
-    school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
+    # Fetch total count first
+    total_schools_query = db.collection("schools")
+    total_count = len(list(total_schools_query.stream()))
+
+    # Apply pagination to the main query
+    offset = (page - 1) * limit
+    school_docs_query = (
+        db.collection("schools")
+        .order_by("timestamp", direction=firestore.Query.DESCENDING)
+    )
+    # Get all docs first then apply skip and limit
+    all_school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
+    school_docs = all_school_docs[offset : offset + limit]
 
     if not school_docs:
-        return []
+        return PaginatedSchoolResponse(schools=[], total_count=total_count)
 
     school_ids = [doc.get("school_id") for doc in school_docs if doc.get("school_id")]
 
@@ -875,11 +919,11 @@ async def get_all_schools_with_selections(authorization: Optional[str] = Header(
                 **base_school.dict(),
                 total_selections=total_selections,
                 last_updated=last_updated,
-                grades=grade_map,
+                grade_selections=grade_map,
             )
         )
 
-    return schools_with_details
+    return PaginatedSchoolResponse(schools=schools_with_details, total_count=total_count)
 
 
 @api_router.delete("/admin/schools/{school_id}")

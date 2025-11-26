@@ -1,17 +1,33 @@
 
 export type SchoolServiceType = 'id_cards' | 'report_cards' | 'certificates';
 
+export type ServiceStatus = 'yes' | 'no';
+export type ServiceStatusMap = Record<SchoolServiceType, ServiceStatus>;
+
+export type GradeKey = 'toddler' | 'playgroup' | 'nursery' | 'lkg' | 'ukg';
+export interface GradeSetting {
+  enabled: boolean;
+  label: string;
+}
+export type GradeMap = Record<GradeKey, GradeSetting>;
+
 export interface SchoolProfile {
   school_id: string;
   school_name: string;
   logo_url?: string | null;
   email?: string | null;
   phone?: string | null;
-  address?: string | null;
+  address_line1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pin?: string | null;
   tagline?: string | null;
   principal_name?: string | null;
   principal_email?: string | null;
   principal_phone?: string | null;
+  website?: string | null;
+  service_status?: ServiceStatusMap;
+  grades?: GradeMap;
   service_type?: SchoolServiceType[];
   created_by_user_id?: string | null;
   created_by_email?: string | null;
@@ -24,12 +40,17 @@ export interface SchoolFormValues {
   logo_file?: File | null;
   email: string;
   phone: string;
-  address: string;
+  address_line1: string;
+  city: string;
+  state: string;
+  pin: string;
   tagline?: string;
+  website: string;
   principal_name: string;
   principal_email: string;
   principal_phone: string;
-  service_type: Record<SchoolServiceType, boolean>;
+  service_status: ServiceStatusMap;
+  grades: GradeMap;
 }
 
 export interface RhymeSelectionDetail {
@@ -45,7 +66,6 @@ export interface RhymeSelectionDetail {
 export interface AdminSchoolProfile extends SchoolProfile {
   total_selections: number;
   last_updated?: string | null;
-  grades: Record<string, RhymeSelectionDetail[]>;
 }
 
 export interface WorkspaceUserUpdatePayload {

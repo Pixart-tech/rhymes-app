@@ -3,33 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from firebase_admin import auth as firebase_auth
 from pydantic import BaseModel, Field
 
+from .models import School
 
-class School(BaseModel):
-    """Representation of a school registered with the application."""
 
-    id: str
-    school_id: str
-    school_name: str
-    logo_url: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    address: Optional[str] = None
-    tagline: Optional[str] = None
-    principal_name: Optional[str] = None
-    principal_email: Optional[str] = None
-    principal_phone: Optional[str] = None
-    service_type: Optional[List[str]] = None
-    created_by_user_id: Optional[str] = None
-    created_by_email: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
 class SchoolCreate(BaseModel):
@@ -63,7 +45,7 @@ def create_auth_router(db) -> APIRouter:
 
         if doc_snapshot.exists:
             existing = doc_snapshot.to_dict()
-            return School(**existing)
+            return build_school_from_record(existing)
 
         school_obj = School(id=uid, school_id=uid, school_name=school_name)
         doc_ref.set(school_obj.dict())

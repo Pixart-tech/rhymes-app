@@ -23,7 +23,6 @@ import {
   SchoolForm,
   type SchoolFormSubmitPayload,
   buildSchoolFormValuesFromProfile,
-  servicesArrayFromSelection,
   buildSchoolFormData
 } from '../components/SchoolProfileForm';
 import { API_BASE_URL } from '../lib/utils';
@@ -2554,8 +2553,8 @@ export function RhymesWorkflowApp() {
       if (!school) {
         return;
       }
-      const selectedServices = servicesArrayFromSelection(values.service_type);
-      if (selectedServices.length === 0) {
+      const hasSelectedService = Object.values(values.service_status).some((status) => status === 'yes');
+      if (!hasSelectedService) {
         toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
         return;
       }
@@ -2565,7 +2564,7 @@ export function RhymesWorkflowApp() {
         if (!token) {
           throw new Error('Unable to fetch Firebase token');
         }
-        const formData = buildSchoolFormData(values, selectedServices);
+        const formData = buildSchoolFormData(values);
         const response = await axios.put<SchoolProfile>(`${API}/schools/${school.school_id}`, formData, {
           headers: { Authorization: `Bearer ${token}` }
         });

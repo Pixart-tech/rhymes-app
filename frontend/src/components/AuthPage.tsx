@@ -33,9 +33,8 @@ import {
 import {
   SchoolForm,
   SchoolFormSubmitPayload,
-  servicesArrayFromSelection,
-  selectionFromServicesArray,
-  buildSchoolFormData
+  buildSchoolFormData,
+  buildSchoolFormValuesFromProfile
 } from './SchoolProfileForm';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
@@ -76,6 +75,11 @@ interface AuthPageProps {
   onAuth: (selection: { school: SchoolProfile; user: WorkspaceUserProfile }) => void;
 }
 
+interface PaginatedAdminSchoolsResponse {
+  schools: AdminSchoolProfile[];
+  totalCount: number;
+}
+
 const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
   const { user, signInWithGoogle, loading: authLoading, getIdToken } = useAuth();
   const [workspaceUser, setWorkspaceUser] = useState<WorkspaceUserProfile | null>(null);
@@ -88,6 +92,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
   const [adminSchools, setAdminSchools] = useState<AdminSchoolProfile[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [schoolsPerPage] = useState(10);
+  const [totalAdminSchoolsCount, setTotalAdminSchoolsCount] = useState(0);
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [profileForm, setProfileForm] = useState({ display_name: '', email: '' });
   const [profileSubmitting, setProfileSubmitting] = useState(false);
@@ -177,7 +184,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     setProfileDialogOpen(false);
   }, [workspaceUser]);
 
-  const fetchAdminSchools = useCallback(async () => {
+  const fetchAdminSchools = useCallback(async (page: number, limit: number) => {
     if (!workspaceUser || workspaceUser.role !== 'super-admin') {
       return;
     }
@@ -188,10 +195,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
       if (!token) {
         throw new Error('Unable to fetch Firebase token');
       }
-      const response = await axios.get<AdminSchoolProfile[]>(`${API}/admin/schools`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setAdminSchools(response.data);
+      const response = await axios.get<PaginatedAdminSchoolsResponse>(
+        `${API}/admin/schools?page=${page}&limit=${limit}`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      setAdminSchools(response.data.schools);
+      setTotalAdminSchoolsCount(response.data.totalCount);
     } catch (error) {
       console.error('Failed to load admin schools', error);
       setAdminError('Unable to load the admin school list. Please try again.');
@@ -203,14 +214,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
 
   useEffect(() => {
     if (workspaceUser?.role === 'super-admin') {
-      void fetchAdminSchools();
+      void fetchAdminSchools(currentPage, schoolsPerPage);
     } else {
       setAdminSchools([]);
       setAdminError(null);
       setAdminLoading(false);
       setDeletingSchoolId(null);
     }
-  }, [workspaceUser, fetchAdminSchools]);
+  }, [workspaceUser, fetchAdminSchools, currentPage, schoolsPerPage]);
 
   useEffect(() => {
     if (allSchoolsForLogos.length === 0) {
@@ -279,19 +290,20 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
   }, [allSchoolsForLogos, logoMap, resolveDirectLogoUrl]);
 
   const buildFormValues = useCallback(
-    (school?: SchoolProfile): SchoolFormValues => ({
-      school_name: school?.school_name ?? '',
-      logo_url: school?.logo_url ?? null,
-      logo_file: null,
-      email: school?.email ?? workspaceUser?.email ?? user?.email ?? '',
-      phone: school?.phone ?? '',
-      address: school?.address ?? '',
-      tagline: school?.tagline ?? '',
-      principal_name: school?.principal_name ?? '',
-      principal_email: school?.principal_email ?? school?.email ?? workspaceUser?.email ?? user?.email ?? '',
-      principal_phone: school?.principal_phone ?? school?.phone ?? '',
-      service_type: selectionFromServicesArray(school?.service_type)
-    }),
+    (school?: SchoolProfile): SchoolFormValues => {
+      const baseValues = buildSchoolFormValuesFromProfile(school);
+      return {
+        ...baseValues,
+        email: school?.email ?? workspaceUser?.email ?? user?.email ?? baseValues.email,
+        principal_email:
+          school?.principal_email ??
+          school?.email ??
+          workspaceUser?.email ??
+          user?.email ??
+          baseValues.principal_email,
+        principal_phone: school?.principal_phone ?? school?.phone ?? baseValues.principal_phone
+      };
+    },
     [workspaceUser, user]
   );
 
@@ -438,8 +450,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
       if (!workspaceUser) {
         return;
       }
-      const selectedServices = servicesArrayFromSelection(values.service_type);
-      if (selectedServices.length === 0) {
+      const hasSelectedService = Object.values(values.service_status).some(
+        (status) => status === 'yes'
+      );
+      if (!hasSelectedService) {
         toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
         return;
       }
@@ -450,7 +464,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
           throw new Error('Unable to fetch Firebase token');
         }
 
-        const formData = buildSchoolFormData(values, selectedServices);
+        const formData = buildSchoolFormData(values);
         const response = await axios.post<SchoolProfile>(`${API}/schools`, formData, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -484,8 +498,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
       if (!editingSchool) {
         return;
       }
-      const selectedServices = servicesArrayFromSelection(values.service_type);
-      if (selectedServices.length === 0) {
+      const hasSelectedService = Object.values(values.service_status).some(
+        (status) => status === 'yes'
+      );
+      if (!hasSelectedService) {
         toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
         return;
       }
@@ -496,7 +512,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
           throw new Error('Unable to fetch Firebase token');
         }
 
-        const formData = buildSchoolFormData(values, selectedServices);
+        const formData = buildSchoolFormData(values);
         const response = await axios.put<SchoolProfile>(`${API}/schools/${editingSchool.school_id}`, formData, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -687,6 +703,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                 Last update {formatDate(adminStats.lastUpdated)}
               </span>
             </div>
+            <div className="rounded-2xl bg-white/20 p-4 backdrop-blur">
+              <p className="text-sm text-white/80">Total schools</p>
+              <p className="text-3xl font-semibold">{totalAdminSchoolsCount}</p>
+              <span className="mt-2 inline-flex items-center gap-1 text-xs text-white/80">
+                <School className="h-3.5 w-3.5" />
+                All schools currently listed
+              </span>
+            </div>
           </CardContent>
         </Card>
 
@@ -728,7 +752,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    void fetchAdminSchools();
+                    void fetchAdminSchools(currentPage, schoolsPerPage);
                   }}
                   disabled={adminLoading}
                 >
@@ -752,106 +776,127 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                 {emptyStateMessage}
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-2xl border border-gray-100">
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        School
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Services
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Selections
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Grades
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Last updated
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 bg-white">
-                    {schoolsToRender.map((school) => {
-                      const logoSrc = getLogoSrc(school, logoMap);
-                      const gradeCount = Object.keys(school.grades || {}).length;
-                      const isDeleting = deletingSchoolId === school.school_id;
-                      const services = school.service_type ?? [];
-
-                      return (
-                        <tr key={school.school_id} className="hover:bg-orange-50/40">
-                          <td className="px-4 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-50 text-orange-500">
-                                {logoSrc ? (
-                                  <img
-                                    src={logoSrc}
-                                    alt={school.school_name}
-                                    className="h-11 w-11 rounded-full object-cover"
-                                  />
-                                ) : (
-                                  <School className="h-5 w-5" />
-                                )}
-                              </div>
-                              <div>
-                                <div className="font-semibold text-gray-800">{school.school_name}</div>
-                                <p className="text-xs text-gray-500">ID: {school.school_id}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="flex flex-wrap gap-1">
-                              {services.length === 0
-                                ? '—'
-                                : services.map((service) => (
-                                    <span key={service} className="rounded-full bg-orange-50 px-2 py-0.5 text-xs text-orange-700">
-                                      {SERVICE_LABELS[service]}
-                                    </span>
-                                  ))}
-                            </div>
-                          </td>
-                          <td className="px-4 py-4 text-gray-700">{school.total_selections ?? 0}</td>
-                          <td className="px-4 py-4 text-gray-700">{gradeCount}</td>
-                          <td className="px-4 py-4 text-gray-700">{formatDate(school.last_updated ?? school.timestamp ?? null)}</td>
-                          <td className="px-4 py-4">
-                            <div className="flex flex-wrap gap-2">
-                              <Button variant="secondary" size="sm" onClick={() => handleSchoolSelect(school)}>
-                                <Eye className="h-4 w-4" />
-                                Open
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setEditingSchool(school);
-                                  setView('edit');
-                                }}
-                              >
-                                <Edit3 className="h-4 w-4" />
-                                Edit
-                              </Button>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => void handleAdminDelete(school.school_id)}
-                                disabled={isDeleting}
-                              >
-                                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                                Delete
-                              </Button>
-                            </div>
-                          </td>
+              <><div className="overflow-x-auto rounded-2xl border border-gray-100">
+                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            School
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            Services
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            Selections
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            Grades
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            Last updated
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            Actions
+                          </th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                        {schoolsToRender.map((school) => {
+                          const logoSrc = getLogoSrc(school, logoMap);
+                          const gradeCount = Object.values(school.grades || {}).filter(
+                            (grade) => grade.enabled
+                          ).length;
+                          const isDeleting = deletingSchoolId === school.school_id;
+                          const services = school.service_type ?? [];
+
+                          return (
+                            <tr key={school.school_id} className="hover:bg-orange-50/40">
+                              <td className="px-4 py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-50 text-orange-500">
+                                    {logoSrc ? (
+                                      <img
+                                        src={logoSrc}
+                                        alt={school.school_name}
+                                        className="h-11 w-11 rounded-full object-cover" />
+                                    ) : (
+                                      <School className="h-5 w-5" />
+                                    )}
+                                  </div>
+                                  <div>
+                                    <div className="font-semibold text-gray-800">{school.school_name}</div>
+                                    <p className="text-xs text-gray-500">ID: {school.school_id}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <div className="flex flex-wrap gap-1">
+                                  {services.length === 0
+                                    ? '—'
+                                    : services.map((service) => (
+                                      <span key={service} className="rounded-full bg-orange-50 px-2 py-0.5 text-xs text-orange-700">
+                                        {SERVICE_LABELS[service]}
+                                      </span>
+                                    ))}
+                                </div>
+                              </td>
+                              <td className="px-4 py-4 text-gray-700">{school.total_selections ?? 0}</td>
+                              <td className="px-4 py-4 text-gray-700">{gradeCount}</td>
+                              <td className="px-4 py-4 text-gray-700">{formatDate(school.last_updated ?? school.timestamp ?? null)}</td>
+                              <td className="px-4 py-4">
+                                <div className="flex flex-wrap gap-2">
+                                  <Button variant="secondary" size="sm" onClick={() => handleSchoolSelect(school)}>
+                                    <Eye className="h-4 w-4" />
+                                    Open
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setEditingSchool(school);
+                                      setView('edit');
+                                    } }
+                                  >
+                                    <Edit3 className="h-4 w-4" />
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => void handleAdminDelete(school.school_id)}
+                                    disabled={isDeleting}
+                                  >
+                                    {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                    Delete
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div><div className="flex items-center justify-between space-x-2 py-4">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <div className="text-sm font-medium">
+                        Page {currentPage} of {Math.ceil(totalAdminSchoolsCount / schoolsPerPage)}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage((prev) => Math.min(Math.ceil(totalAdminSchoolsCount / schoolsPerPage), prev + 1))}
+                        disabled={currentPage === Math.ceil(totalAdminSchoolsCount / schoolsPerPage)}
+                      >
+                        Next
+                      </Button>
+                    </div></>
             )}
           </CardContent>
         </Card>

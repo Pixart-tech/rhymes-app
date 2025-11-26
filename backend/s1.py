@@ -254,7 +254,7 @@ class RhymeSelectionDetail(BaseModel):
 class SchoolWithSelections(School):
     total_selections: int = 0
     last_updated: Optional[datetime] = None
-    grades: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
+    grade_selections: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
 
 
 # Authentication endpoints
@@ -649,7 +649,7 @@ async def get_all_schools_with_selections():
                 **base_payload,
                 total_selections=total_selections,
                 last_updated=last_updated,
-                grades=grade_map,
+                grade_selections=grade_map,
             )
         )
 
