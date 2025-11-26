@@ -1645,21 +1645,25 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
           return;
         }
 
-        const pageIndex = numericIndex;
         const pagesValue = parsePagesValue(selection?.pages);
-        const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
+        const span = getPageSpan(pagesValue);
 
-        if (pagesValue === 0.5) {
-          const slot = normalizeSlot(selection?.position, 'top') || 'top';
-          entry[slot] = true;
-        } else {
-          entry.top = true;
-          entry.bottom = true;
+        for (let offset = 0; offset < span; offset += 1) {
+          const pageIndex = numericIndex + offset;
+          const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
+
+          if (pagesValue === 0.5) {
+            const slot = normalizeSlot(selection?.position, 'top') || 'top';
+            entry[slot] = true;
+          } else {
+            entry.top = true;
+            entry.bottom = true;
+          }
+
+          usageMap.set(pageIndex, entry);
+          highestIndex = Math.max(highestIndex, pageIndex);
+          lowestIndex = Math.min(lowestIndex, pageIndex);
         }
-
-        usageMap.set(pageIndex, entry);
-        highestIndex = Math.max(highestIndex, pageIndex);
-        lowestIndex = Math.min(lowestIndex, pageIndex);
       });
     }
 
@@ -1775,6 +1779,30 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     return normalized === 'top' || normalized === 'bottom' ? normalized : fallback;
   };
 
+  const getPageSpan = (pagesValue) => {
+    const parsed = parsePagesValue(pagesValue);
+
+    if (parsed === null || parsed <= 0.5) {
+      return 1;
+    }
+
+    return Math.max(1, Math.floor(parsed));
+  };
+
+  const selectionCoversPage = (selection, targetPageIndex) => {
+    if (!selection) return false;
+
+    const startIndex = Number(selection?.page_index);
+    if (!Number.isFinite(startIndex)) {
+      return false;
+    }
+
+    const span = getPageSpan(selection?.pages);
+    const endIndex = startIndex + span - 1;
+
+    return targetPageIndex >= startIndex && targetPageIndex <= endIndex;
+  };
+
   const parsePagesValue = (pagesValue) => {
     if (typeof pagesValue === 'number') {
       return Number.isFinite(pagesValue) ? pagesValue : null;
@@ -1813,13 +1841,27 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const computeRemovalsForSelection = ({ selections, pageIndex, normalizedPosition, newPages }) => {
+    const newSpan = getPageSpan(newPages);
+    const newStart = pageIndex;
+    const newEnd = pageIndex + newSpan - 1;
+
     if (!Array.isArray(selections) || selections.length === 0) {
       return [];
     }
 
     return selections.filter(existing => {
       if (!existing) return false;
-      if (Number(existing.page_index) !== Number(pageIndex)) {
+      const existingStart = Number(existing.page_index);
+
+      if (!Number.isFinite(existingStart)) {
+        return false;
+      }
+
+      const existingSpan = getPageSpan(existing.pages);
+      const existingEnd = existingStart + existingSpan - 1;
+      const overlaps = existingStart <= newEnd && newStart <= existingEnd;
+
+      if (!overlaps) {
         return false;
       }
 
@@ -2121,15 +2163,13 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
     if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) return pageRhymes;
 
-    // Double-page rhymes (occupy both containers and mirror the SVG)
+    // Rhymes that span multiple pages should occupy each covered page individually
     for (const r of selectedRhymes) {
       if (!r) continue;
-      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+      if (!selectionCoversPage(r, Number(currentPageIndex))) continue;
       const pages = parsePagesValue(r.pages);
-      if (pages === 2 || pages === 2.0) {
+      if (pages !== null && pages > 1) {
         pageRhymes.top = r;
-        pageRhymes.bottom = r;
-        pageRhymes.layout = 'double';
         return pageRhymes;
       }
     }
@@ -2137,7 +2177,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     // Prefer full-page rhyme
     for (const r of selectedRhymes) {
       if (!r) continue;
-      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+      if (!selectionCoversPage(r, Number(currentPageIndex))) continue;
       const pages = parsePagesValue(r.pages);
       if (pages === 1) {
         pageRhymes.top = r;
@@ -2149,7 +2189,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     // Place half-page rhymes by explicit position (do not infer)
     for (const r of selectedRhymes) {
       if (!r) continue;
-      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+      if (!selectionCoversPage(r, Number(currentPageIndex))) continue;
       const pages = parsePagesValue(r.pages);
       if (pages === 0.5) {
         const pos = normalizeSlot(r.position, 'top') || 'top';
