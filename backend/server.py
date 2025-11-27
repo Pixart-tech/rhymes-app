@@ -701,25 +701,34 @@ async def delete_school(school_id: str):
     }
 
 
-@api_router.get("/rhymes/svg/{rhyme_code}")
-async def get_rhyme_svg(rhyme_code: str):
-    """Return SVG markup for the requested rhyme.
+def _localize_rhyme_svg_markup(svg_markup: str, source_path: Optional[Path], rhyme_code: str) -> str:
+    """Inline external assets for rhyme SVG markup, falling back safely."""
 
-    When ``RHYME_SVG_BASE_PATH`` is configured the endpoint first attempts to
-    resolve ``<rhyme_code>.svg`` within that directory so real artwork from a
-    network share or mounted volume can be exercised. If the environment
-    variable is unset or the file is missing, the lookup falls back to the
-    repository ``images`` directory before ultimately generating the placeholder
-    SVG so the frontend continues to work for missing assets.
-    """
+    try:
+        return _localize_svg_image_assets(
+            svg_markup,
+            source_path or Path("."),
+            rhyme_code,
+            inline_mode=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        logger.warning(
+            "Unable to inline image assets for rhyme %s from %s: %s",
+            rhyme_code,
+            source_path,
+            exc,
+        )
+        return svg_markup
 
-    svg_content: Optional[str] = None
-    svg_pages: List[str] = []
+
+@lru_cache(maxsize=256)
+def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
+    """Return a cached list of localised SVG pages for ``rhyme_code``."""
 
     svg_path = _resolve_rhyme_svg_path(rhyme_code)
-    
 
-    svg_source_path: Optional[Path] = None
+    svg_pages: List[str] = []
+
     if svg_path is not None:
         # svg_path may be a single Path, a directory Path, or a list of Path
         candidates: List[Path] = []
@@ -743,34 +752,39 @@ async def get_rhyme_svg(rhyme_code: str):
                 )
                 continue
 
-            localized_markup = _localize_svg_image_assets(
-                svg_markup, candidate, rhyme_code, inline_mode=True
-            )
-
+            localized_markup = _localize_rhyme_svg_markup(svg_markup, candidate, rhyme_code)
             svg_pages.append(localized_markup)
-            svg_source_path = candidate
 
     if svg_pages:
-        if len(svg_pages) == 1:
-            svg_content = svg_pages[0]
-        else:
-            return JSONResponse({"pages": svg_pages})
+        return svg_pages
 
-    if svg_content is None:
-        try:
-            svg_content = generate_rhyme_svg(rhyme_code)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Rhyme not found")
-    else:
-        # Pass a Path (if available) to the localizer; fall back to base path
-        localize_source = svg_source_path or (svg_path if isinstance(svg_path, Path) else None)
-        if localize_source is None:
-            # No concrete file path available; call localizer with a harmless placeholder
-            svg_content = _localize_svg_image_assets(svg_content, Path("."), rhyme_code, inline_mode=True)
-        else:
-            svg_content = _localize_svg_image_assets(svg_content, localize_source, rhyme_code, inline_mode=True)
+    try:
+        document = _load_rhyme_svg_markup(rhyme_code)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Rhyme not found") from exc
 
-    return Response(content=svg_content, media_type="image/svg+xml")
+    localized_markup = _localize_rhyme_svg_markup(
+        document.markup, document.source_path, rhyme_code
+    )
+
+    return [localized_markup]
+
+
+@api_router.get("/rhymes/svg/{rhyme_code}")
+async def get_rhyme_svg(rhyme_code: str):
+    """Return all SVG pages for the requested rhyme as a JSON list.
+
+    The results are cached to avoid repeated filesystem reads and asset
+    localisation work, ensuring multi-page rhymes can be stepped through on the
+    frontend without repeatedly hitting the backend.
+    """
+
+    svg_pages = _get_cached_rhyme_pages(rhyme_code)
+
+    if not svg_pages:
+        raise HTTPException(status_code=404, detail="Rhyme not found")
+
+    return JSONResponse({"pages": svg_pages})
 
 
 # @api_router.get("/cover-assets/manifest")
