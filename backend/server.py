@@ -736,25 +736,25 @@ async def get_rhyme_svg(rhyme_code: str):
 
         for candidate in candidates:
             try:
-                svg_markup = candidate.read_text(encoding="utf-8")
+                svg_content = candidate.read_text(encoding="utf-8")
             except OSError as exc:
                 logger.error(
                     "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, candidate, exc
                 )
                 continue
 
-            localized_markup = _localize_svg_image_assets(
-                svg_markup, candidate, rhyme_code, inline_mode=True
-            )
+            # localized_markup = _localize_svg_image_assets(
+            #     svg_markup, candidate, rhyme_code, inline_mode=True
+            # )
 
-            svg_pages.append(localized_markup)
+            # svg_pages.append(localized_markup)
             svg_source_path = candidate
 
-    if svg_pages:
-        if len(svg_pages) == 1:
-            svg_content = svg_pages[0]
-        else:
-            return JSONResponse({"pages": svg_pages})
+    # if svg_pages:
+    #     if len(svg_pages) == 1:
+    #         svg_content = svg_pages[0]
+    #     else:
+    #         return JSONResponse({"pages": svg_pages})
 
     if svg_content is None:
         try:
