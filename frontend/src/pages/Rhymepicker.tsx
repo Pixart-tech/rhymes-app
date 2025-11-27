@@ -1291,9 +1291,6 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
         {sortedGroups.map(([pageKey, rhymes]) => {
           if (!rhymes || rhymes.length === 0) return null;
           const numericKey = Number.parseFloat(pageKey);
-          if (Number.isFinite(numericKey) && Math.abs(numericKey - 0.5) < 0.001) {
-            return null;
-          }
           const badgeLabel = Number.isFinite(numericKey)
             ? (Math.abs(numericKey - Math.round(numericKey)) < 0.001
               ? numericKey.toFixed(1)
@@ -1382,51 +1379,56 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   }, [selectedRhymes]);
 
   const extractImageUrlsFromSvg = useCallback((svgContent) => {
-    if (!svgContent || typeof svgContent !== 'string') {
-      return [];
-    }
+    const contents = Array.isArray(svgContent) ? svgContent : [svgContent];
 
     if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
       return [];
     }
 
     try {
-      const parser = new window.DOMParser();
-      const doc = parser.parseFromString(svgContent, 'image/svg+xml');
-      const imageNodes = doc.querySelectorAll('image, img');
       const urls = new Set();
 
-      imageNodes.forEach((node) => {
-        if (!node) {
+      contents.forEach((content) => {
+        if (!content || typeof content !== 'string') {
           return;
         }
 
-        const candidates = [
-          node.getAttribute('href'),
-          node.getAttribute('xlink:href'),
-          node.getAttribute('data-href'),
-          node.getAttribute('src')
-        ];
+        const parser = new window.DOMParser();
+        const doc = parser.parseFromString(content, 'image/svg+xml');
+        const imageNodes = doc.querySelectorAll('image, img');
 
-        candidates.forEach((candidate) => {
-          if (typeof candidate !== 'string') {
+        imageNodes.forEach((node) => {
+          if (!node) {
             return;
           }
 
-          const trimmed = candidate.trim();
+          const candidates = [
+            node.getAttribute('href'),
+            node.getAttribute('xlink:href'),
+            node.getAttribute('data-href'),
+            node.getAttribute('src')
+          ];
 
-          if (!trimmed || /^data:/i.test(trimmed)) {
-            return;
-          }
+          candidates.forEach((candidate) => {
+            if (typeof candidate !== 'string') {
+              return;
+            }
 
-          if (trimmed.startsWith('//') && typeof window !== 'undefined' && window.location?.protocol) {
-            urls.add(`${window.location.protocol}${trimmed}`);
-            return;
-          }
+            const trimmed = candidate.trim();
 
-          if (/^https?:/i.test(trimmed)) {
-            urls.add(trimmed);
-          }
+            if (!trimmed || /^data:/i.test(trimmed)) {
+              return;
+            }
+
+            if (trimmed.startsWith('//') && typeof window !== 'undefined' && window.location?.protocol) {
+              urls.add(`${window.location.protocol}${trimmed}`);
+              return;
+            }
+
+            if (/^https?:/i.test(trimmed)) {
+              urls.add(trimmed);
+            }
+          });
         });
       });
 
@@ -1439,7 +1441,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   const prefetchImageAssets = useCallback(
     async (svgMarkup) => {
-      if (!svgMarkup || typeof svgMarkup !== 'string') {
+      if (!svgMarkup || (typeof svgMarkup !== 'string' && !Array.isArray(svgMarkup))) {
         return;
       }
 
@@ -1482,6 +1484,79 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     [extractImageUrlsFromSvg]
   );
 
+  const normalizeSvgPages = useCallback(
+    (svgContent, code = 'rhyme') => {
+      if (!svgContent) {
+        return [];
+      }
+
+      const sanitizePage = (page, index) =>
+        sanitizeRhymeSvgContent(page, index !== undefined ? `${code}-${index}` : code);
+
+      if (Array.isArray(svgContent)) {
+        return svgContent
+          .map((page, index) => (typeof page === 'string' ? sanitizePage(page, index) : null))
+          .filter((page) => typeof page === 'string' && page.trim().length > 0);
+      }
+
+      if (typeof svgContent === 'string') {
+        const trimmed = svgContent.trim();
+        return trimmed ? [sanitizePage(trimmed)] : [];
+      }
+
+      return [];
+    },
+    []
+  );
+
+  const getSvgPages = useCallback(
+    (selection) => normalizeSvgPages(selection?.svgContent, selection?.code || 'rhyme'),
+    [normalizeSvgPages]
+  );
+
+  const hasSvgPages = useCallback(
+    (svgContent) => normalizeSvgPages(svgContent).length > 0,
+    [normalizeSvgPages]
+  );
+
+  const getPageOffsetForSelection = useCallback(
+    (selection, targetPageIndex) => {
+      if (!selection) return 0;
+
+      const startIndex = Number(selection?.page_index);
+      const span = getPageSpan(selection?.pages);
+
+      if (!Number.isFinite(startIndex)) {
+        return 0;
+      }
+
+      const offset = targetPageIndex - startIndex;
+      if (offset < 0 || offset >= span) {
+        return 0;
+      }
+
+      return offset;
+    },
+    [getPageSpan]
+  );
+
+  const getSvgForSelectionPage = useCallback(
+    (selection, targetPageIndex) => {
+      const pages = getSvgPages(selection);
+      if (pages.length === 0) return '';
+
+      const startIndex = Number(selection?.page_index);
+      const offset = Number.isFinite(startIndex) ? targetPageIndex - startIndex : 0;
+
+      if (offset < 0 || offset >= pages.length) {
+        return pages[0];
+      }
+
+      return pages[offset];
+    },
+    [getSvgPages]
+  );
+
   const fetchSvgForRhyme = useCallback(
     async (rhymeCode) => {
       const code = typeof rhymeCode === 'string' ? rhymeCode : rhymeCode?.code;
@@ -1510,12 +1585,14 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         .get(`${API}/rhymes/svg/${code}`, { responseType: 'arraybuffer' })
         .then((response) => {
           const decoded = decodeSvgPayload(response.data, response.headers);
-          const svgContent =
+          const svgPages = normalizeSvgPages(
             decoded && typeof decoded === 'object' && Array.isArray(decoded.pages)
-              ? decoded.pages.map((page, index) => sanitizeRhymeSvgContent(page, `${code}-${index}`))
-              : sanitizeRhymeSvgContent(decoded, code);
-          svgCacheRef.current.set(code, svgContent);
-          return svgContent;
+              ? decoded.pages
+              : decoded,
+            code
+          );
+          svgCacheRef.current.set(code, svgPages);
+          return svgPages;
         })
         .catch((error) => {
           console.error('Error fetching rhyme SVG:', error);
@@ -1554,10 +1631,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         (rhyme) => Number(rhyme?.page_index) === normalizedPageIndex
       );
 
-      const missingRhymes = rhymesForPage.filter((rhyme) => {
-        const content = typeof rhyme?.svgContent === 'string' ? rhyme.svgContent.trim() : '';
-        return content.length === 0;
-      });
+      const missingRhymes = rhymesForPage.filter((rhyme) => !hasSvgPages(rhyme?.svgContent));
 
       if (missingRhymes.length === 0) {
         return;
@@ -1580,7 +1654,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
           })
         );
 
-        const successful = results.filter((result) => typeof result.svgContent === 'string' && result.svgContent.trim());
+        const successful = results.filter((result) => hasSvgPages(result.svgContent));
 
         if (successful.length === 0) {
           return;
@@ -1623,7 +1697,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         pageFetchPromisesRef.current.delete(normalizedPageIndex);
       }
     },
-    [fetchSvgForRhyme]
+    [fetchSvgForRhyme, hasSvgPages]
   );
 
   useEffect(() => {
@@ -1722,10 +1796,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       const gradeSelections = response.data[grade] || [];
 
       const rhymesWithPlaceholders = gradeSelections.map((rhyme) => {
-        const existingContent =
-          typeof rhyme?.svgContent === 'string' && rhyme.svgContent.trim().length > 0
-            ? sanitizeRhymeSvgContent(rhyme.svgContent, rhyme.code)
-            : null;
+        const existingContent = normalizeSvgPages(rhyme?.svgContent, rhyme.code);
 
         return {
           ...rhyme,
@@ -2217,18 +2288,25 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const hasTopRhyme = currentPageRhymes.top !== null;
   const hasBottomRhyme = currentPageRhymes.bottom !== null;
   const isDoublePageLayout = currentPageRhymes.layout === 'double';
-  const isTopFullPage = hasTopRhyme && !isDoublePageLayout && parsePagesValue(currentPageRhymes.top.pages) === 1;
+  const topPagesValue = parsePagesValue(currentPageRhymes.top?.pages);
+  const isTopFullPage = hasTopRhyme && !isDoublePageLayout && (topPagesValue !== null && topPagesValue >= 1);
   const showBottomContainer = isDoublePageLayout ? false : !isTopFullPage;
   const topSelection = currentPageRhymes.top;
   const bottomSelection = currentPageRhymes.bottom;
-  const topSvgContent = typeof topSelection?.svgContent === 'string' ? topSelection.svgContent.trim() : '';
-  const bottomSvgContent = typeof bottomSelection?.svgContent === 'string' ? bottomSelection.svgContent.trim() : '';
-  const topReady = !topSelection || topSvgContent.length > 0;
-  const bottomReady = !showBottomContainer || !bottomSelection || bottomSvgContent.length > 0;
+  const topSvgPages = getSvgPages(topSelection);
+  const bottomSvgPages = getSvgPages(bottomSelection);
+  const topPageOffset = hasTopRhyme ? getPageOffsetForSelection(topSelection, currentPageIndex) : 0;
+  const bottomPageOffset = hasBottomRhyme ? getPageOffsetForSelection(bottomSelection, currentPageIndex) : 0;
+  const topSvgContent = hasTopRhyme ? getSvgForSelectionPage(topSelection, currentPageIndex) : '';
+  const bottomSvgContent = hasBottomRhyme ? getSvgForSelectionPage(bottomSelection, currentPageIndex) : '';
+  const topReady = !topSelection || topSvgPages.length > 0;
+  const bottomReady = !showBottomContainer || !bottomSelection || bottomSvgPages.length > 0;
   const isTopLoading = !!topSelection && !topReady;
   const isBottomLoading = showBottomContainer && !!bottomSelection && !bottomReady;
   const canShowNextButton = topReady && bottomReady;
   const doublePageSvgContent = isDoublePageLayout ? topSvgContent : '';
+  const isTopContinuation = hasTopRhyme && topPageOffset > 0;
+  const isBottomContinuation = hasBottomRhyme && bottomPageOffset > 0;
 
   const renderLoadingIndicator = (label) => (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-white/80 p-6">
@@ -2388,21 +2466,33 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                 >
                                   {hasTopRhyme ? (
                                     <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper">
-                                      <Button
-                                        onClick={() => handleAddRhyme('top')}
-                                        variant="outline"
-                                        className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
-                                      >
-                                        <Replace className="w-4 h-4 mr-2" />
-                                        Replace
-                                      </Button>
+                                      {!isTopContinuation ? (
+                                        <Button
+                                          onClick={() => handleAddRhyme('top')}
+                                          variant="outline"
+                                          className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
+                                        >
+                                          <Replace className="w-4 h-4 mr-2" />
+                                          Replace
+                                        </Button>
+                                      ) : (
+                                        <div className="absolute top-4 right-4 z-10 rounded-lg bg-white/90 px-3 py-2 text-xs font-semibold text-orange-600 shadow-md">
+                                          Visit the first page of this rhyme to replace it.
+                                        </div>
+                                      )}
+
+                                      {topSvgPages.length > 1 && (
+                                        <div className="absolute left-4 top-4 z-10 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-orange-600 shadow">
+                                          Page {Math.min(topPageOffset + 1, topSvgPages.length)} of {topSvgPages.length}
+                                        </div>
+                                      )}
 
                                       <div className={`rhyme-slot-container${hasTopRhyme ? ' has-svg' : ''}`}>
                                         {isTopLoading ? (
                                           renderLoadingIndicator(currentPageRhymes.top?.name || 'rhyme')
-                                        ) : topSvgContent.length > 0 ? (
+                                        ) : topSvgContent && topSvgContent.length > 0 ? (
                                           <InlineSvg
-                                            markup={currentPageRhymes.top?.svgContent || ''}
+                                            markup={topSvgContent || ''}
                                             className="rhyme-svg-content"
                                             sanitize={false}
                                             ariaLabel={`${currentPageRhymes.top?.name || 'Rhyme'} illustration`}
@@ -2435,21 +2525,33 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
                                     {hasBottomRhyme ? (
                                       <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper">
-                                        <Button
-                                          onClick={() => handleAddRhyme('bottom')}
-                                          variant="outline"
-                                          className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
-                                        >
-                                          <Replace className="w-4 h-4 mr-2" />
-                                          Replace
-                                        </Button>
+                                        {!isBottomContinuation ? (
+                                          <Button
+                                            onClick={() => handleAddRhyme('bottom')}
+                                            variant="outline"
+                                            className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
+                                          >
+                                            <Replace className="w-4 h-4 mr-2" />
+                                            Replace
+                                          </Button>
+                                        ) : (
+                                          <div className="absolute top-4 right-4 z-10 rounded-lg bg-white/90 px-3 py-2 text-xs font-semibold text-orange-600 shadow-md">
+                                            Visit the first page of this rhyme to replace it.
+                                          </div>
+                                        )}
+
+                                        {bottomSvgPages.length > 1 && (
+                                          <div className="absolute left-4 top-4 z-10 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-orange-600 shadow">
+                                            Page {Math.min(bottomPageOffset + 1, bottomSvgPages.length)} of {bottomSvgPages.length}
+                                          </div>
+                                        )}
 
                                         <div className={`rhyme-slot-container${hasBottomRhyme ? ' has-svg' : ''}`}>
                                           {isBottomLoading ? (
                                             renderLoadingIndicator(currentPageRhymes.bottom?.name || 'rhyme')
-                                          ) : bottomSvgContent.length > 0 ? (
+                                          ) : bottomSvgContent && bottomSvgContent.length > 0 ? (
                                             <InlineSvg
-                                              markup={currentPageRhymes.bottom?.svgContent || ''}
+                                              markup={bottomSvgContent || ''}
                                               className="rhyme-svg-content"
                                               sanitize={false}
                                               ariaLabel={`${currentPageRhymes.bottom?.name || 'Rhyme'} illustration`}
