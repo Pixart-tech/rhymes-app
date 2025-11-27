@@ -231,31 +231,31 @@ const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-4 sm:p-6">
       <div className="mx-auto flex max-w-5xl flex-col gap-8">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-800">Welcome, {school.school_name}</h1>
-            <p className="text-gray-600">School ID: {school.school_id}</p>
+            <h1 className="text-2xl font-bold text-gray-800 sm:text-3xl">Welcome, {school.school_name}</h1>
+            <p className="text-sm text-gray-600 sm:text-base">School ID: {school.school_id}</p>
           </div>
           <Button
             onClick={onLogout}
             variant="outline"
-            className="bg-white/80 hover:bg-white border-gray-200"
+            className="bg-white/80 text-sm font-semibold hover:bg-white border-gray-200 sm:text-base"
           >
             Logout
           </Button>
         </div>
 
         <Card className="border-0 bg-white/80 backdrop-blur-md shadow-xl">
-          <CardHeader>
-            <CardTitle className="text-2xl font-semibold text-gray-800">Choose what you would like to work on</CardTitle>
-            <p className="text-gray-600">
+          <CardHeader className="space-y-3 sm:space-y-4">
+            <CardTitle className="text-xl font-semibold text-gray-800 sm:text-2xl">Choose what you would like to work on</CardTitle>
+            <p className="text-sm leading-relaxed text-gray-600 sm:text-base">
               Select one of the workflows below to continue. You can always return to this menu to switch tasks.
             </p>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            <div className="grid grid-cols-2 gap-4 sm:gap-5 md:gap-6 md:grid-cols-3">
               {options.map((option) => {
                 const IconComponent = option.icon;
                 return (
@@ -264,19 +264,19 @@ const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
                     className="group cursor-pointer border border-transparent bg-white/70 transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-2xl"
                     onClick={() => onModeSelect(option.id)}
                   >
-                    <CardContent className="flex h-full flex-col gap-4 p-6">
-                      <div className={`w-16 h-16 rounded-2xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-2xl shadow-lg transition-transform duration-300 group-hover:scale-110`}>
-                        <IconComponent className="h-8 w-8" />
+                    <CardContent className="flex h-full flex-col gap-3 p-4 sm:gap-4 sm:p-6">
+                      <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-2xl shadow-lg transition-transform duration-300 group-hover:scale-110`}>
+                        <IconComponent className="h-7 w-7 sm:h-8 sm:w-8" />
                       </div>
                       <div className="space-y-2">
-                        <h3 className="text-xl font-semibold text-gray-800">{option.title}</h3>
-                        <p className="text-sm text-gray-600 leading-relaxed">{option.description}</p>
+                        <h3 className="text-lg font-semibold text-gray-800 sm:text-xl">{option.title}</h3>
+                        <p className="text-xs text-gray-600 leading-relaxed sm:text-sm">{option.description}</p>
                       </div>
                       <div className="mt-auto">
                         <Button
                           type="button"
                           onClick={() => onModeSelect(option.id)}
-                          className="w-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:from-orange-500 hover:to-red-500"
+                          className="w-full bg-gradient-to-r from-orange-400 to-red-400 text-xs font-semibold text-white shadow-lg transition-all duration-300 hover:from-orange-500 hover:to-red-500 sm:text-sm"
                         >
                           Explore {option.title}
                         </Button>
