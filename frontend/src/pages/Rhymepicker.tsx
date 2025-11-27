@@ -1519,6 +1519,31 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     [normalizeSvgPages]
   );
 
+  const parsePagesValue = (pagesValue) => {
+    if (typeof pagesValue === 'number') {
+      return Number.isFinite(pagesValue) ? pagesValue : null;
+    }
+    if (typeof pagesValue === 'string') {
+      const trimmed = pagesValue.trim();
+      if (trimmed === '') {
+        return null;
+      }
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+
+  const getPageSpan = (pagesValue) => {
+    const parsed = parsePagesValue(pagesValue);
+
+    if (parsed === null || parsed <= 0.5) {
+      return 1;
+    }
+
+    return Math.max(1, Math.floor(parsed));
+  };
+
   const getPageOffsetForSelection = useCallback(
     (selection, targetPageIndex) => {
       if (!selection) return 0;
@@ -1850,16 +1875,6 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     return normalized === 'top' || normalized === 'bottom' ? normalized : fallback;
   };
 
-  const getPageSpan = (pagesValue) => {
-    const parsed = parsePagesValue(pagesValue);
-
-    if (parsed === null || parsed <= 0.5) {
-      return 1;
-    }
-
-    return Math.max(1, Math.floor(parsed));
-  };
-
   const selectionCoversPage = (selection, targetPageIndex) => {
     if (!selection) return false;
 
@@ -1872,21 +1887,6 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     const endIndex = startIndex + span - 1;
 
     return targetPageIndex >= startIndex && targetPageIndex <= endIndex;
-  };
-
-  const parsePagesValue = (pagesValue) => {
-    if (typeof pagesValue === 'number') {
-      return Number.isFinite(pagesValue) ? pagesValue : null;
-    }
-    if (typeof pagesValue === 'string') {
-      const trimmed = pagesValue.trim();
-      if (trimmed === '') {
-        return null;
-      }
-      const parsed = Number(trimmed);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    return null;
   };
 
   const sortSelections = (selections) => {
