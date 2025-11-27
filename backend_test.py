@@ -257,9 +257,11 @@ class RhymePickerAPITester:
                 f"rhymes/svg/{code}",
                 200
             )
-            
-            if success and isinstance(svg_content, str):
-                is_svg = svg_content.strip().startswith('<svg')
+
+            if success and isinstance(svg_content, dict):
+                pages = svg_content.get("pages") or []
+                first_page = pages[0] if pages else ''
+                is_svg = isinstance(first_page, str) and first_page.strip().startswith('<svg')
                 self.log_test("SVG Content Format", is_svg, "Valid SVG format" if is_svg else "Invalid SVG format")
                 svg_tested = True
                 break

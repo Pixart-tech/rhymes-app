@@ -170,6 +170,14 @@ export const decodeSvgPayload = (payload, headers) => {
       return '';
     }
 
+    try {
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        return JSON.parse(trimmed);
+      }
+    } catch (error) {
+      // Ignore JSON parse errors and fall back to raw string handling
+    }
+
     if (trimmed.startsWith('data:image/svg+xml;base64,')) {
       return decodeBase64(trimmed);
     }
@@ -185,7 +193,8 @@ export const decodeSvgPayload = (payload, headers) => {
   }
 
   if (payload instanceof ArrayBuffer || ArrayBuffer.isView(payload)) {
-    return decodeBinaryPayload(payload, headers);
+    const decoded = decodeBinaryPayload(payload, headers);
+    return decodeSvgPayload(decoded, headers);
   }
 
   if (typeof payload === 'object') {
