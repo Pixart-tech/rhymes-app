@@ -2304,6 +2304,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const doublePageSvgContent = isDoublePageLayout ? topSvgContent : '';
   const isTopContinuation = hasTopRhyme && topPageOffset > 0;
   const isBottomContinuation = hasBottomRhyme && bottomPageOffset > 0;
+  const showTopContinuationNote = hasTopRhyme && topSvgPages.length > topPageOffset + 1;
+  const showBottomContinuationNote = hasBottomRhyme && bottomSvgPages.length > bottomPageOffset + 1;
 
   const renderLoadingIndicator = (label) => (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-white/80 p-6">
@@ -2379,7 +2381,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
                 {/* Navigation Controls */}
                 <div className="flex-shrink-0 space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
                     <Button
                       onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
                       disabled={currentPageIndex === 0}
@@ -2500,6 +2502,11 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                           </div>
                                         )}
                                       </div>
+                                      {showTopContinuationNote && (
+                                        <div className="rhyme-slot-footnote">
+                                          Remaining pages for this rhyme continue on the next page.
+                                        </div>
+                                      )}
                                     </div>
                                   ) : (
                                     <div className="rhyme-slot-container">
@@ -2559,6 +2566,11 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                             </div>
                                           )}
                                         </div>
+                                        {showBottomContinuationNote && (
+                                          <div className="rhyme-slot-footnote">
+                                            Remaining pages for this rhyme continue on the next page.
+                                          </div>
+                                        )}
                                       </div>
                                     ) : (
                                       <div className="rhyme-slot-container">
