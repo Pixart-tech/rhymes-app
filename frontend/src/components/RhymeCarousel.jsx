@@ -121,10 +121,11 @@ const RhymeCarousel = ({ schoolId, grade, apiBaseUrl = API }) => {
           const response = await axios.get(`${resolvedApi}/rhymes/svg/${code}`, {
             responseType: 'arraybuffer'
           });
-          const svgContent = sanitizeRhymeSvgContent(
-            decodeSvgPayload(response.data, response.headers),
-            code
-          );
+          const decoded = decodeSvgPayload(response.data, response.headers);
+          const normalized = decoded && typeof decoded === 'object' && Array.isArray(decoded.pages)
+            ? decoded.pages[0]
+            : decoded;
+          const svgContent = sanitizeRhymeSvgContent(normalized, code);
           svgCacheRef.current.set(code, svgContent);
           return svgContent;
         } catch (fetchError) {
