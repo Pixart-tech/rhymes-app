@@ -23,14 +23,14 @@ from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path, PureWindowsPath
-from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
-
-from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.responses import JSONResponse, Response
-from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+from dotenv import load_dotenv
+from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi.responses import Response
+from pydantic import BaseModel, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
 
+load_dotenv()
 
 if __package__ in {None, ""}:
     # Allow ``python backend/server.py`` to work by ensuring the project root is
@@ -39,13 +39,29 @@ if __package__ in {None, ""}:
     project_root = current_dir.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from backend.app import auth, config, rhymes, svg_processing, unc_path_utils  # type: ignore
+    from backend.app import auth, config, rhymes, school_profiles, svg_processing, unc_path_utils  # type: ignore
+    from backend.app.firebase_service import (  # type: ignore
+        DEFAULT_USER_ROLE,
+        db,
+        ensure_user_document as _ensure_user_document,
+        firestore,
+        verify_and_decode_token as _verify_and_decode_token,
+    )
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
-    from .app import auth, config, rhymes, svg_processing, unc_path_utils
+    from .app import auth, config, rhymes, school_profiles, svg_processing, unc_path_utils
+    from .app.firebase_service import (
+        DEFAULT_USER_ROLE,
+        db,
+        ensure_user_document as _ensure_user_document,
+        firestore,
+        verify_and_decode_token as _verify_and_decode_token,
+    )
     from .app.svg_processing import SvgDocument as _SvgDocument
 
 School = auth.School
+SchoolCreatePayload = school_profiles.SchoolCreatePayload
+SchoolUpdatePayload = school_profiles.SchoolUpdatePayload
 
 logger = logging.getLogger(__name__)
 
@@ -144,10 +160,28 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
         )
         return svg_markup
 
-# MongoDB connection
-mongo_url = os.environ["MONGO_URL"]
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ["DB_NAME"]]
+
+async def _read_upload_file(upload_file: Optional[UploadFile]) -> Tuple[Optional[bytes], Optional[str]]:
+    if not upload_file:
+        return None, None
+    contents = await upload_file.read()
+    if not contents:
+        return None, None
+    return contents, upload_file.content_type or "application/octet-stream"
+
+
+def _build_workspace_user(record: Dict[str, Any]) -> "WorkspaceUser":
+    return WorkspaceUser(
+        uid=record["uid"],
+        email=record.get("email"),
+        display_name=record.get("display_name"),
+        role=record.get("role", DEFAULT_USER_ROLE),
+        school_ids=list(record.get("school_ids", [])),
+        created_at=record.get("created_at") or datetime.utcnow(),
+        updated_at=record.get("updated_at") or datetime.utcnow(),
+    )
+
+
 
 app = FastAPI()
 app.add_middleware(
@@ -299,7 +333,202 @@ class RhymeSelectionDetail(BaseModel):
 class SchoolWithSelections(School):
     total_selections: int = 0
     last_updated: Optional[datetime] = None
-    grades: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
+    grade_selections: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
+
+
+class WorkspaceUser(BaseModel):
+    uid: str
+    email: Optional[EmailStr] = None
+    display_name: Optional[str] = None
+    role: Literal["super-admin", "user"] = DEFAULT_USER_ROLE
+    school_ids: List[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class UserSessionResponse(BaseModel):
+    user: WorkspaceUser
+    schools: List[School] = Field(default_factory=list)
+
+
+class WorkspaceUserUpdatePayload(BaseModel):
+    display_name: Optional[str] = Field(default=None, min_length=2)
+    email: Optional[EmailStr] = None
+
+class PaginatedSchoolResponse(BaseModel):
+    schools: List[SchoolWithSelections]
+    total_count: int
+
+
+# Workspace endpoints
+@api_router.get("/users/me", response_model=UserSessionResponse)
+def get_current_workspace_user(authorization: Optional[str] = Header(None)):
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    workspace_user = _build_workspace_user(user_record)
+
+    schools: List[School] = []
+    for school_id in workspace_user.school_ids:
+        if not school_id:
+            continue
+        doc_ref = db.collection("schools").document(school_id)
+        snapshot = doc_ref.get()
+        if not snapshot.exists:
+            continue
+        record = snapshot.to_dict() or {}
+        record.setdefault("id", snapshot.id)
+        record.setdefault("school_id", record.get("school_id") or snapshot.id)
+        schools.append(school_profiles.build_school_from_record(record))
+
+    return UserSessionResponse(user=workspace_user, schools=schools)
+
+
+@api_router.patch("/users/me", response_model=WorkspaceUser)
+def update_current_workspace_user(
+    payload: WorkspaceUserUpdatePayload, authorization: Optional[str] = Header(None)
+):
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+
+    updates: Dict[str, Any] = {}
+    if payload.display_name is not None:
+        display_name = payload.display_name.strip()
+        if not display_name:
+            raise HTTPException(status_code=400, detail="Display name cannot be empty")
+        updates["display_name"] = display_name
+
+    if payload.email is not None:
+        updates["email"] = str(payload.email)
+
+    if not updates:
+        return _build_workspace_user(user_record)
+
+    updates["updated_at"] = datetime.utcnow()
+    uid = user_record["uid"]
+    db.collection("users").document(uid).update(updates)
+    user_record.update(updates)
+    return _build_workspace_user(user_record)
+
+
+@api_router.post("/schools", response_model=School)
+async def create_school_profile(
+    payload: SchoolCreatePayload = Depends(SchoolCreatePayload.as_form),
+    logo_file: Optional[UploadFile] = File(None),
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    logo_blob, logo_mime_type = await _read_upload_file(logo_file)
+    return school_profiles.create_school_profile(db, payload, user_record, logo_blob, logo_mime_type)
+
+
+@api_router.put("/schools/{school_id}", response_model=School)
+async def update_school_profile(
+    school_id: str,
+    payload: SchoolUpdatePayload = Depends(SchoolUpdatePayload.as_form),
+    logo_file: Optional[UploadFile] = File(None),
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    uid = user_record["uid"]
+    role = user_record.get("role", DEFAULT_USER_ROLE)
+
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    existing = snapshot.to_dict() or {}
+    if existing.get("created_by_user_id") != uid and role != "super-admin":
+        raise HTTPException(status_code=403, detail="You do not have permission to edit this school")
+
+    raw_updates = payload.dict(exclude_unset=True)
+    logo_blob, logo_mime_type = await _read_upload_file(logo_file)
+
+    def _clean(value: Optional[str]) -> Optional[str]:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    service_status_raw = raw_updates.pop("service_status", None)
+    grades_raw = raw_updates.pop("grades", None)
+    address_fields = ("address_line1", "city", "state", "pin")
+    address_overrides: Dict[str, Any] = {field: raw_updates.pop(field) for field in address_fields if field in raw_updates}
+
+    updates: Dict[str, Any] = {}
+    for key, value in raw_updates.items():
+        if key == "service_type":
+            updates[key] = school_profiles.normalize_service_types(value)
+        else:
+            updates[key] = _clean(value)
+
+    if address_overrides:
+        cleaned_address = {field: _clean(address_overrides[field]) for field in address_overrides}
+        updates.update(cleaned_address)
+        merged_address = {
+            field: cleaned_address[field] if field in cleaned_address else existing.get(field)
+            for field in address_fields
+        }
+     
+
+    if service_status_raw is not None:
+        normalized_status = school_profiles.normalize_service_status(service_status_raw)
+        updates["service_status"] = normalized_status
+        updates["service_type"] = school_profiles.services_from_status(normalized_status)
+    elif "service_type" in updates:
+        updates["service_status"] = {
+            service: ("yes" if service in updates["service_type"] else "no")
+            for service in school_profiles.SERVICE_TYPE_VALUES
+        }
+
+    if grades_raw is not None:
+        updates["grades"] = school_profiles.normalize_grades(grades_raw)
+
+    if logo_blob is not None:
+        updates["logo_blob"] = logo_blob
+        updates["logo_mime_type"] = logo_mime_type
+
+    if not updates:
+        existing.setdefault("id", snapshot.id)
+        existing.setdefault("school_id", snapshot.id)
+        return school_profiles.build_school_from_record(existing)
+
+    now = datetime.utcnow()
+    updates["updated_at"] = now
+    updates["timestamp"] = now
+    doc_ref.update(updates)
+    existing.update(updates)
+    existing.setdefault("id", snapshot.id)
+    existing.setdefault("school_id", snapshot.id)
+
+    return school_profiles.build_school_from_record(existing)
+
+
+@api_router.get("/schools/{school_id}/logo")
+def get_school_logo(school_id: str):
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    record = snapshot.to_dict() or {}
+    logo_blob = record.get("logo_blob")
+    if logo_blob is None:
+        raise HTTPException(status_code=404, detail="Logo not found")
+
+    if isinstance(logo_blob, memoryview):
+        logo_blob = logo_blob.tobytes()
+    elif isinstance(logo_blob, bytearray):
+        logo_blob = bytes(logo_blob)
+
+    if not isinstance(logo_blob, (bytes, bytearray)):
+        raise HTTPException(status_code=404, detail="Logo not found")
+
+    media_type = record.get("logo_mime_type") or "image/jpeg"
+    headers = {"Cache-Control": "no-store"}
+    return Response(content=bytes(logo_blob), media_type=media_type, headers=headers)
 
 
 # Rhymes data endpoints
@@ -323,15 +552,15 @@ async def get_all_rhymes():
 
 
 @api_router.get("/rhymes/available/{school_id}/{grade}")
-async def get_available_rhymes(
+def get_available_rhymes(
     school_id: str, grade: str, include_selected: bool = False
 ):
     """Get available rhymes for a specific grade"""
     if not include_selected:
         # Get already selected rhymes for ALL grades in this school
-        selected_rhymes = await db.rhyme_selections.find(
-            {"school_id": school_id}
-        ).to_list(None) 
+        selections_ref = db.collection("rhyme_selections")
+        query = selections_ref.where("school_id", "==", school_id)
+        selected_rhymes = [doc.to_dict() for doc in query.stream()]
 
         selected_codes = {selection["rhyme_code"] for selection in selected_rhymes}
     else:
@@ -361,9 +590,11 @@ async def get_available_rhymes(
 
 
 @api_router.get("/rhymes/selected/{school_id}")
-async def get_selected_rhymes(school_id: str):
+def get_selected_rhymes(school_id: str):
     """Get all selected rhymes for a school organized by grade"""
-    selections = await db.rhyme_selections.find({"school_id": school_id}).to_list(None)
+    selections_ref = db.collection("rhyme_selections")
+    query = selections_ref.where("school_id", "==", school_id)
+    selections = [doc.to_dict() for doc in query.stream()]
 
     result = {}
     for selection in selections:
@@ -389,11 +620,11 @@ async def get_selected_rhymes(school_id: str):
 
 
 @api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
-async def get_selected_rhymes_other_grades(school_id: str, grade: str):
+def get_selected_rhymes_other_grades(school_id: str, grade: str):
     """Get rhymes selected in other grades that can be reused"""
-    selections = await db.rhyme_selections.find(
-        {"school_id": school_id, "grade": {"$ne": grade}}  # Exclude current grade
-    ).to_list(None)
+    selections_ref = db.collection("rhyme_selections")
+    query = selections_ref.where("school_id", "==", school_id).where("grade", "!=", grade)
+    selections = [doc.to_dict() for doc in query.stream()]
 
     # Get unique rhymes from other grades
     selected_rhymes = {}
@@ -442,7 +673,8 @@ async def select_rhyme(input: RhymeSelectionCreate):
         "page_index": input.page_index,
     }
 
-    existing_selections = await db.rhyme_selections.find(page_query).to_list(None)
+    existing_selections_query = db.collection("rhyme_selections").where("school_id", "==", input.school_id).where("grade", "==", input.grade).where("page_index", "==", input.page_index)
+    existing_selections = [doc.to_dict() for doc in existing_selections_query.stream()]
 
     for existing in existing_selections:
         existing_pages = float(existing.get("pages", 1))
@@ -464,7 +696,7 @@ async def select_rhyme(input: RhymeSelectionCreate):
                 should_remove = True
 
         if should_remove:
-            await db.rhyme_selections.delete_one({"_id": existing["_id"]})
+            db.collection("rhyme_selections").document(existing["id"]).delete()
 
     # Create new selection
     selection_dict = input.dict()
@@ -473,7 +705,7 @@ async def select_rhyme(input: RhymeSelectionCreate):
     )
 
     selection_obj = RhymeSelection(**selection_dict)
-    await db.rhyme_selections.insert_one(selection_obj.dict())
+    db.collection("rhyme_selections").document(selection_obj.id).set(selection_obj.dict())
 
     return selection_obj
 
@@ -499,13 +731,8 @@ async def remove_specific_rhyme_selection(
 ):
     """Remove a specific rhyme selection for a position (top/bottom)"""
     # Get all selections for this page
-    selections = await db.rhyme_selections.find(
-        {
-            "school_id": school_id,
-            "grade": grade,
-            "page_index": page_index,
-        }
-    ).to_list(None)
+    selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade).where("page_index", "==", page_index)
+    selections = [doc.to_dict() for doc in selections_query.stream()]
 
     if not selections:
         # raise HTTPException(status_code=404, detail="No selections found for this page")
@@ -546,10 +773,7 @@ async def remove_specific_rhyme_selection(
         )
 
     # Remove the selection
-    result = await db.rhyme_selections.delete_one({"_id": selection_to_remove["_id"]})
-
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Selection not found")
+    db.collection("rhyme_selections").document(selection_to_remove["id"]).delete()
 
     return {"message": f"{position.capitalize()} selection removed successfully"}
 
@@ -561,9 +785,8 @@ async def get_grade_status(school_id: str):
     status = []
 
     for grade in grades:
-        selections = await db.rhyme_selections.find(
-            {"school_id": school_id, "grade": grade}
-        ).to_list(None)
+        selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade)
+        selections = [doc.to_dict() for doc in selections_query.stream()]
 
         selected_count = len(selections)
 
@@ -578,21 +801,39 @@ async def get_grade_status(school_id: str):
     return status
 
 
-@api_router.get("/admin/schools", response_model=List[SchoolWithSelections])
-async def get_all_schools_with_selections():
-    """Return all schools with their rhyme selections grouped by grade."""
-    school_docs = await db.schools.find().sort("timestamp", -1).to_list(None)
+@api_router.get("/admin/schools", response_model=PaginatedSchoolResponse)
+async def get_all_schools_with_selections(
+    page: int = 1, limit: int = 10, authorization: Optional[str] = Header(None)
+):
+    """Return all schools with their rhyme selections grouped by grade, with pagination."""
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    if user_record.get("role") != "super-admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+
+    # Fetch total count first
+    total_schools_query = db.collection("schools")
+    total_count = len(list(total_schools_query.stream()))
+
+    # Apply pagination to the main query
+    offset = (page - 1) * limit
+    school_docs_query = (
+        db.collection("schools")
+        .order_by("timestamp", direction=firestore.Query.DESCENDING)
+    )
+    # Get all docs first then apply skip and limit
+    all_school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
+    school_docs = all_school_docs[offset : offset + limit]
 
     if not school_docs:
-        return []
+        return PaginatedSchoolResponse(schools=[], total_count=total_count)
 
     school_ids = [doc.get("school_id") for doc in school_docs if doc.get("school_id")]
 
     selection_docs = []
     if school_ids:
-        selection_docs = await db.rhyme_selections.find(
-            {"school_id": {"$in": school_ids}}
-        ).to_list(None)
+        selection_docs_query = db.collection("rhyme_selections").where("school_id", "in", school_ids)
+        selection_docs = [doc.to_dict() for doc in selection_docs_query.stream()]
 
     selections_by_school: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     latest_selection_timestamp: Dict[str, datetime] = {}
@@ -630,12 +871,13 @@ async def get_all_schools_with_selections():
 
     for doc in school_docs:
         school_id = doc.get("school_id")
-        base_payload = {
-            "id": doc.get("id"),
-            "school_id": school_id,
-            "school_name": doc.get("school_name"),
-            "timestamp": doc.get("timestamp"),
-        }
+        if not school_id:
+            continue
+
+        if not doc.get("id"):
+            doc["id"] = school_id
+
+        base_school = school_profiles.build_school_from_record(doc)
 
         grade_map: Dict[str, List[RhymeSelectionDetail]] = {}
 
@@ -675,29 +917,43 @@ async def get_all_schools_with_selections():
 
         schools_with_details.append(
             SchoolWithSelections(
-                **base_payload,
+                **base_school.dict(),
                 total_selections=total_selections,
                 last_updated=last_updated,
-                grades=grade_map,
+                grade_selections=grade_map,
             )
         )
 
-    return schools_with_details
+    return PaginatedSchoolResponse(schools=schools_with_details, total_count=total_count)
 
 
 @api_router.delete("/admin/schools/{school_id}")
-async def delete_school(school_id: str):
+async def delete_school(school_id: str, authorization: Optional[str] = Header(None)):
     """Delete a school and all of its rhyme selections."""
-    school_result = await db.schools.delete_one({"school_id": school_id})
-    selection_result = await db.rhyme_selections.delete_many({"school_id": school_id})
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    if user_record.get("role") != "super-admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
 
-    if school_result.deleted_count == 0 and selection_result.deleted_count == 0:
+    school_query = db.collection("schools").where("school_id", "==", school_id)
+    school_docs = [doc for doc in school_query.stream()]
+    for doc in school_docs:
+        doc.reference.delete()
+    school_result_deleted_count = len(school_docs)
+
+    selection_query = db.collection("rhyme_selections").where("school_id", "==", school_id)
+    selection_docs = [doc for doc in selection_query.stream()]
+    for doc in selection_docs:
+        doc.reference.delete()
+    selection_result_deleted_count = len(selection_docs)
+
+    if school_result_deleted_count == 0 and selection_result_deleted_count == 0:
         raise HTTPException(status_code=404, detail="School not found")
 
     return {
         "message": "School and associated rhymes removed successfully",
-        "removed_school": school_result.deleted_count,
-        "removed_selections": selection_result.deleted_count,
+        "removed_school": school_result_deleted_count,
+        "removed_selections": selection_result_deleted_count,
     }
 
 
@@ -1193,12 +1449,8 @@ async def download_rhyme_binder(school_id: str, grade: str):
     except PDFDependencyUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    selections = await db.rhyme_selections.find(
-        {
-            "school_id": school_id,
-            "grade": grade,
-        }
-    ).to_list(None)
+    selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade)
+    selections = [doc.to_dict() for doc in selections_query.stream()]
 
     if not selections:
         raise HTTPException(status_code=404, detail="No rhymes selected for this grade")
@@ -1329,7 +1581,3 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()

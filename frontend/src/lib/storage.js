@@ -51,132 +51,56 @@ export const clearPersistedAppState = () => {
   window.localStorage.removeItem(APP_STATE_KEY);
 };
 
-const buildCoverWorkflowKey = (schoolId, grade) => {
-  if (!schoolId || !grade) {
-    return '';
-  }
+const createWorkflowStorage = (keyPrefix) => {
+  const buildKey = (schoolId, grade) => {
+    if (!schoolId || !grade) {
+      return '';
+    }
+    const normalizedSchool = schoolId.toString().trim();
+    const normalizedGrade = grade.toString().trim();
+    if (!normalizedSchool || !normalizedGrade) {
+      return '';
+    }
+    return `${keyPrefix}${normalizedSchool}::${normalizedGrade}`;
+  };
 
-  const normalizedSchool = schoolId.toString().trim();
-  const normalizedGrade = grade.toString().trim();
-
-  if (!normalizedSchool || !normalizedGrade) {
-    return '';
-  }
-
-  return `${COVER_WORKFLOW_KEY_PREFIX}${normalizedSchool}::${normalizedGrade}`;
+  return {
+    load: (schoolId, grade) => {
+      if (!isBrowser()) return null;
+      const key = buildKey(schoolId, grade);
+      return key ? safeParseJson(window.localStorage.getItem(key)) : null;
+    },
+    save: (schoolId, grade, state) => {
+      if (!isBrowser()) return;
+      const key = buildKey(schoolId, grade);
+      if (!key) return;
+      if (!state) {
+        window.localStorage.removeItem(key);
+        return;
+      }
+      try {
+        const payload = JSON.stringify({ ...state, updatedAt: Date.now() });
+        window.localStorage.setItem(key, payload);
+      } catch (error) {
+        console.warn(`Unable to persist workflow state for key [${key}]:`, error);
+      }
+    },
+    clear: (schoolId, grade) => {
+      if (!isBrowser()) return;
+      const key = buildKey(schoolId, grade);
+      if (key) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  };
 };
 
-export const loadCoverWorkflowState = (schoolId, grade) => {
-  if (!isBrowser()) {
-    return null;
-  }
+const coverWorkflowStorage = createWorkflowStorage(COVER_WORKFLOW_KEY_PREFIX);
+export const loadCoverWorkflowState = coverWorkflowStorage.load;
+export const saveCoverWorkflowState = coverWorkflowStorage.save;
+export const clearCoverWorkflowState = coverWorkflowStorage.clear;
 
-  const key = buildCoverWorkflowKey(schoolId, grade);
-  if (!key) {
-    return null;
-  }
-
-  const raw = window.localStorage.getItem(key);
-  return safeParseJson(raw);
-};
-
-export const saveCoverWorkflowState = (schoolId, grade, state) => {
-  if (!isBrowser()) {
-    return;
-  }
-
-  const key = buildCoverWorkflowKey(schoolId, grade);
-  if (!key) {
-    return;
-  }
-
-  if (!state) {
-    window.localStorage.removeItem(key);
-    return;
-  }
-
-  try {
-    const payload = JSON.stringify({ ...state, updatedAt: Date.now() });
-    window.localStorage.setItem(key, payload);
-  } catch (error) {
-    console.warn('Unable to persist cover workflow state:', error);
-  }
-};
-
-export const clearCoverWorkflowState = (schoolId, grade) => {
-  if (!isBrowser()) {
-    return;
-  }
-
-  const key = buildCoverWorkflowKey(schoolId, grade);
-  if (!key) {
-    return;
-  }
-
-  window.localStorage.removeItem(key);
-};
-
-const buildBookWorkflowKey = (schoolId, grade) => {
-  if (!schoolId || !grade) {
-    return '';
-  }
-
-  const normalizedSchool = schoolId.toString().trim();
-  const normalizedGrade = grade.toString().trim();
-
-  if (!normalizedSchool || !normalizedGrade) {
-    return '';
-  }
-
-  return `${BOOK_WORKFLOW_KEY_PREFIX}${normalizedSchool}::${normalizedGrade}`;
-};
-
-export const loadBookWorkflowState = (schoolId, grade) => {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  const key = buildBookWorkflowKey(schoolId, grade);
-  if (!key) {
-    return null;
-  }
-
-  const raw = window.localStorage.getItem(key);
-  return safeParseJson(raw);
-};
-
-export const saveBookWorkflowState = (schoolId, grade, state) => {
-  if (!isBrowser()) {
-    return;
-  }
-
-  const key = buildBookWorkflowKey(schoolId, grade);
-  if (!key) {
-    return;
-  }
-
-  if (!state) {
-    window.localStorage.removeItem(key);
-    return;
-  }
-
-  try {
-    const payload = JSON.stringify({ ...state, updatedAt: Date.now() });
-    window.localStorage.setItem(key, payload);
-  } catch (error) {
-    console.warn('Unable to persist book workflow state:', error);
-  }
-};
-
-export const clearBookWorkflowState = (schoolId, grade) => {
-  if (!isBrowser()) {
-    return;
-  }
-
-  const key = buildBookWorkflowKey(schoolId, grade);
-  if (!key) {
-    return;
-  }
-
-  window.localStorage.removeItem(key);
-};
+const bookWorkflowStorage = createWorkflowStorage(BOOK_WORKFLOW_KEY_PREFIX);
+export const loadBookWorkflowState = bookWorkflowStorage.load;
+export const saveBookWorkflowState = bookWorkflowStorage.save;
+export const clearBookWorkflowState = bookWorkflowStorage.clear;
