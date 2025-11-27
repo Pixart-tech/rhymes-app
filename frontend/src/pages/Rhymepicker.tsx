@@ -76,10 +76,10 @@ const buildBinderDownloadUrl = (apiBase, schoolId, gradeId) => {
 };
 
 const GRADE_OPTIONS = [
-  { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
-  { id: 'lkg', name: 'LKG', color: 'from-blue-400 to-cyan-400', icon: '🎈' },
-  { id: 'ukg', name: 'UKG', color: 'from-green-400 to-emerald-400', icon: '🌟' },
-  { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' }
+  { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400' },
+  { id: 'lkg', name: 'LKG', color: 'from-blue-400 to-cyan-400' },
+  { id: 'ukg', name: 'UKG', color: 'from-green-400 to-emerald-400' },
+  { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400' }
 ];
 
 const createDefaultGradeNames = () =>
@@ -1038,7 +1038,7 @@ const GradeSelectionPage = ({
             </Card>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-4">
             {GRADE_OPTIONS.map((grade) => {
               const resolvedGradeName = isCoverMode
                 ? gradeNameOverrides[grade.id] || grade.name
@@ -1050,27 +1050,24 @@ const GradeSelectionPage = ({
                   className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
                   onClick={() => handleGradeCardSelect(grade.id)}
                 >
-                  <CardContent className="p-6 text-center space-y-4">
-                    <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                      <span className="text-2xl">{grade.icon}</span>
-                    </div>
-                    <h3 className="text-xl font-bold text-gray-800 mb-2">{resolvedGradeName}</h3>
+                  <CardContent className="p-5 text-center space-y-4">
+                    <h3 className="text-base font-semibold text-gray-800 sm:text-lg">{resolvedGradeName}</h3>
                     {isCoverMode ? (
-                      <p className="text-sm text-gray-600">
+                      <p className="text-xs text-gray-600 sm:text-sm">
                         Start crafting personalised cover pages for {resolvedGradeName}.
                       </p>
                     ) : isBookMode ? (
                       <div className="space-y-3">
-                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm font-medium text-gray-800">
+                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-xs font-medium text-gray-800 sm:text-sm">
                           {(bookSelectionCounts[grade.id] ?? 0)} book{(bookSelectionCounts[grade.id] ?? 0) === 1 ? '' : 's'} planned
                         </div>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-xs text-gray-600 sm:text-sm">
                           Curate engaging reading experiences for {resolvedGradeName}.
                         </p>
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm font-medium text-gray-800">
+                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-xs font-medium text-gray-800 sm:text-sm">
                           {getGradeStatusInfo(grade.id)} Rhymes Selected
                         </div>
                         <Button
