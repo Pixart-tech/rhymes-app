@@ -182,7 +182,7 @@ export interface SchoolFormProps {
   onCancel?: () => void;
 }
 
-export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, submitting, onSubmit, onCancel }) => {
+export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, submitting, onSubmit, onCancel, onBackToHome, isSuperAdmin }) => {
   const [values, setValues] = useState<SchoolFormValues>(initialValues);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string>(getLogoPreview(initialValues));
   const logoPreviewUrlRef = useRef<string | null>(null);
@@ -294,7 +294,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
       imageSrcUrlRef.current = null;
     }
     setImageSrc(null);
-  }, []);
+  }, [setImageSrc]);
 
   const handleLogoChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -450,19 +450,34 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
         onClose={handleCropperClose}
       />
       <CardHeader className="space-y-6">
-        {onCancel && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onCancel}
-            disabled={submitting || isCompressingLogo}
-            className="flex items-center gap-1 text-gray-600 hover:text-gray-900 -ml-2"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Button>
-        )}
+        <div className="flex justify-between items-center">
+          {onBackToHome && !isSuperAdmin && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onBackToHome}
+              disabled={submitting || isCompressingLogo}
+              className="flex items-center gap-1 text-gray-600 hover:text-gray-900 -ml-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to Home
+            </Button>
+          )}
+          {(onCancel && isSuperAdmin) || (onCancel && !onBackToHome) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onCancel}
+              disabled={submitting || isCompressingLogo}
+              className="flex items-center gap-1 text-gray-600 hover:text-gray-900 -ml-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
+          ) : null}
+        </div>
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm text-gray-600">
             <span>Section {currentSection} of {TOTAL_SECTIONS}</span>
@@ -786,11 +801,11 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
 
           <CardFooter className="mt-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-end">
             <div className="flex gap-2">
-              {onCancel && (
+              {onCancel && (isSuperAdmin || !onBackToHome) ? (
                 <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting || isCompressingLogo}>
                   Cancel
                 </Button>
-              )}
+              ) : null}
               <Button type="button" variant="outline" onClick={handlePreviousSection} disabled={currentSection === 1}>
                 Previous
               </Button>

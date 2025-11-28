@@ -141,6 +141,7 @@ const ModeSelectionPage = ({
   onLogout,
   isSuperAdmin = false,
   onBackToAdmin,
+  onBackToDashboard,
   onEditProfile
 }) => {
   const options = [
@@ -204,6 +205,16 @@ const ModeSelectionPage = ({
                   <a href="#/admin/upload">Admin tools</a>
                 </Button>
               </>
+            )}
+            {onBackToDashboard && (
+              <Button
+                variant="outline"
+                className="bg-white/80 hover:bg-white border-gray-200"
+                onClick={onBackToDashboard}
+              >
+                <ChevronLeft className="mr-2 h-4 w-4" />
+                Back to branches
+              </Button>
             )}
             <Button
               onClick={onLogout}
@@ -2706,6 +2717,20 @@ export function RhymesWorkflowApp() {
     setIsEditingSchoolProfile(false);
   }, [isSuperAdminUser, school, clearCoverWorkflowForSchool]);
 
+  const handleReturnToBranchList = useCallback(() => {
+    const currentSchoolId = school?.school_id;
+    if (currentSchoolId) {
+      clearCoverWorkflowForSchool(currentSchoolId);
+    }
+    clearPersistedAppState();
+    setSelectedGrade(null);
+    setSelectedMode(null);
+    setCoverDefaults(mergeCoverDefaults());
+    setIsCoverDetailsStepComplete(false);
+    setSchool(null);
+    setIsEditingSchoolProfile(false);
+  }, [school, clearCoverWorkflowForSchool]);
+
   return (
     <div className="App">
       <Toaster position="top-right" />
@@ -2718,6 +2743,8 @@ export function RhymesWorkflowApp() {
           submitting={schoolFormSubmitting}
           onSubmit={handleSchoolProfileSubmit}
           onCancel={() => setIsEditingSchoolProfile(false)}
+          onBackToHome={!isSuperAdminUser ? () => navigate('/') : undefined}
+          isSuperAdmin={isSuperAdminUser}
         />
       ) : !selectedMode ? (
         <ModeSelectionPage
@@ -2726,6 +2753,7 @@ export function RhymesWorkflowApp() {
           onLogout={handleLogout}
           isSuperAdmin={isSuperAdminUser}
           onBackToAdmin={handleReturnToAdminDashboard}
+          onBackToDashboard={school?.branch_parent_id ? handleReturnToBranchList : undefined}
           onEditProfile={() => setIsEditingSchoolProfile(true)}
         />
       ) : selectedMode === 'cover' && !isCoverDetailsStepComplete ? (

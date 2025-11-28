@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import string
 from datetime import datetime
 import json
@@ -218,6 +219,19 @@ class SchoolCreatePayload(BaseModel):
         )
 
 
+class BranchCreatePayload(BaseModel):
+    parent_school_id: str = Field(..., min_length=1)
+    branch_name: str = Field(..., min_length=2)
+    coordinator_name: str = Field(..., min_length=2)
+    coordinator_email: EmailStr
+    coordinator_phone: str = Field(..., min_length=5)
+
+    address_line1: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pin: Optional[str] = None
+
+
 class SchoolUpdatePayload(BaseModel):
     school_name: Optional[str] = Field(default=None, min_length=2)
     email: Optional[EmailStr] = None
@@ -358,6 +372,7 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         service_type=extract_service_type(record.get("service_type")),
         service_status=normalize_service_status(record.get("service_status")),
         grades=normalize_grades(grades_from_record),
+        branch_parent_id=record.get("branch_parent_id"),
         created_by_user_id=record.get("created_by_user_id"),
         created_by_email=record.get("created_by_email"),
         created_at=record.get("created_at") or record.get("timestamp") or now,
@@ -386,6 +401,26 @@ def create_school_profile(
     if not user_id:
         raise HTTPException(status_code=400, detail="User record is missing a user id")
 
+    email_query = (
+        db.collection("schools").where("email", "==", str(payload.email)).limit(1).get()
+    )
+    phone_query = (
+        db.collection("schools").where("phone", "==", payload.phone).limit(1).get()
+    )
+
+    errors = []
+    if email_query:
+        errors.append("email")
+    if phone_query:
+        errors.append("phone number")
+
+    if errors:
+        error_parts = " and ".join(errors)
+        raise HTTPException(
+            status_code=409,
+            detail=f"A school with this {error_parts} already exists. Please use a different {error_parts}.",
+        )
+
     school_id = generate_school_id(db)
     now = datetime.utcnow()
 
@@ -404,7 +439,7 @@ def create_school_profile(
         "logo_mime_type": logo_mime_type,
         "email": _clean_optional_string(str(payload.email) if payload.email else None),
         "phone": _clean_optional_string(payload.phone),
-        "address": _clean_optional_string(payload.address),
+        "address": compose_address(address_line1, city, state, pin),
         "address_line1": address_line1,
         "city": city,
         "state": state,
@@ -436,13 +471,80 @@ def create_school_profile(
     return build_school_from_record(school_payload)
 
 
+def create_branch_profile(
+    db: firestore.Client,
+    payload: BranchCreatePayload,
+    user_record: Dict[str, Any],
+) -> School:
+    user_id = user_record.get("uid")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="User record is missing a user id")
+
+    parent_school_id = (payload.parent_school_id or "").strip()
+    if not parent_school_id:
+        raise HTTPException(status_code=400, detail="Parent school id is required")
+
+    parent_snapshot = db.collection("schools").document(parent_school_id).get()
+    if not parent_snapshot.exists:
+        raise HTTPException(status_code=404, detail="Parent school not found")
+
+    parent_record = parent_snapshot.to_dict() or {}
+    if parent_record.get("branch_parent_id"):
+        raise HTTPException(status_code=400, detail="Cannot add a branch to another branch")
+
+    role = user_record.get("role")
+    if role != "super-admin" and parent_school_id not in user_record.get("school_ids", []):
+        raise HTTPException(status_code=403, detail="You do not have permission to add a branch to this school")
+
+    branch_id = generate_school_id(db)
+    now = datetime.utcnow()
+
+    address_line1 = _clean_optional_string(payload.address_line1)
+    city = _clean_optional_string(payload.city)
+    state = _clean_optional_string(payload.state)
+    pin = _clean_optional_string(payload.pin)
+
+    branch_payload = {
+        "id": branch_id,
+        "school_id": branch_id,
+        "school_name": payload.branch_name.strip(),
+        "address": compose_address(address_line1, city, state, pin),
+        "address_line1": address_line1,
+        "city": city,
+        "state": state,
+        "pin": pin,
+        "principal_name": _clean_optional_string(payload.coordinator_name),
+        "principal_email": _clean_optional_string(str(payload.coordinator_email)),
+        "principal_phone": _clean_optional_string(payload.coordinator_phone),
+        "branch_parent_id": parent_school_id,
+        "created_by_user_id": user_id,
+        "created_by_email": user_record.get("email"),
+        "created_at": now,
+        "updated_at": now,
+        "timestamp": now,
+    }
+
+    db.collection("schools").document(branch_id).set(branch_payload)
+    db.collection("users").document(user_id).update(
+        {"school_ids": firestore.ArrayUnion([branch_id]), "updated_at": now}
+    )
+
+    existing_ids = set(user_record.get("school_ids", []))
+    existing_ids.add(branch_id)
+    user_record["school_ids"] = list(existing_ids)
+
+    return build_school_from_record(branch_payload)
+
+
 __all__ = [
     "SchoolServiceType",
     "SERVICE_TYPE_VALUES",
     "SchoolCreatePayload",
+    "BranchCreatePayload",
     "SchoolUpdatePayload",
     "build_school_from_record",
     "create_school_profile",
+    "create_branch_profile",
     "extract_service_type",
     "normalize_service_types",
     "normalize_service_status",

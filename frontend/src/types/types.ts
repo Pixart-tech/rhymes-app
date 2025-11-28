@@ -21,6 +21,7 @@ export interface SchoolProfile {
   city?: string | null;
   state?: string | null;
   pin?: string | null;
+  branch_parent_id?: string | null;
   tagline?: string | null;
   principal_name?: string | null;
   principal_email?: string | null;

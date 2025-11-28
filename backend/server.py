@@ -62,6 +62,7 @@ else:  # pragma: no cover - exercised only during normal package imports
 School = auth.School
 SchoolCreatePayload = school_profiles.SchoolCreatePayload
 SchoolUpdatePayload = school_profiles.SchoolUpdatePayload
+BranchCreatePayload = school_profiles.BranchCreatePayload
 
 logger = logging.getLogger(__name__)
 
@@ -419,6 +420,16 @@ async def create_school_profile(
     user_record = _ensure_user_document(decoded_token)
     logo_blob, logo_mime_type = await _read_upload_file(logo_file)
     return school_profiles.create_school_profile(db, payload, user_record, logo_blob, logo_mime_type)
+
+
+@api_router.post("/branches", response_model=School)
+def create_branch_profile(
+    payload: BranchCreatePayload,
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    return school_profiles.create_branch_profile(db, payload, user_record)
 
 
 @api_router.put("/schools/{school_id}", response_model=School)
