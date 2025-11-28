@@ -138,7 +138,6 @@ const buildCoverGradeNames = (source) =>
 const ModeSelectionPage = ({
   school,
   onModeSelect,
-  onLogout,
   isSuperAdmin = false,
   onBackToAdmin,
   onBackToDashboard,
@@ -213,16 +212,9 @@ const ModeSelectionPage = ({
                 onClick={onBackToDashboard}
               >
                 <ChevronLeft className="mr-2 h-4 w-4" />
-                Back to branches
+                Back to dashboard
               </Button>
             )}
-            <Button
-              onClick={onLogout}
-              variant="outline"
-              className="bg-white/80 hover:bg-white border-gray-200"
-            >
-              Logout
-            </Button>
           </div>
         </div>
 
@@ -2735,7 +2727,7 @@ export function RhymesWorkflowApp() {
     <div className="App">
       <Toaster position="top-right" />
       {!school ? (
-        <AuthPage onAuth={handleAuth} />
+        <AuthPage onAuth={handleAuth} onLogout={handleLogout} />
       ) : isEditingSchoolProfile ? (
         <SchoolForm
           mode="edit"
@@ -2750,10 +2742,9 @@ export function RhymesWorkflowApp() {
         <ModeSelectionPage
           school={school}
           onModeSelect={handleModeSelect}
-          onLogout={handleLogout}
           isSuperAdmin={isSuperAdminUser}
           onBackToAdmin={handleReturnToAdminDashboard}
-          onBackToDashboard={school?.branch_parent_id ? handleReturnToBranchList : undefined}
+          onBackToDashboard={!isSuperAdminUser ? handleReturnToBranchList : undefined}
           onEditProfile={() => setIsEditingSchoolProfile(true)}
         />
       ) : selectedMode === 'cover' && !isCoverDetailsStepComplete ? (

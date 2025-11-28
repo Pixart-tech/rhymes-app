@@ -197,6 +197,9 @@ class PDFDependencyUnavailableError(RuntimeError):
       """Raised when the core PDF toolchain cannot be imported at runtime."""
     
 
+class BranchStatusUpdatePayload(BaseModel):
+    status: Literal["active", "inactive"]
+
 
 
 @dataclass(frozen=True)
@@ -367,6 +370,36 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
     user_record = _ensure_user_document(decoded_token)
     workspace_user = _build_workspace_user(user_record)
 
+    if workspace_user.role != "super-admin" and workspace_user.email:
+        normalized_email = workspace_user.email.strip().lower()
+        if normalized_email:
+            school_snapshots = (
+                db.collection("schools").where("created_by_email", "==", normalized_email).get()
+            )
+            new_school_ids: List[str] = []
+            sync_timestamp = datetime.utcnow()
+
+            for snapshot in school_snapshots:
+                school_id = snapshot.id
+                if school_id in workspace_user.school_ids:
+                    continue
+
+                school_data = snapshot.to_dict() or {}
+                school_updates: Dict[str, Any] = {}
+                if school_data.get("created_by_user_id") != workspace_user.uid:
+                    school_updates["created_by_user_id"] = workspace_user.uid
+                if school_updates:
+                    school_updates["updated_at"] = sync_timestamp
+                    db.collection("schools").document(school_id).update(school_updates)
+
+                new_school_ids.append(school_id)
+
+            if new_school_ids:
+                db.collection("users").document(workspace_user.uid).update(
+                    {"school_ids": firestore.ArrayUnion(new_school_ids), "updated_at": sync_timestamp}
+                )
+                workspace_user.school_ids.extend(new_school_ids)
+
     schools: List[School] = []
     for school_id in workspace_user.school_ids:
         if not school_id:
@@ -514,6 +547,48 @@ async def update_school_profile(
     existing.setdefault("school_id", snapshot.id)
 
     return school_profiles.build_school_from_record(existing)
+
+
+@api_router.patch("/schools/{school_id}/status", response_model=School)
+def update_branch_status(
+    school_id: str,
+    payload: BranchStatusUpdatePayload,
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    uid = user_record.get("uid")
+    if not uid:
+        raise HTTPException(status_code=400, detail="User record is missing a user id")
+
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    record = snapshot.to_dict() or {}
+    parent_id = record.get("branch_parent_id")
+    if not parent_id:
+        raise HTTPException(status_code=400, detail="Only branch profiles can have their status updated")
+
+    role = user_record.get("role", DEFAULT_USER_ROLE)
+    if role != "super-admin" and record.get("created_by_user_id") != uid:
+        raise HTTPException(status_code=403, detail="You do not have permission to update this branch")
+
+    branch_status: school_profiles.BranchStatus = payload.status
+    if branch_status not in (school_profiles.BRANCH_STATUS_ACTIVE, school_profiles.BRANCH_STATUS_INACTIVE):
+        raise HTTPException(status_code=400, detail="Invalid branch status")
+
+    now = datetime.utcnow()
+    updates = {
+        "status": branch_status,
+        "updated_at": now,
+        "timestamp": now,
+    }
+    doc_ref.update(updates)
+    record.update(updates)
+
+    return school_profiles.build_school_from_record(record)
 
 
 @api_router.get("/schools/{school_id}/logo")

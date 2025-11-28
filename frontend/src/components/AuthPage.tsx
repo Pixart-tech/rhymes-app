@@ -14,17 +14,17 @@ import {
   UserRoundPen,
   Search,
   MoreVertical,
-  Clock,
   TrendingUp
 } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth';
 import { storage } from '../lib/firebase';
-import { API_BASE_URL } from '../lib/utils';
+import { API_BASE_URL, cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from './ui/card';
 import {
   AdminSchoolProfile,
+  BranchStatus,
   GradeKey,
   SchoolProfile,
   SchoolFormValues,
@@ -41,13 +41,13 @@ import {
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger
 } from './ui/dropdown-menu';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
 const API = API_BASE_URL || '/api';
 
@@ -96,6 +96,7 @@ interface WorkspaceSession {
 
 interface AuthPageProps {
   onAuth: (selection: { school: SchoolProfile; user: WorkspaceUserProfile }) => void;
+  onLogout: () => void;
 }
 
 interface PaginatedAdminSchoolsResponse {
@@ -104,7 +105,7 @@ interface PaginatedAdminSchoolsResponse {
   total_count?: number;
 }
 
-const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
+const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const { user, signInWithGoogle, loading: authLoading, getIdToken } = useAuth();
   const [workspaceUser, setWorkspaceUser] = useState<WorkspaceUserProfile | null>(null);
   const [schools, setSchools] = useState<SchoolProfile[]>([]);
@@ -115,6 +116,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
   const [submitting, setSubmitting] = useState(false);
   const [branchParent, setBranchParent] = useState<SchoolProfile | null>(null);
   const [branchSubmitting, setBranchSubmitting] = useState(false);
+  const [branchStatusUpdatingId, setBranchStatusUpdatingId] = useState<string | null>(null);
   const [adminSchools, setAdminSchools] = useState<AdminSchoolProfile[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState<string | null>(null);
@@ -411,7 +413,16 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     () => adminSchools.filter((school) => Boolean(school.branch_parent_id)).length,
     [adminSchools]
   );
-  const adminUserCount = useMemo(() => {
+    const activeAdminSchoolsCount = useMemo(
+      () =>
+        adminSchools.filter((school) => {
+          const status = school.status ?? 'active';
+          return status === 'active';
+        }).length,
+      [adminSchools]
+    );
+    const inactiveAdminSchoolsCount = Math.max(0, totalAdminSchoolsCount - activeAdminSchoolsCount);
+    const adminUserCount = useMemo(() => {
     const userIds = new Set<string>();
     adminSchools.forEach((school) => {
       const identifier = school.created_by_user_id ?? school.created_by_email ?? '';
@@ -571,6 +582,66 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     setView('list');
   }, []);
 
+  const handleEditSchool = useCallback(
+    (school: SchoolProfile) => {
+      setEditingSchool(school);
+      setView('edit');
+    },
+    [setView]
+  );
+
+  const handleEditBranch = useCallback(
+    (branch: SchoolProfile) => {
+      setEditingSchool(branch);
+      setView('edit');
+    },
+    [setView]
+  );
+
+  const handleBranchStatusChange = useCallback(
+    async (branch: SchoolProfile, targetStatus: BranchStatus) => {
+      if (!workspaceUser) {
+        return;
+      }
+      if (targetStatus === 'inactive') {
+        const confirmed = window.confirm('Are you sure you want to discontinue this branch? This cannot be undone.');
+        if (!confirmed) {
+          return;
+        }
+      }
+      setBranchStatusUpdatingId(branch.school_id);
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+        const response = await axios.patch<SchoolProfile>(
+          `${API}/schools/${branch.school_id}/status`,
+          { status: targetStatus },
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        const updatedBranch = response.data;
+        setSchools((prev) => prev.map((school) => (school.school_id === updatedBranch.school_id ? updatedBranch : school)));
+        setAdminSchools((prev) =>
+          prev.map((school) => (school.school_id === updatedBranch.school_id ? { ...school, ...updatedBranch } : school))
+        );
+        toast.success(
+          targetStatus === 'active' ? 'Branch activated' : 'Branch discontinued'
+        );
+      } catch (error) {
+        console.error('Failed to update branch status', error);
+        toast.error(
+          `Unable to ${targetStatus === 'active' ? 'activate' : 'discontinue'} branch. Please try again.`
+        );
+      } finally {
+        setBranchStatusUpdatingId(null);
+      }
+    },
+    [getIdToken, setAdminSchools, setSchools, workspaceUser]
+  );
+
   const handleAddBranch = useCallback(
     (school: SchoolProfile) => {
       setBranchParent(school);
@@ -719,7 +790,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
   };
 
   const isSuperAdmin = workspaceUser?.role === 'super-admin';
-  const isCreateView = !isSuperAdmin && (view === 'create' || schools.length === 0);
+  const isCreateView = view === 'create' || (!isSuperAdmin && schools.length === 0);
   const isEditView = view === 'edit' && Boolean(editingSchool);
   const isBranchView = view === 'branch' && Boolean(branchParent);
 
@@ -727,6 +798,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     const { rootSchools, branchMap, orphanBranches } = branchStructure;
     const hasSchools = schools.length > 0;
     const hasRootSchools = rootSchools.length > 0;
+    const primarySchool = hasRootSchools ? rootSchools[0] : null;
+    const primaryBranches = primarySchool ? branchMap.get(primarySchool.school_id) ?? [] : [];
 
     return (
       <div className="space-y-6">
@@ -749,14 +822,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                 Edit profile
               </Button>
               <Button
-                className="bg-slate-900 text-white hover:bg-slate-800"
-                onClick={() => {
-                  setEditingSchool(null);
-                  setView('create');
-                }}
+                variant="outline"
+                className="border-rose-200 text-rose-700 hover:border-rose-300"
+                onClick={onLogout}
               >
-                <Plus className="h-4 w-4" />
-                Create new school
+                Logout
               </Button>
             </div>
           </CardHeader>
@@ -778,120 +848,152 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                       Create a parent school
                     </Button>
                   </div>
-                ) : (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {rootSchools.map((school) => {
-                      const logoSrc = getLogoSrc(school, logoMap);
-                      const branchList = branchMap.get(school.school_id) ?? [];
-                      const canEdit = school.created_by_user_id === workspaceUser?.uid;
-                      return (
-                        <Card key={school.school_id} className="border border-slate-100 bg-slate-50/60 shadow-sm">
-                          <CardHeader className="space-y-3">
-                            <div className="flex items-center gap-3">
-                              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-sky-100 to-emerald-100 text-slate-700 shadow">
-                                {logoSrc ? (
-                                  <img
-                                    src={logoSrc}
-                                    alt={school.school_name}
-                                    className="h-12 w-12 rounded-full object-cover"
-                                  />
-                                ) : (
-                                  <School className="h-6 w-6" />
-                                )}
-                              </div>
-                              <div>
-                                <CardTitle className="text-lg text-slate-900">{school.school_name}</CardTitle>
-                                <p className="text-xs uppercase tracking-wide text-slate-500">ID: {school.school_id}</p>
-                              </div>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="space-y-4">
-                            <div className="space-y-1 text-sm text-slate-600">
-                              {school.email && <p>Email: {school.email}</p>}
-                              {school.phone && <p>Phone: {school.phone}</p>}
-                              {school.address && <p className="line-clamp-2">Address: {school.address}</p>}
-                              {school.tagline && <p className="italic text-slate-500">{school.tagline}</p>}
-                            </div>
-                            <div className="space-y-3 rounded-2xl border border-slate-100 bg-white/70 p-4">
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="text-sm font-semibold text-slate-700">Branches ({branchList.length})</p>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="flex items-center gap-1 border-slate-200 text-slate-700 hover:border-slate-300"
-                                  onClick={() => handleAddBranch(school)}
+                ) : primarySchool ? (
+                  <div className="space-y-5">
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-6 shadow-inner">
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-sky-100 to-emerald-100 text-slate-700 shadow">
+                          {getLogoSrc(primarySchool, logoMap) ? (
+                            <img
+                              src={getLogoSrc(primarySchool, logoMap)}
+                              alt={primarySchool.school_name}
+                              className="h-14 w-14 rounded-full object-cover"
+                            />
+                          ) : (
+                            <School className="h-6 w-6" />
+                          )}
+                        </div>
+                        <div>
+                          <CardTitle className="text-xl text-slate-900">{primarySchool.school_name}</CardTitle>
+                          <p className="text-xs uppercase tracking-wide text-slate-500">ID: {primarySchool.school_id}</p>
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-1 text-sm text-slate-600">
+                        {primarySchool.email && <p>Email: {primarySchool.email}</p>}
+                        {primarySchool.phone && <p>Phone: {primarySchool.phone}</p>}
+                        {primarySchool.address && <p className="line-clamp-2">Address: {primarySchool.address}</p>}
+                        {primarySchool.tagline && <p className="italic text-slate-500">{primarySchool.tagline}</p>}
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          className="flex items-center gap-2 border-slate-200 text-slate-700 hover:border-slate-300"
+                          onClick={() => handleSchoolSelect(primarySchool)}
+                        >
+                          <Eye className="h-4 w-4" />
+                          View
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="flex items-center gap-2 border-amber-200 text-amber-700 hover:border-amber-300"
+                          onClick={() => handleEditSchool(primarySchool)}
+                        >
+                          <Edit3 className="h-4 w-4" />
+                          Edit
+                        </Button>
+                      </div>
+                      <div className="mt-5 space-y-3 rounded-2xl border border-slate-100 bg-white/70 p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-slate-700">Branches ({primaryBranches.length})</p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-1 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300"
+                            onClick={() => {
+                              if (primarySchool) handleAddBranch(primarySchool);
+                            }}
+                          >
+                            <Plus className="h-4 w-4" />
+                            Add branch
+                          </Button>
+                        </div>
+                        {primaryBranches.length === 0 ? (
+                          <p className="text-xs text-slate-500">No branches yet.</p>
+                        ) : (
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {primaryBranches.map((branch) => {
+                              const branchAddress = formatBranchAddress(branch);
+                              const branchStatus = branch.status ?? 'active';
+                              const isActive = branchStatus === 'active';
+                              const isUpdating = branchStatusUpdatingId === branch.school_id;
+                              return (
+                                <div
+                                  key={branch.school_id}
+                                  className={cn(
+                                    'rounded-2xl border p-3 transition-colors',
+                                    isActive ? 'border-slate-200 bg-slate-50/70' : 'border-rose-200 bg-rose-50/80'
+                                  )}
                                 >
-                                  <Plus className="h-4 w-4" />
-                                  Add branch
-                                </Button>
-                              </div>
-                              {branchList.length === 0 ? (
-                                <p className="text-xs text-slate-500">No branches yet.</p>
-                              ) : (
-                                <div className="space-y-3">
-                                  {branchList.map((branch) => {
-                                    const branchAddress = formatBranchAddress(branch);
-                                    return (
-                                      <div
-                                        key={branch.school_id}
-                                        className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3"
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                      <p className="text-sm font-semibold text-slate-900">{branch.school_name}</p>
+                                      <p className="text-xs text-slate-500">ID: {branch.school_id}</p>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 space-y-1 text-xs text-slate-500">
+                                    {branch.principal_name && <p>Coordinator: {branch.principal_name}</p>}
+                                    {branch.principal_email && <p>Email: {branch.principal_email}</p>}
+                                    {branch.principal_phone && <p>Phone: {branch.principal_phone}</p>}
+                                    {branchAddress && <p>Address: {branchAddress}</p>}
+                                  </div>
+                                  {!isActive && (
+                                    <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-rose-700">
+                                      Status: inactive
+                                    </p>
+                                  )}
+                                  <div className="mt-4 flex flex-wrap gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300"
+                                      onClick={() => handleEditBranch(branch)}
+                                      disabled={isUpdating}
+                                    >
+                                      <Edit3 className="h-4 w-4" />
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300"
+                                      onClick={() => handleSchoolSelect(branch)}
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                      View
+                                    </Button>
+                                    {isActive ? (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300 shadow-sm"
+                                        onClick={() => handleBranchStatusChange(branch, 'inactive')}
+                                        disabled={isUpdating}
                                       >
-                                        <div className="flex items-center justify-between gap-3">
-                                          <div>
-                                            <p className="text-sm font-semibold text-slate-900">{branch.school_name}</p>
-                                            <p className="text-xs text-slate-500">ID: {branch.school_id}</p>
-                                          </div>
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="border-slate-200 text-slate-700 hover:border-slate-300"
-                                            onClick={() => handleSchoolSelect(branch)}
-                                          >
-                                            <Eye className="h-4 w-4" />
-                                            View
-                                          </Button>
-                                        </div>
-                                        <div className="mt-2 space-y-1 text-xs text-slate-500">
-                                          {branch.principal_name && <p>Coordinator: {branch.principal_name}</p>}
-                                          {branch.principal_email && <p>Email: {branch.principal_email}</p>}
-                                          {branch.principal_phone && <p>Phone: {branch.principal_phone}</p>}
-                                          {branchAddress && <p>Address: {branchAddress}</p>}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+                                        <Trash2 className="h-4 w-4" />
+                                        Discontinue
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300"
+                                        onClick={() => handleBranchStatusChange(branch, 'active')}
+                                        disabled={isUpdating}
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                        Activate
+                                      </Button>
+                                    )}
+                                  </div>
                                 </div>
-                              )}
-                            </div>
-                          </CardContent>
-                          <CardFooter className="flex flex-wrap gap-2">
-                            <Button
-                              variant="outline"
-                              className="flex-1 border-slate-200 text-slate-700 hover:border-slate-300"
-                              onClick={() => handleSchoolSelect(school)}
-                            >
-                              <Eye className="h-4 w-4" />
-                              View
-                            </Button>
-                            {canEdit && (
-                              <Button
-                                variant="outline"
-                                className="flex-1 border-slate-200 text-slate-700 hover:border-slate-300"
-                                onClick={() => {
-                                  setEditingSchool(school);
-                                  setView('edit');
-                                }}
-                              >
-                                <Edit3 className="h-4 w-4" />
-                                Edit
-                              </Button>
-                            )}
-                          </CardFooter>
-                        </Card>
-                      );
-                    })}
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                )}
+                ) : null}
                 {orphanBranches.length > 0 && (
                   <Card className="border border-slate-100 bg-white/80 shadow-sm">
                     <CardHeader className="space-y-2">
@@ -900,7 +1002,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                         These branches reference a school that is not currently listed in your workspace.
                       </p>
                     </CardHeader>
-                    <CardContent className="space-y-3">
+                    <CardContent className="grid gap-3 sm:grid-cols-2">
                       {orphanBranches.map((branch) => {
                         const branchAddress = formatBranchAddress(branch);
                         return (
@@ -916,7 +1018,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="border-slate-200 text-slate-700 hover:border-slate-300"
+                                className="border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:border-sky-300"
                                 onClick={() => handleSchoolSelect(branch)}
                               >
                                 <Eye className="h-4 w-4" />
@@ -990,7 +1092,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
             </div>
           </div>
         </CardHeader>
-        <div className="h-1 w-32 rounded-full bg-gradient-to-r from-sky-300 via-cyan-100 to-emerald-200" aria-hidden="true" />
+            <div className="h-1 w-32 rounded-full bg-gradient-to-r from-sky-300 via-cyan-100 to-emerald-200" aria-hidden="true" />
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5">
               <p className="text-sm text-slate-500">Total selections</p>
@@ -1007,6 +1109,16 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                 <School className="h-3.5 w-3.5" />
                 All schools currently listed
               </span>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-100 bg-emerald-50 p-4">
+                  <p className="text-xs uppercase tracking-wide text-emerald-700">Active schools</p>
+                  <p className="text-2xl font-semibold text-emerald-900">{activeAdminSchoolsCount}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-100 bg-rose-50 p-4">
+                  <p className="text-xs uppercase tracking-wide text-rose-700">Inactive schools</p>
+                  <p className="text-2xl font-semibold text-rose-900">{inactiveAdminSchoolsCount}</p>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -1091,6 +1203,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                           Branches
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Status
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                           Selections
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1109,6 +1224,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                         const logoSrc = getLogoSrc(school, logoMap);
                         const gradeCount = Object.values(school.grades || {}).filter((grade) => grade.enabled).length;
                         const isDeleting = deletingSchoolId === school.school_id;
+                        const branchStatus = school.status ?? 'active';
+                        const isBranch = Boolean(school.branch_parent_id);
+                        const isBranchUpdating = branchStatusUpdatingId === school.school_id;
                         const services = school.service_type ?? [];
 
                         return (
@@ -1166,6 +1284,17 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                                 </span>
                               )}
                             </td>
+                            <td className="px-4 py-4">
+                              <span
+                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                                  branchStatus === 'active'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-rose-50 text-rose-700'
+                                }`}
+                              >
+                                {branchStatus === 'active' ? 'Active' : 'Inactive'}
+                              </span>
+                            </td>
                             <td className="px-4 py-4 text-slate-700">{school.total_selections ?? 0}</td>
                             <td className="px-4 py-4 text-slate-700">{gradeCount}</td>
                             <td className="px-4 py-4 text-slate-700">
@@ -1181,7 +1310,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent
                                   align="end"
-                                  className="w-40 rounded-2xl border border-slate-100 bg-white shadow-lg"
+                                  className="w-48 rounded-2xl border border-slate-100 bg-white shadow-lg"
                                 >
                                   <DropdownMenuItem onClick={() => handleSchoolSelect(school)}>
                                     View
@@ -1194,16 +1323,36 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                                   >
                                     Edit
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      void handleAdminDelete(school.school_id);
-                                    }}
-                                    className="text-red-600"
-                                  >
-                                    Delete
-                                  </DropdownMenuItem>
+                                  {school.branch_parent_id ? (
+                                    branchStatus === 'inactive' ? (
+                                      <DropdownMenuItem
+                                        onClick={() => handleBranchStatusChange(school, 'active')}
+                                        disabled={isBranchUpdating}
+                                      >
+                                        Activate
+                                      </DropdownMenuItem>
+                                    ) : (
+                                      <DropdownMenuItem
+                                        onClick={() => handleBranchStatusChange(school, 'inactive')}
+                                        disabled={isBranchUpdating}
+                                        className="text-rose-600"
+                                      >
+                                        Discontinue
+                                      </DropdownMenuItem>
+                                    )
+                                  ) : (
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        void handleAdminDelete(school.school_id);
+                                      }}
+                                      disabled={deletingSchoolId === school.school_id}
+                                      className="text-red-600"
+                                    >
+                                      Delete
+                                    </DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem onClick={() => handleDownloadBinder(school.school_id)}>
-                                    Download binder
+                                    Binder
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
@@ -1288,10 +1437,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                   </>
                 )}
               </Button>
-              <p className="text-sm text-gray-600 text-center">
-                Choose your Google account to access your workspace. Roles are detected automatically—no manual email
-                entry needed.
-              </p>
             </div>
           </CardContent>
         </Card>

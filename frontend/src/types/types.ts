@@ -2,7 +2,8 @@
 export type SchoolServiceType = 'id_cards' | 'report_cards' | 'certificates';
 
 export type ServiceStatus = 'yes' | 'no';
-export type ServiceStatusMap = Record<SchoolServiceType, ServiceStatus>;
+export type OptionalServiceStatus = ServiceStatus | '';
+export type ServiceStatusMap = Record<SchoolServiceType, OptionalServiceStatus>;
 
 export type GradeKey = 'toddler' | 'playgroup' | 'nursery' | 'lkg' | 'ukg';
 export interface GradeSetting {
@@ -10,6 +11,7 @@ export interface GradeSetting {
   label: string;
 }
 export type GradeMap = Record<GradeKey, GradeSetting>;
+export type BranchStatus = 'active' | 'inactive';
 
 export interface SchoolProfile {
   school_id: string;
@@ -30,6 +32,8 @@ export interface SchoolProfile {
   service_status?: ServiceStatusMap;
   grades?: GradeMap;
   service_type?: SchoolServiceType[];
+  status?: BranchStatus;
+  id_card_fields?: string[];
   created_by_user_id?: string | null;
   created_by_email?: string | null;
   timestamp?: string;
@@ -52,6 +56,7 @@ export interface SchoolFormValues {
   principal_phone: string;
   service_status: ServiceStatusMap;
   grades: GradeMap;
+  id_card_fields: string[];
 }
 
 export interface RhymeSelectionDetail {

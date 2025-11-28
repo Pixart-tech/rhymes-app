@@ -19,6 +19,7 @@ import {
   ServiceStatusMap,
 } from '../types/types';
 import ImageCropperDialog from './ImageCropper';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 
 const getLogoPreview = (vals: SchoolFormValues) => vals.logo_url || '';
 const TOTAL_SECTIONS = 3;
@@ -43,12 +44,31 @@ const SERVICE_OPTIONS: { value: SchoolServiceType; prompt: string }[] = [
   { value: 'certificates', prompt: 'Are you taking certificates?' }
 ];
 
+const ID_CARD_FIELD_OPTIONS = [
+  'Student Name',
+  'Class',
+  'Student Image',
+  'Date of Birth',
+  'Father name',
+  'Father number',
+  'Father image',
+  'Mother name',
+  'Mother number',
+  'Mother image',
+  'Address',
+  'Student Age',
+  'Student Blood group',
+  'Admission Number',
+  'Roll number'
+];
+const MAX_ID_CARD_FIELDS = 10;
+
 export const SCHOOL_SERVICE_KEYS: SchoolServiceType[] = ['id_cards', 'report_cards', 'certificates'];
 
 const createDefaultServiceStatus = (): ServiceStatusMap => ({
-  id_cards: 'no',
-  report_cards: 'no',
-  certificates: 'no'
+  id_cards: '',
+  report_cards: '',
+  certificates: ''
 });
 
 const buildServiceStatusFromProfile = (profile?: SchoolProfile | null): ServiceStatusMap => {
@@ -112,7 +132,8 @@ export const buildSchoolFormValuesFromProfile = (
     principal_email: profile?.principal_email ?? '',
     principal_phone: profile?.principal_phone ?? '',
     service_status: buildServiceStatusFromProfile(profile),
-    grades: buildGradeMapFromProfile(profile)
+    grades: buildGradeMapFromProfile(profile),
+    id_card_fields: profile?.id_card_fields ?? []
   };
 };
 
@@ -130,8 +151,12 @@ export const buildSchoolFormData = (values: SchoolFormValues): FormData => {
   formData.append('principal_name', values.principal_name);
   formData.append('principal_email', values.principal_email);
   formData.append('principal_phone', values.principal_phone);
-  formData.append('service_status', JSON.stringify(values.service_status));
+  const normalizedServiceStatus = Object.fromEntries(
+    Object.entries(values.service_status).map(([key, value]) => [key, value || 'no'])
+  );
+  formData.append('service_status', JSON.stringify(normalizedServiceStatus));
   formData.append('grades', JSON.stringify(values.grades));
+  formData.append('id_card_fields', JSON.stringify(values.id_card_fields));
   if (values.logo_file) {
     formData.append('logo_file', values.logo_file);
   }
@@ -197,7 +222,12 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
     Boolean(initialValues.phone && initialValues.phone === initialValues.principal_phone)
   );
   const [invalidFields, setInvalidFields] = useState(new Set<string>());
-
+  const [idFieldDialogOpen, setIdFieldDialogOpen] = useState(false);
+  const [customIdField, setCustomIdField] = useState('');
+  const [showCustomFieldInput, setShowCustomFieldInput] = useState(false);
+  const [idFieldDialogSkipped, setIdFieldDialogSkipped] = useState(false);
+  const prevIdCardStatus = useRef(initialValues.service_status.id_cards);
+ 
   useEffect(() => {
     setValues(initialValues);
     setLogoPreviewUrl(getLogoPreview(initialValues));
@@ -305,9 +335,9 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
         return;
       }
 
-      const allowedTypes = ['image/jpeg', 'image/png'];
+      const allowedTypes = ['image/png'];
       if (!allowedTypes.includes(file.type)) {
-        toast.error('Invalid file type. Please select a PNG or JPEG image.');
+        toast.error('Invalid file type. Please select a PNG image.');
         handleCropperClose();
         setValues((prev) => ({ ...prev, logo_file: null }));
         input.value = '';
@@ -337,11 +367,22 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
 
   const onCropComplete = useCallback(
     async (croppedImage: Blob) => {
-      const file = new File([croppedImage], 'logo.jpg', { type: 'image/jpeg' });
+      const file = new File([croppedImage], 'logo.png', { type: 'image/png' });
       setValues((prev) => ({ ...prev, logo_file: file, logo_url: null }));
     },
     []
   );
+
+  const handleDialogDone = useCallback(() => {
+    setIdFieldDialogOpen(false);
+    setShowCustomFieldInput(false);
+  }, []);
+
+  const handleDialogSkip = useCallback(() => {
+    setIdFieldDialogSkipped(true);
+    setIdFieldDialogOpen(false);
+    setShowCustomFieldInput(false);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -364,10 +405,72 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
         [service]: status
       }
     }));
+    if (service === 'id_cards' && status !== 'yes') {
+      setIdFieldDialogSkipped(false);
+    }
   };
+
+  useEffect(() => {
+    const current = values.service_status.id_cards;
+    if (current === 'yes' && prevIdCardStatus.current !== 'yes' && !idFieldDialogSkipped) {
+      setShowCustomFieldInput(false);
+      setIdFieldDialogOpen(true);
+    }
+    prevIdCardStatus.current = current;
+  }, [values.service_status.id_cards, idFieldDialogSkipped]);
+
+  const toggleIdCardField = useCallback(
+    (field: string) => {
+      setValues((prev) => {
+        const exists = prev.id_card_fields.includes(field);
+        if (exists) {
+          return { ...prev, id_card_fields: prev.id_card_fields.filter((name) => name !== field) };
+        }
+        if (prev.id_card_fields.length >= MAX_ID_CARD_FIELDS) {
+          toast.error(`You can select up to ${MAX_ID_CARD_FIELDS} fields.`);
+          return prev;
+        }
+        return { ...prev, id_card_fields: [...prev.id_card_fields, field] };
+      });
+      setIdFieldDialogSkipped(false);
+    },
+    []
+  );
+
+  const handleAddCustomIdField = useCallback(() => {
+    const trimmed = customIdField.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (values.id_card_fields.includes(trimmed)) {
+      toast.error('Field already selected.');
+      return;
+    }
+    if (values.id_card_fields.length >= MAX_ID_CARD_FIELDS) {
+      toast.error(`You can select up to ${MAX_ID_CARD_FIELDS} fields.`);
+      return;
+    }
+    setValues((prev) => ({ ...prev, id_card_fields: [...prev.id_card_fields, trimmed] }));
+    setIdFieldDialogSkipped(false);
+    setCustomIdField('');
+  }, [customIdField, values.id_card_fields]);
+
+  useEffect(() => {
+    const current = values.service_status.id_cards;
+    if (current === 'yes' && prevIdCardStatus.current !== 'yes' && !idFieldDialogSkipped) {
+      setShowCustomFieldInput(false);
+      setIdFieldDialogOpen(true);
+    }
+    prevIdCardStatus.current = current;
+  }, [values.service_status.id_cards, idFieldDialogSkipped]);
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setInvalidFields(new Set());
+    if (!validateSection3()) {
+      setCurrentSection(TOTAL_SECTIONS);
+      return;
+    }
     onSubmit({ values });
   };
 
@@ -418,6 +521,25 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
     if (errors.size > 0) {
         toast.error("Please provide a name for all enabled grades.");
         return false;
+    }
+    return true;
+  };
+
+  const validateSection3 = () => {
+    const hasSelection = Object.values(values.service_status).some((status) => status !== '');
+    if (!hasSelection) {
+      const errors = new Set<string>();
+      errors.add('service_status');
+      setInvalidFields(errors);
+      toast.error('Please select at least one service option.');
+      return false;
+    }
+    if (values.service_status.id_cards === 'yes' && values.id_card_fields.length === 0 && !idFieldDialogSkipped) {
+      const errors = new Set<string>();
+      errors.add('id_card_fields');
+      setInvalidFields(errors);
+      toast.error('Select at least one ID card field.');
+      return false;
     }
     return true;
   };
@@ -538,7 +660,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                     <Input
                       id="logo"
                       type="file"
-                      accept="image/png, image/jpeg"
+                      accept="image/png"
                       onChange={handleLogoChange}
                       disabled={submitting}
                       required={!logoPreviewUrl}
@@ -794,10 +916,127 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                     </div>
                   ))}
                 </div>
+                {invalidFields.has('service_status') && (
+                  <p className="text-xs text-red-600">Please select at least one service option.</p>
+                )}
+                {values.service_status.id_cards === 'yes' && (
+                  <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold">ID card fields</span>
+                      <span>
+                        {values.id_card_fields.length}/{MAX_ID_CARD_FIELDS}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Select up to {MAX_ID_CARD_FIELDS} fields. Add custom fields if needed.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setIdFieldDialogSkipped(false);
+                        setIdFieldDialogOpen(true);
+                      }}
+                    >
+                      Configure ID card fields
+                    </Button>
+                    {invalidFields.has('id_card_fields') && (
+                      <p className="text-xs text-red-600">Please choose at least one field for the ID card.</p>
+                    )}
+                  </div>
+                )}
               </section>
             )}
           </fieldset>
 
+          <Dialog
+            open={idFieldDialogOpen}
+            onOpenChange={(open) => {
+              setIdFieldDialogOpen(open);
+              if (!open) {
+                setShowCustomFieldInput(false);
+              }
+            }}
+          >
+            <DialogContent className="max-w-xl">
+              <DialogHeader className="space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <DialogTitle>Select ID card fields</DialogTitle>
+                    <p className="text-xs text-slate-500">
+                      Selected fields will be collected further—kindly cooperate with us.
+                    </p>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" onClick={handleDialogSkip}>
+                    Skip for now
+                  </Button>
+                </div>
+                <DialogDescription>
+                  Choose up to {MAX_ID_CARD_FIELDS} fields you'd like to show on ID cards.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid grid-cols-2 gap-3 max-h-72 overflow-y-auto pb-4">
+                {ID_CARD_FIELD_OPTIONS.map((field) => {
+                  const checked = values.id_card_fields.includes(field);
+                  const isDisabled = !checked && values.id_card_fields.length >= MAX_ID_CARD_FIELDS;
+                  return (
+                    <label
+                      key={field}
+                      className={`flex items-center gap-3 rounded-lg border px-3 py-2 hover:border-slate-300 ${
+                        isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={isDisabled}
+                        onChange={() => toggleIdCardField(field)}
+                      />
+                      <span className={`text-sm ${checked ? 'font-semibold' : ''}`}>{field}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="space-y-3 border-t border-slate-100 pt-4">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="toggle-custom-field"
+                    checked={showCustomFieldInput}
+                    onCheckedChange={(checked) => setShowCustomFieldInput(Boolean(checked))}
+                  />
+                  <Label htmlFor="toggle-custom-field">Add custom field</Label>
+                </div>
+                {showCustomFieldInput && (
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Custom field name (e.g. House name)"
+                      value={customIdField}
+                      onChange={(event) => setCustomIdField(event.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleAddCustomIdField}
+                      disabled={
+                        !customIdField.trim() || values.id_card_fields.length >= MAX_ID_CARD_FIELDS
+                      }
+                    >
+                      Add
+                    </Button>
+                  </div>
+                )}
+                <p className="text-xs text-slate-500">
+                  Selected {values.id_card_fields.length}/{MAX_ID_CARD_FIELDS} fields.
+                </p>
+              </div>
+              <DialogFooter className="pt-4">
+                <Button type="button" onClick={handleDialogDone}>
+                  Done
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <CardFooter className="mt-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-end">
             <div className="flex gap-2">
