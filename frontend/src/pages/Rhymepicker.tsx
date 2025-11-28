@@ -1373,6 +1373,40 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
   }, [selectedRhymes]);
 
+  const selectedRhymeCodes = useMemo(
+    () => new Set((selectedRhymes || []).map((rhyme) => rhyme?.code).filter(Boolean)),
+    [selectedRhymes]
+  );
+
+  const filterRhymesDataBySelection = useCallback(
+    (rhymesData) => {
+      if (!rhymesData || typeof rhymesData !== 'object') {
+        return {};
+      }
+
+      return Object.entries(rhymesData).reduce((acc, [pageKey, rhymes]) => {
+        const filtered = Array.isArray(rhymes)
+          ? rhymes.filter((item) => item && !selectedRhymeCodes.has(item.code))
+          : [];
+
+        if (filtered.length > 0) {
+          acc[pageKey] = filtered;
+        }
+
+        return acc;
+      }, {});
+    },
+    [selectedRhymeCodes]
+  );
+
+  const filteredAvailableRhymes = useMemo(
+    () => filterRhymesDataBySelection(availableRhymes),
+    [availableRhymes, filterRhymesDataBySelection]
+  );
+
+  // Reusable rhymes remain visible even when selected, so they are not filtered out
+  const filteredReusableRhymes = reusableRhymes;
+
 
   const normalizeSvgPages = useCallback(
     (svgContent) => {
@@ -2500,8 +2534,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                 </div>
                 <div className="flex-1 min-h-0 overflow-hidden px-2 pb-4 sm:px-4">
                   <TreeMenu
-                    rhymesData={availableRhymes}
-                    reusableRhymes={reusableRhymes}
+                    rhymesData={filteredAvailableRhymes}
+                    reusableRhymes={filteredReusableRhymes}
                     showReusable={showReusable}
                     onRhymeSelect={handleRhymeSelect}
                     onToggleReusable={handleToggleReusable}
