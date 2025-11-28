@@ -255,7 +255,7 @@ const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
             </p>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 sm:gap-5 md:grid-cols-3 md:gap-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 md:grid-cols-3 md:gap-6">
               {options.map((option) => {
                 const IconComponent = option.icon;
                 return (
