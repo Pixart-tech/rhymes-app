@@ -1,5 +1,6 @@
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink';
+const imageObjectUrlCache = new Map();
 
 const getHeaderValue = (headers, key) => {
   if (!headers) {
@@ -517,6 +518,129 @@ export const sanitizeRhymeSvgContent = (svgContent, rhymeCode) => {
     console.error('Error sanitizing rhyme SVG:', error);
     return svgContent;
   }
+};
+
+const extractFileNameFromHref = (href) => {
+  if (typeof href !== 'string' || href.trim().length === 0) {
+    return '';
+  }
+
+  const trimmed = href.trim();
+
+  if (/^data:/i.test(trimmed)) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(trimmed, 'https://example.invalid');
+    const pathName = parsed.pathname || '';
+    const segments = pathName.split(/[\\/]+/);
+    return decodeURIComponent(segments.pop() || '');
+  } catch (error) {
+    const sanitized = trimmed.replace(/[#?].*$/, '');
+    const segments = sanitized.split(/[\\/]+/);
+    return decodeURIComponent(segments.pop() || '');
+  }
+};
+
+export const rewriteSvgImagesWithApi = async (svgMarkup, rhymeCode, apiBaseUrl, cache = imageObjectUrlCache) => {
+  if (typeof svgMarkup !== 'string' || svgMarkup.trim().length === 0) {
+    return svgMarkup;
+  }
+
+  if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
+    return svgMarkup;
+  }
+
+  try {
+    const parser = new window.DOMParser();
+    const doc = parser.parseFromString(svgMarkup, 'image/svg+xml');
+    const svgElement = doc.documentElement?.tagName?.toLowerCase() === 'svg'
+      ? doc.documentElement
+      : doc.querySelector('svg');
+
+    if (!svgElement || svgElement.tagName?.toLowerCase() === 'parsererror') {
+      return svgMarkup;
+    }
+
+    const images = Array.from(svgElement.querySelectorAll('image'));
+
+    if (!images.length) {
+      return svgMarkup;
+    }
+
+    const resolvedApi = apiBaseUrl || '';
+
+    const fetchTasks = images.map(async (image) => {
+      const rawHref = (image.getAttribute('href') || image.getAttribute('xlink:href') || '').trim();
+
+      if (!rawHref || /^data:/i.test(rawHref)) {
+        return;
+      }
+
+      const fileName = extractFileNameFromHref(rawHref);
+      if (!fileName) {
+        return;
+      }
+
+      const cacheKey = `${rhymeCode || 'rhyme'}::${fileName}`;
+      let objectUrl = cache.get(cacheKey);
+
+      if (!objectUrl) {
+        const requestUrl = `${resolvedApi}/rhymes/svg-image/${encodeURIComponent(rhymeCode || '')}?file=${encodeURIComponent(fileName)}`;
+        try {
+          const response = await fetch(requestUrl);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch image asset: ${response.status}`);
+          }
+
+          const blob = await response.blob();
+          objectUrl = URL.createObjectURL(blob);
+          cache.set(cacheKey, objectUrl);
+        } catch (error) {
+          console.error('Unable to fetch rhyme image asset', { rhymeCode, fileName, error });
+          return;
+        }
+      }
+
+      image.setAttribute('href', objectUrl);
+      image.setAttribute('xlink:href', objectUrl);
+    });
+
+    await Promise.allSettled(fetchTasks);
+
+    if (typeof window.XMLSerializer === 'undefined') {
+      return svgElement.outerHTML;
+    }
+
+    const serializer = new window.XMLSerializer();
+    return serializer.serializeToString(svgElement);
+  } catch (error) {
+    console.error('Error rewriting SVG image references:', error);
+    return svgMarkup;
+  }
+};
+
+export const prepareRhymeSvgPages = async (svgContent, rhymeCode, apiBaseUrl) => {
+  const pages = Array.isArray(svgContent) ? svgContent : [svgContent];
+  const preparedPages = [];
+
+  for (let index = 0; index < pages.length; index += 1) {
+    const page = pages[index];
+
+    if (typeof page !== 'string' || page.trim().length === 0) {
+      continue;
+    }
+
+    const withImages = await rewriteSvgImagesWithApi(page, rhymeCode, apiBaseUrl);
+    const sanitized = sanitizeRhymeSvgContent(withImages, index !== undefined ? `${rhymeCode}-${index}` : rhymeCode);
+
+    if (typeof sanitized === 'string' && sanitized.trim().length > 0) {
+      preparedPages.push(sanitized);
+    }
+  }
+
+  return preparedPages;
 };
 
 export const prepareSvgContent = (payload, headers, rhymeCode) => {

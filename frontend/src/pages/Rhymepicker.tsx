@@ -20,7 +20,7 @@ import HomePage from '../pages/HomePage';
 import BookWorkflow from '../components/BookWorkflow';
 import InlineSvg from '../components/InlineSvg';
 import { API_BASE_URL } from '../lib/utils';
-import { decodeSvgPayload, sanitizeRhymeSvgContent } from '../lib/svgUtils';
+import { decodeSvgPayload, prepareRhymeSvgPages } from '../lib/svgUtils';
 import { readFileAsDataUrl } from '../lib/fileUtils';
 import {
   clearPersistedAppState,
@@ -1364,8 +1364,6 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   const svgCacheRef = useRef(new Map());
   const svgInFlightRef = useRef(new Map());
-  const imageAssetCacheRef = useRef(new Set());
-  const imageInFlightRef = useRef(new Map());
   const selectedRhymesRef = useRef([]);
   const pageFetchPromisesRef = useRef(new Map());
 
@@ -1375,133 +1373,16 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
   }, [selectedRhymes]);
 
-  const extractImageUrlsFromSvg = useCallback((svgContent) => {
-    const contents = Array.isArray(svgContent) ? svgContent : [svgContent];
-
-    if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
-      return [];
-    }
-
-    try {
-      const urls = new Set();
-
-      contents.forEach((content) => {
-        if (!content || typeof content !== 'string') {
-          return;
-        }
-
-        const parser = new window.DOMParser();
-        const doc = parser.parseFromString(content, 'image/svg+xml');
-        const imageNodes = doc.querySelectorAll('image, img');
-
-        imageNodes.forEach((node) => {
-          if (!node) {
-            return;
-          }
-
-          const candidates = [
-            node.getAttribute('href'),
-            node.getAttribute('xlink:href'),
-            node.getAttribute('data-href'),
-            node.getAttribute('src')
-          ];
-
-          candidates.forEach((candidate) => {
-            if (typeof candidate !== 'string') {
-              return;
-            }
-
-            const trimmed = candidate.trim();
-
-            if (!trimmed || /^data:/i.test(trimmed)) {
-              return;
-            }
-
-            if (trimmed.startsWith('//') && typeof window !== 'undefined' && window.location?.protocol) {
-              urls.add(`${window.location.protocol}${trimmed}`);
-              return;
-            }
-
-            if (/^https?:/i.test(trimmed)) {
-              urls.add(trimmed);
-            }
-          });
-        });
-      });
-
-      return Array.from(urls);
-    } catch (error) {
-      console.error('Error parsing SVG for image asset references:', error);
-      return [];
-    }
-  }, []);
-
-  const prefetchImageAssets = useCallback(
-    async (svgMarkup) => {
-      if (!svgMarkup || (typeof svgMarkup !== 'string' && !Array.isArray(svgMarkup))) {
-        return;
-      }
-
-      const assetUrls = extractImageUrlsFromSvg(svgMarkup);
-      if (!assetUrls.length) {
-        return;
-      }
-
-      const tasks = assetUrls
-        .map((url) => {
-          if (imageAssetCacheRef.current.has(url)) {
-            return null;
-          }
-
-          if (imageInFlightRef.current.has(url)) {
-            return imageInFlightRef.current.get(url);
-          }
-
-          const request = axios
-            .get(url, { responseType: 'blob' })
-            .then(() => {
-              imageAssetCacheRef.current.add(url);
-            })
-            .catch((error) => {
-              console.error('Error prefetching image asset:', url, error);
-            })
-            .finally(() => {
-              imageInFlightRef.current.delete(url);
-            });
-
-          imageInFlightRef.current.set(url, request);
-          return request;
-        })
-        .filter(Boolean);
-
-      if (tasks.length > 0) {
-        await Promise.allSettled(tasks);
-      }
-    },
-    [extractImageUrlsFromSvg]
-  );
 
   const normalizeSvgPages = useCallback(
-    (svgContent, code = 'rhyme') => {
+    (svgContent) => {
       if (!svgContent) {
         return [];
       }
 
-      const sanitizePage = (page, index) =>
-        sanitizeRhymeSvgContent(page, index !== undefined ? `${code}-${index}` : code);
+      const pages = Array.isArray(svgContent) ? svgContent : [svgContent];
 
-      if (Array.isArray(svgContent)) {
-        return svgContent
-          .map((page, index) => (typeof page === 'string' ? sanitizePage(page, index) : null))
-          .filter((page) => typeof page === 'string' && page.trim().length > 0);
-      }
-
-      if (typeof svgContent === 'string') {
-        const trimmed = svgContent.trim();
-        return trimmed ? [sanitizePage(trimmed)] : [];
-      }
-
-      return [];
+      return pages.filter((page) => typeof page === 'string' && page.trim().length > 0);
     },
     []
   );
@@ -1588,31 +1469,22 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       }
 
       if (svgCacheRef.current.has(code)) {
-        const cached = svgCacheRef.current.get(code);
-        if (cached) {
-          await prefetchImageAssets(cached);
-        }
-        return cached;
+        return svgCacheRef.current.get(code);
       }
 
       if (svgInFlightRef.current.has(code)) {
-        const pending = await svgInFlightRef.current.get(code);
-        if (pending) {
-          await prefetchImageAssets(pending);
-        }
-        return pending;
+        return svgInFlightRef.current.get(code);
       }
 
       const requestPromise = axios
         .get(`${API}/rhymes/svg/${code}`, { responseType: 'arraybuffer' })
-        .then((response) => {
+        .then(async (response) => {
           const decoded = decodeSvgPayload(response.data, response.headers);
-          const svgPages = normalizeSvgPages(
+          const rawPages =
             decoded && typeof decoded === 'object' && Array.isArray(decoded.pages)
               ? decoded.pages
-              : decoded,
-            code
-          );
+              : decoded;
+          const svgPages = await prepareRhymeSvgPages(rawPages, code, API);
           svgCacheRef.current.set(code, svgPages);
           return svgPages;
         })
@@ -1626,14 +1498,9 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
       svgInFlightRef.current.set(code, requestPromise);
 
-      const svgContent = await requestPromise;
-      if (svgContent) {
-        await prefetchImageAssets(svgContent);
-      }
-
-      return svgContent;
+      return requestPromise;
     },
-    [prefetchImageAssets]
+    []
   );
 
   const ensurePageAssets = useCallback(
