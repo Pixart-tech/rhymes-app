@@ -14,6 +14,7 @@ print("Forced working directory:", os.getcwd())
 
 
 import logging
+import mimetypes
 import os
 import sys
 import tempfile
@@ -702,18 +703,18 @@ async def delete_school(school_id: str):
 
 
 def _localize_rhyme_svg_markup(svg_markup: str, source_path: Optional[Path], rhyme_code: str) -> str:
-    """Inline external assets for rhyme SVG markup, falling back safely."""
+    """Rewrite external image references without inlining bitmap data."""
 
     try:
         return _localize_svg_image_assets(
             svg_markup,
             source_path or Path("."),
             rhyme_code,
-            inline_mode=True,
+            inline_mode=False,
         )
     except Exception as exc:  # pragma: no cover - defensive fallback
         logger.warning(
-            "Unable to inline image assets for rhyme %s from %s: %s",
+            "Unable to rewrite image assets for rhyme %s from %s: %s",
             rhyme_code,
             source_path,
             exc,
@@ -785,6 +786,38 @@ async def get_rhyme_svg(rhyme_code: str):
         raise HTTPException(status_code=404, detail="Rhyme not found")
 
     return JSONResponse({"pages": svg_pages})
+
+
+@api_router.get("/rhymes/svg-image/{rhyme_code}")
+async def get_rhyme_svg_image(rhyme_code: str, file: str):
+    """Return a bitmap asset referenced by a rhyme SVG."""
+
+    sanitized_name = Path(file).name
+    if not sanitized_name:
+        raise HTTPException(status_code=400, detail="Image file name is required")
+
+    asset_dir = RHYME_SVG_BASE_PATH / rhyme_code
+    asset_path = asset_dir / sanitized_name
+
+    try:
+        asset_path.relative_to(asset_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid image file path")
+
+    if not asset_path.exists() or not asset_path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    mime_type, _ = mimetypes.guess_type(asset_path.name)
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    try:
+        content = asset_path.read_bytes()
+    except OSError as exc:
+        logger.error("Unable to read image %s for rhyme %s: %s", asset_path, rhyme_code, exc)
+        raise HTTPException(status_code=500, detail="Unable to read image file") from exc
+
+    return Response(content=content, media_type=mime_type)
 
 
 # @api_router.get("/cover-assets/manifest")
