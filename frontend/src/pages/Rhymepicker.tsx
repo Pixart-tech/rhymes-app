@@ -255,7 +255,7 @@ const ModeSelectionPage = ({ school, onModeSelect, onLogout }) => {
             </p>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4 sm:gap-5 md:gap-6 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 md:grid-cols-3 md:gap-6">
               {options.map((option) => {
                 const IconComponent = option.icon;
                 return (
@@ -1367,7 +1367,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const selectedRhymesRef = useRef([]);
   const pageFetchPromisesRef = useRef(new Map());
 
-  const MAX_RHYMES_PER_GRADE = 25;
+  const MAX_PAGES_PER_GRADE = 44;
 
   useEffect(() => {
     selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
@@ -1637,8 +1637,20 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     };
   };
 
+  const countUsedPages = (usageMap) => {
+    let usedPages = 0;
+
+    usageMap.forEach((entry) => {
+      if (entry?.top || entry?.bottom) {
+        usedPages += 1;
+      }
+    });
+
+    return usedPages;
+  };
+
   const computeNextAvailablePageInfoFromUsage = ({ usageMap, highestIndex }) => {
-    for (let index = 0; index < MAX_RHYMES_PER_GRADE; index += 1) {
+    for (let index = 0; index < MAX_PAGES_PER_GRADE; index += 1) {
       const entry = usageMap.get(index);
       if (!entry) {
         return { index, hasCapacity: true, highestIndex };
@@ -1648,7 +1660,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       }
     }
 
-    const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_RHYMES_PER_GRADE - 1);
+    const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_PAGES_PER_GRADE - 1);
     return { index: fallbackIndex, hasCapacity: false, highestIndex };
   };
 
@@ -1714,7 +1726,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         }
 
         const nextPageIndex = initialIndex + 1;
-        if (nextPageIndex < MAX_RHYMES_PER_GRADE) {
+        if (nextPageIndex < MAX_PAGES_PER_GRADE) {
           ensurePageAssets(nextPageIndex, sortedSelections).catch((prefetchError) => {
             console.error('Error preloading upcoming rhyme SVGs:', prefetchError);
           });
@@ -1848,11 +1860,11 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       };
 
       const nextArray = sortSelections([...filtered, baseRhyme]);
-      const totalSelected = nextArray.length;
-      const isReplacement = removals.length > 0;
+      const usage = computePageUsage(nextArray);
+      const totalPagesSelected = countUsedPages(usage.usageMap);
 
-      if (!isReplacement && totalSelected > MAX_RHYMES_PER_GRADE) {
-        toast.error('Max of 25 rhymes per grade');
+      if (totalPagesSelected > MAX_PAGES_PER_GRADE) {
+        toast.error('Max of 44 pages can be selected');
         setShowTreeMenu(false);
         setCurrentPosition(null);
         return;
@@ -2026,7 +2038,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const handlePageChange = (newPageIndex) => {
-    const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_RHYMES_PER_GRADE - 1));
+    const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_PAGES_PER_GRADE - 1));
 
     setCurrentPageIndex(clampedIndex);
 
@@ -2036,7 +2048,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       });
 
       const nextIndex = clampedIndex + 1;
-      if (nextIndex < MAX_RHYMES_PER_GRADE) {
+      if (nextIndex < MAX_PAGES_PER_GRADE) {
         ensurePageAssets(nextIndex).catch((error) => {
           console.error('Error prefetching next rhyme page:', error);
         });
@@ -2049,6 +2061,10 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const pageUsage = useMemo(() => computePageUsage(selectedRhymes), [selectedRhymes]);
+  const totalPagesSelected = useMemo(
+    () => countUsedPages(pageUsage.usageMap),
+    [pageUsage]
+  );
   const nextPageInfo = useMemo(() => computeNextAvailablePageInfoFromUsage(pageUsage), [pageUsage]);
   const nextAvailablePageIndex = nextPageInfo.index;
   const hasNextPageCapacity = nextPageInfo.hasCapacity;
@@ -2056,28 +2072,27 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   // Calculate total pages
   const calculateTotalPages = () => {
-    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex : -1;
-    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex : 0;
-    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex : 0;
+    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex + 1 : 0;
+    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex + 1 : 0;
+    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex + 1 : 0;
 
-    const candidates = [normalizedHighest, normalizedNext, normalizedCurrent]
-      .filter(index => Number.isFinite(index) && index >= 0);
+    const candidates = [totalPagesSelected, normalizedHighest, normalizedNext, normalizedCurrent]
+      .filter((index) => Number.isFinite(index) && index > 0);
 
-    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
+    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 1;
 
-    return Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
+    return Math.min(maxIndex, MAX_PAGES_PER_GRADE);
   };
 
   useEffect(() => {
-    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex : -1;
-    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex : 0;
-    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex : 0;
+    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex + 1 : 0;
+    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex + 1 : 0;
+    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex + 1 : 0;
 
-    const candidates = [normalizedHighest, normalizedNext, normalizedCurrent]
-      .filter(index => Number.isFinite(index) && index >= 0);
+    const candidates = [totalPagesSelected, normalizedHighest, normalizedNext, normalizedCurrent]
+      .filter((index) => Number.isFinite(index) && index > 0);
 
-    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
-    const total = Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
+    const total = Math.min(candidates.length > 0 ? Math.max(...candidates) : 1, MAX_PAGES_PER_GRADE);
 
     if (total <= 0) {
       if (currentPageIndex !== 0) {
@@ -2090,7 +2105,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     if (currentPageIndex > maxAllowed) {
       setCurrentPageIndex(Math.max(0, maxAllowed));
     }
-  }, [highestFilledIndex, nextAvailablePageIndex, currentPageIndex]);
+  }, [highestFilledIndex, nextAvailablePageIndex, currentPageIndex, totalPagesSelected]);
 
   // Get rhymes for current page
   const getCurrentPageRhymes = () => {

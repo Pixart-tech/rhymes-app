@@ -400,6 +400,7 @@ def localize_svg_image_assets(
     inline_mode: bool = False,
     preprocess_for_pdf: bool = False,
     cache_dir: Optional[Path] = None,
+    asset_url_prefix: Optional[str] = None,
 ) -> str:
     """Return ``svg_text`` with external image references localised."""
 
@@ -467,6 +468,8 @@ def localize_svg_image_assets(
             continue
 
         new_href = cache_file.name
+        if asset_url_prefix:
+            new_href = f"{asset_url_prefix.rstrip('/')}/{cache_file.name}"
         image.set("href", new_href)
         image.set(f"{{{config.XLINK_NS}}}href", new_href)
         modified = True
