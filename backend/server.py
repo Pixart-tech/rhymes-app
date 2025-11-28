@@ -135,7 +135,8 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
             svg_markup,
             svg_path,
             f"cover::{svg_path.name}",
-            inline_mode=True,
+            inline_mode=False,
+            asset_url_prefix="/api/cover-assets/images",
         )
     except Exception as exc:  # pragma: no cover - defensive fallback
         logger.warning(
@@ -925,6 +926,26 @@ async def get_cover_assets_network_paths(selection_key: str):
         )
 
     return {"assets": assets}
+
+
+@api_router.get("/cover-assets/images/{file_name}")
+async def get_cover_asset_image(file_name: str):
+    """Serve cached cover asset images as standard files instead of base64 data URIs."""
+
+    cache_dir = _ensure_image_cache_dir()
+    candidate_path = (cache_dir / file_name).resolve()
+
+    try:
+        candidate_path.relative_to(cache_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid image requested.")
+
+    if not candidate_path.exists() or not candidate_path.is_file():
+        raise HTTPException(status_code=404, detail="Cover asset image not found.")
+
+    media_type, _ = mimetypes.guess_type(candidate_path.name)
+    content = candidate_path.read_bytes()
+    return Response(content=content, media_type=media_type or "application/octet-stream")
 
 
 @api_router.get("/cover-assets/svg/{relative_path:path}")
