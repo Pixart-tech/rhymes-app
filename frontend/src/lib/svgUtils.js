@@ -587,7 +587,7 @@ export const rewriteSvgImagesWithApi = async (svgMarkup, rhymeCode, apiBaseUrl, 
       let objectUrl = cache.get(cacheKey);
 
       if (!objectUrl) {
-        const requestUrl = `${resolvedApi}/rhymes/svg-image/${encodeURIComponent(rhymeCode || '')}?file=${encodeURIComponent(fileName)}`;
+        const requestUrl = `${resolvedApi}/rhymes/images/${encodeURIComponent(rhymeCode || '')}/${encodeURIComponent(fileName)}`;
         try {
           const response = await fetch(requestUrl);
           if (!response.ok) {
