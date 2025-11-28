@@ -25,6 +25,8 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
+from urllib.parse import quote
+from shutil import copy2
 
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
@@ -70,6 +72,53 @@ def _ensure_image_cache_dir() -> Path:
 
 def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]|List[Path]:
     return svg_processing.resolve_rhyme_svg_path(RHYME_SVG_BASE_PATH, rhyme_code)
+
+
+def _get_rhyme_image_cache_dir(rhyme_code: str) -> Path:
+    """Return a rhyme-specific cache directory for external image assets."""
+
+    rhyme_cache_dir = config.IMAGE_CACHE_DIR / "rhymes" / rhyme_code
+    return svg_processing.ensure_image_cache_dir(rhyme_cache_dir)
+
+
+def _resolve_rhyme_image_path(rhyme_code: str, file_name: str) -> Path:
+    """Return a cached rhyme image path, populating the cache on demand."""
+
+    sanitized_name = Path(file_name).name
+    if not sanitized_name:
+        raise HTTPException(status_code=400, detail="Image file name is required")
+
+    cache_dir = _get_rhyme_image_cache_dir(rhyme_code)
+    candidate_path = (cache_dir / sanitized_name).resolve()
+
+    try:
+        candidate_path.relative_to(cache_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid image file path")
+
+    if candidate_path.exists() and candidate_path.is_file():
+        return candidate_path
+
+    source_dir = RHYME_SVG_BASE_PATH / rhyme_code
+    source_path = (source_dir / sanitized_name).resolve()
+
+    try:
+        source_path.relative_to(source_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid image file path")
+
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    try:
+        copy2(source_path, candidate_path)
+    except OSError as exc:
+        logger.warning(
+            "Unable to cache image %s for rhyme %s: %s", sanitized_name, rhyme_code, exc
+        )
+        return source_path
+
+    return candidate_path
 
 
 def _ensure_cover_assets_base_path() -> Path:
@@ -135,7 +184,8 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
             svg_markup,
             svg_path,
             f"cover::{svg_path.name}",
-            inline_mode=True,
+            inline_mode=False,
+            asset_url_prefix="/api/cover-assets/images",
         )
     except Exception as exc:  # pragma: no cover - defensive fallback
         logger.warning(
@@ -711,6 +761,8 @@ def _localize_rhyme_svg_markup(svg_markup: str, source_path: Optional[Path], rhy
             source_path or Path("."),
             rhyme_code,
             inline_mode=False,
+            cache_dir=_get_rhyme_image_cache_dir(rhyme_code),
+            asset_url_prefix=f"/api/rhymes/images/{quote(rhyme_code, safe='')}",
         )
     except Exception as exc:  # pragma: no cover - defensive fallback
         logger.warning(
@@ -790,31 +842,35 @@ async def get_rhyme_svg(rhyme_code: str):
 
 @api_router.get("/rhymes/svg-image/{rhyme_code}")
 async def get_rhyme_svg_image(rhyme_code: str, file: str):
-    """Return a bitmap asset referenced by a rhyme SVG."""
+    """Return a bitmap asset referenced by a rhyme SVG (legacy query API)."""
 
-    sanitized_name = Path(file).name
-    if not sanitized_name:
-        raise HTTPException(status_code=400, detail="Image file name is required")
-
-    asset_dir = RHYME_SVG_BASE_PATH / rhyme_code
-    asset_path = asset_dir / sanitized_name
-
-    try:
-        asset_path.relative_to(asset_dir)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid image file path")
-
-    if not asset_path.exists() or not asset_path.is_file():
-        raise HTTPException(status_code=404, detail="Image not found")
-
-    mime_type, _ = mimetypes.guess_type(asset_path.name)
+    image_path = _resolve_rhyme_image_path(rhyme_code, file)
+    mime_type, _ = mimetypes.guess_type(image_path.name)
     if not mime_type:
         mime_type = "application/octet-stream"
 
     try:
-        content = asset_path.read_bytes()
+        content = image_path.read_bytes()
     except OSError as exc:
-        logger.error("Unable to read image %s for rhyme %s: %s", asset_path, rhyme_code, exc)
+        logger.error("Unable to read image %s for rhyme %s: %s", image_path, rhyme_code, exc)
+        raise HTTPException(status_code=500, detail="Unable to read image file") from exc
+
+    return Response(content=content, media_type=mime_type)
+
+
+@api_router.get("/rhymes/images/{rhyme_code}/{file_name}")
+async def get_rhyme_image(rhyme_code: str, file_name: str):
+    """Serve cached rhyme image assets as regular files for browser consumption."""
+
+    image_path = _resolve_rhyme_image_path(rhyme_code, file_name)
+    mime_type, _ = mimetypes.guess_type(image_path.name)
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    try:
+        content = image_path.read_bytes()
+    except OSError as exc:
+        logger.error("Unable to read image %s for rhyme %s: %s", image_path, rhyme_code, exc)
         raise HTTPException(status_code=500, detail="Unable to read image file") from exc
 
     return Response(content=content, media_type=mime_type)
@@ -925,6 +981,26 @@ async def get_cover_assets_network_paths(selection_key: str):
         )
 
     return {"assets": assets}
+
+
+@api_router.get("/cover-assets/images/{file_name}")
+async def get_cover_asset_image(file_name: str):
+    """Serve cached cover asset images as standard files instead of base64 data URIs."""
+
+    cache_dir = _ensure_image_cache_dir()
+    candidate_path = (cache_dir / file_name).resolve()
+
+    try:
+        candidate_path.relative_to(cache_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid image requested.")
+
+    if not candidate_path.exists() or not candidate_path.is_file():
+        raise HTTPException(status_code=404, detail="Cover asset image not found.")
+
+    media_type, _ = mimetypes.guess_type(candidate_path.name)
+    content = candidate_path.read_bytes()
+    return Response(content=content, media_type=media_type or "application/octet-stream")
 
 
 @api_router.get("/cover-assets/svg/{relative_path:path}")
