@@ -414,7 +414,7 @@ async def get_available_rhymes(
 @api_router.get("/rhymes/selected/{school_id}")
 async def get_selected_rhymes(school_id: str):
     """Get all selected rhymes for a school organized by grade"""
-    selections = await db.rhyme_selections.find({"school_id": school_id}).to_list(None)
+    selections = await db.rhyme_selections.find({"school_id": school_id}).to_list(length=999999)
 
     result = {}
     for selection in selections:
@@ -614,7 +614,7 @@ async def get_grade_status(school_id: str):
     for grade in grades:
         selections = await db.rhyme_selections.find(
             {"school_id": school_id, "grade": grade}
-        ).to_list(None)
+        ).to_list(length=999999)
 
         selected_count = len(selections)
 
@@ -632,7 +632,7 @@ async def get_grade_status(school_id: str):
 @api_router.get("/admin/schools", response_model=List[SchoolWithSelections])
 async def get_all_schools_with_selections():
     """Return all schools with their rhyme selections grouped by grade."""
-    school_docs = await db.schools.find().sort("timestamp", -1).to_list(None)
+    school_docs = await db.schools.find().sort("timestamp", -1).to_list(length=999999)
 
     if not school_docs:
         return []
@@ -643,7 +643,7 @@ async def get_all_schools_with_selections():
     if school_ids:
         selection_docs = await db.rhyme_selections.find(
             {"school_id": {"$in": school_ids}}
-        ).to_list(None)
+        ).to_list(length=999999)
 
     selections_by_school: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     latest_selection_timestamp: Dict[str, datetime] = {}
@@ -805,7 +805,7 @@ def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
                 )
                 continue
 
-            localized_markup = _localize_rhyme_svg_markup(svg_markup, candidate, rhyme_code)
+            localized_markup = _localize_rhyme_svg_markup(svg_content, candidate, rhyme_code)
             svg_pages.append(localized_markup)
 
     if svg_pages:
@@ -1306,7 +1306,7 @@ def _render_svg_on_canvas(
 @api_router.get("/rhymes/binder/{school_id}/{grade}")
 async def download_rhyme_binder(school_id: str, grade: str):
     """Generate a PDF binder containing all rhymes for the specified grade."""
-    print("Iam running")
+
 
     try:
         pdf_resources = _load_pdf_dependencies()
@@ -1321,7 +1321,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
             "school_id": school_id,
             "grade": grade,
         }
-    ).to_list(None)
+    ).to_list(length=999999)
 
     if not selections:
         raise HTTPException(status_code=404, detail="No rhymes selected for this grade")
@@ -1455,4 +1455,4 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    client.close()  
