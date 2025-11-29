@@ -206,14 +206,29 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
         return svg_markup
 
 
+cors_origins = _parse_csv(os.environ.get("CORS_ORIGINS"), default=["*"])
+allow_all_origins = "*" in cors_origins or not cors_origins
+normalized_origins = [origin for origin in cors_origins if origin != "*"]
+
 app = FastAPI()
+origins = [
+    
+    "http://localhost:3000"  # remove * in production
+]
+
 app.add_middleware(
     CORSMiddleware,
+    
     allow_credentials=True,
-    allow_origins=_parse_csv(os.environ.get("CORS_ORIGINS"), default=["*"]),
+    allow_origins=[] if allow_all_origins else normalized_origins,
+    allow_origin_regex=".*" if allow_all_origins else None,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+
+
 
 
 class PDFDependencyUnavailableError(RuntimeError):
@@ -312,10 +327,10 @@ def _load_pdf_dependencies() -> _PdfResources:
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
+app.include_router(api_router)
 api_router.include_router(auth.create_auth_router(db))
 api_router.include_router(workspace.router)
 api_router.include_router(schools.router)
-
 
 # Models
 class RhymeSelection(BaseModel):
@@ -429,10 +444,15 @@ def get_selected_rhymes(school_id: str):
 def get_selected_rhymes_other_grades(school_id: str, grade: str):
     """Get rhymes selected in other grades that can be reused"""
     selections_ref = db.collection("rhyme_selections")
-    query = selections_ref.where("school_id", "==", school_id).where("grade", "!=", grade)
-    selections = [doc.to_dict() for doc in query.stream()]
+    query = selections_ref.where("school_id", "==", school_id)
+    selections = []
+    for doc in query.stream():
+        data = doc.to_dict()
+        if not data or data.get("grade") == grade:
+            continue
+        selections.append(data)
 
-    # Get unique rhymes from other grades
+    # Get unique rhymes from other gra  des
     selected_rhymes = {}
     for selection in selections:
         code = selection["rhyme_code"]
@@ -452,6 +472,7 @@ def get_selected_rhymes_other_grades(school_id: str, grade: str):
         if page_key not in rhymes_by_pages:
             rhymes_by_pages[page_key] = []
         rhymes_by_pages[page_key].append(rhyme)
+        
 
     return rhymes_by_pages
 
@@ -607,7 +628,7 @@ async def get_grade_status(school_id: str):
     return status
 
 
-@api_router.get("/admin/schools", response_model=PaginatedSchoolResponse)
+
 async def get_all_schools_with_selections(
     page: int = 1, limit: int = 10, authorization: Optional[str] = Header(None)
 ):
