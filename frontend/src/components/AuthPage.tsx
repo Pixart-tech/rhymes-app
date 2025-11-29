@@ -59,6 +59,10 @@ const SERVICE_LABELS: Record<SchoolServiceType, string> = {
 };
 type AdminServiceFilter = 'all' | SchoolServiceType;
 const GRADE_DOWNLOAD_OPTIONS: GradeKey[] = ['nursery', 'lkg', 'ukg', 'playgroup'];
+const PAGE_SIZE_OPTIONS = [5, 10, 15];
+type FetchOptions = {
+  showLoading?: boolean;
+};
 
 const getLogoSrc = (school: SchoolProfile, resolvedLogos?: Record<string, string>): string | null => {
   if (resolvedLogos?.[school.school_id]) {
@@ -121,7 +125,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [schoolsPerPage] = useState(10);
+  const [schoolsPerPage, setSchoolsPerPage] = useState(10);
   const [totalAdminSchoolsCount, setTotalAdminSchoolsCount] = useState(0);
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [profileForm, setProfileForm] = useState({ display_name: '', email: '' });
@@ -180,12 +184,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     return null;
   }, []);
 
-  const fetchWorkspace = useCallback(async () => {
+  const fetchWorkspace = useCallback(async ({ showLoading = true }: FetchOptions = {}) => {
     if (!user) {
       return;
     }
-    setWorkspaceLoading(true);
-    setWorkspaceError(null);
+    if (showLoading) {
+      setWorkspaceLoading(true);
+      setWorkspaceError(null);
+    }
 
     try {
       const token = await getIdToken();
@@ -199,14 +205,21 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       const nextUser = response.data.user;
       setWorkspaceUser(nextUser);
       setSchools(response.data.schools);
-      const shouldStartInCreate = nextUser.role !== 'super-admin' && response.data.schools.length === 0;
-      setView(shouldStartInCreate ? 'create' : 'list');
+      if (showLoading) {
+        const shouldStartInCreate = nextUser.role !== 'super-admin' && response.data.schools.length === 0;
+        setView(shouldStartInCreate ? 'create' : 'list');
+      }
+      setWorkspaceError(null);
     } catch (error) {
       console.error('Failed to load workspace', error);
-      setWorkspaceError('Unable to load your workspace. Please try again.');
-      toast.error('Unable to load your workspace. Please try again.');
+      if (showLoading) {
+        setWorkspaceError('Unable to load your workspace. Please try again.');
+        toast.error('Unable to load your workspace. Please try again.');
+      }
     } finally {
-      setWorkspaceLoading(false);
+      if (showLoading) {
+        setWorkspaceLoading(false);
+      }
     }
   }, [user, getIdToken]);
 
@@ -239,37 +252,53 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     }
   }, [view, branchParent]);
 
-  const fetchAdminSchools = useCallback(async (page: number, limit: number) => {
-    if (!workspaceUser || workspaceUser.role !== 'super-admin') {
-      return;
-    }
-    setAdminLoading(true);
-    setAdminError(null);
-    try {
-      const token = await getIdToken();
-      if (!token) {
-        throw new Error('Unable to fetch Firebase token');
+  const fetchAdminSchools = useCallback(
+    async (
+      pageArg?: number,
+      limitArg?: number,
+      { showLoading = true }: FetchOptions = {}
+    ) => {
+      if (!workspaceUser || workspaceUser.role !== 'super-admin') {
+        return;
       }
-      const response = await axios.get<PaginatedAdminSchoolsResponse>(
-        `${API}/admin/schools?page=${page}&limit=${limit}`,
-        {
-          headers: { Authorization: `Bearer ${token}` }
+      if (showLoading) {
+        setAdminLoading(true);
+        setAdminError(null);
+      }
+      const page = pageArg ?? currentPage;
+      const limit = limitArg ?? schoolsPerPage;
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
         }
-      );
-      setAdminSchools(response.data.schools);
-      setTotalAdminSchoolsCount(
-        response.data.totalCount ??
-        response.data.total_count ??
-        response.data.schools.length
-      );
-    } catch (error) {
-      console.error('Failed to load admin schools', error);
-      setAdminError('Unable to load the admin school list. Please try again.');
-      toast.error('Unable to load the admin school list. Please try again.');
-    } finally {
-      setAdminLoading(false);
-    }
-  }, [workspaceUser, getIdToken]);
+        const response = await axios.get<PaginatedAdminSchoolsResponse>(
+          `${API}/admin/schools?page=${page}&limit=${limit}`,
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        setAdminSchools(response.data.schools);
+        setTotalAdminSchoolsCount(
+          response.data.totalCount ??
+          response.data.total_count ??
+          response.data.schools.length
+        );
+        setAdminError(null);
+      } catch (error) {
+        console.error('Failed to load admin schools', error);
+        if (showLoading) {
+          setAdminError('Unable to load the admin school list. Please try again.');
+          toast.error('Unable to load the admin school list. Please try again.');
+        }
+      } finally {
+        if (showLoading) {
+          setAdminLoading(false);
+        }
+      }
+    },
+    [workspaceUser, getIdToken, currentPage, schoolsPerPage]
+  );
 
   useEffect(() => {
     if (workspaceUser?.role === 'super-admin') {
@@ -281,6 +310,47 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       setDeletingSchoolId(null);
     }
   }, [workspaceUser, fetchAdminSchools, currentPage, schoolsPerPage]);
+
+  const availablePageSizeOptions = useMemo(() => {
+    const total = Math.max(totalAdminSchoolsCount, schoolsPerPage, 5);
+    const maxMultiple = Math.ceil(total / 5) * 5;
+    const options = new Set<number>(PAGE_SIZE_OPTIONS);
+    for (let size = 5; size <= maxMultiple; size += 5) {
+      options.add(size);
+    }
+    return Array.from(options).sort((a, b) => a - b);
+  }, [totalAdminSchoolsCount, schoolsPerPage]);
+
+  const handlePageSizeChange = useCallback((value: string) => {
+    const nextSize = Number(value);
+    if (!Number.isFinite(nextSize) || nextSize <= 0) {
+      return;
+    }
+    setCurrentPage(1);
+    setSchoolsPerPage(nextSize);
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const syncDashboards = () => {
+      void fetchWorkspace({ showLoading: false });
+      if (workspaceUser?.role === 'super-admin') {
+        void fetchAdminSchools(undefined, undefined, { showLoading: false });
+      }
+    };
+
+    window.addEventListener('focus', syncDashboards);
+
+    return () => {
+      window.removeEventListener('focus', syncDashboards);
+    };
+  }, [user, workspaceUser?.role, fetchWorkspace, fetchAdminSchools]);
 
   useEffect(() => {
     if (allSchoolsForLogos.length === 0) {
@@ -1062,6 +1132,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     const schoolsToRender = filteredAdminSchools;
     const emptyStateMessage =
       adminSchools.length === 0 ? 'No schools available yet.' : 'No schools match the current filters.';
+    const totalPages = Math.max(1, Math.ceil(totalAdminSchoolsCount / schoolsPerPage));
 
     return (
       <div className="space-y-6">
@@ -1371,30 +1442,50 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                     </tbody>
                   </table>
                 </div>
-                <div className="flex items-center justify-between space-x-2 py-4">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-slate-200 text-slate-700 hover:border-slate-300"
-                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    Previous
-                  </Button>
-                  <div className="text-sm font-medium text-slate-700">
-                    Page {currentPage} of {Math.ceil(totalAdminSchoolsCount / schoolsPerPage)}
+                <div className="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-slate-200 text-slate-700 hover:border-slate-300"
+                      onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <div className="text-sm font-medium text-slate-700">
+                      Page {currentPage} of {totalPages}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-slate-200 text-slate-700 hover:border-slate-300"
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                      }
+                      disabled={currentPage === totalPages}
+                    >
+                      Next
+                    </Button>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-slate-200 text-slate-700 hover:border-slate-300"
-                    onClick={() =>
-                      setCurrentPage((prev) => Math.min(Math.ceil(totalAdminSchoolsCount / schoolsPerPage), prev + 1))
-                    }
-                    disabled={currentPage === Math.ceil(totalAdminSchoolsCount / schoolsPerPage)}
-                  >
-                    Next
-                  </Button>
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <span>Rows per page</span>
+                    <Select
+                      value={String(schoolsPerPage)}
+                      onValueChange={handlePageSizeChange}
+                    >
+                      <SelectTrigger className="w-20 rounded-2xl border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="border border-slate-100 bg-white shadow-lg">
+                        {availablePageSizeOptions.map((option) => (
+                          <SelectItem key={option} value={String(option)}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </>
             )}

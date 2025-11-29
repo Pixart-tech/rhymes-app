@@ -53,6 +53,18 @@ async def create_school_profile(
     return school_profiles.create_school_profile(db, payload, user_record, logo_blob, logo_mime_type)
 
 
+@router.get("/schools/email-availability")
+async def check_school_email_availability(
+    email: str,
+    authorization: Optional[str] = Header(None),
+):
+    verify_and_decode_token(authorization)
+    normalized_email = school_profiles._normalize_email(email)
+    if not normalized_email:
+        raise HTTPException(status_code=400, detail="Please provide a valid email address.")
+    school_profiles._ensure_unique_email(db, normalized_email, "school email")
+    return {"available": True}
+
 @router.post("/branches", response_model=school_profiles.School)
 def create_branch_profile(
     payload: school_profiles.BranchCreatePayload,

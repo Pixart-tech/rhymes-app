@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import axios from 'axios';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
@@ -205,9 +206,21 @@ export interface SchoolFormProps {
   submitting: boolean;
   onSubmit: (payload: SchoolFormSubmitPayload) => Promise<void> | void;
   onCancel?: () => void;
+  onBackToHome?: () => void;
+  isSuperAdmin?: boolean;
+  checkEmailAvailability?: (email: string) => Promise<boolean>;
 }
 
-export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, submitting, onSubmit, onCancel, onBackToHome, isSuperAdmin }) => {
+export const SchoolForm: React.FC<SchoolFormProps> = ({
+  mode,
+  initialValues,
+  submitting,
+  onSubmit,
+  onCancel,
+  onBackToHome,
+  isSuperAdmin,
+  checkEmailAvailability,
+}) => {
   const [values, setValues] = useState<SchoolFormValues>(initialValues);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string>(getLogoPreview(initialValues));
   const logoPreviewUrlRef = useRef<string | null>(null);
@@ -227,6 +240,8 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
   const [showCustomFieldInput, setShowCustomFieldInput] = useState(false);
   const [idFieldDialogSkipped, setIdFieldDialogSkipped] = useState(false);
   const prevIdCardStatus = useRef(initialValues.service_status.id_cards);
+  const [isEmailChecking, setIsEmailChecking] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
  
   useEffect(() => {
     setValues(initialValues);
@@ -248,6 +263,18 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
       setValues((prev) => ({ ...prev, principal_phone: prev.phone }));
     }
   }, [linkPrincipalPhone, values.phone]);
+
+  useEffect(() => {
+    setEmailError(null);
+    setInvalidFields((prev) => {
+      if (!prev.has('email')) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.delete('email');
+      return next;
+    });
+  }, [values.email]);
 
   useEffect(() => {
     if (values.logo_file) {
@@ -335,9 +362,9 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
         return;
       }
 
-      const allowedTypes = ['image/png'];
+      const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
       if (!allowedTypes.includes(file.type)) {
-        toast.error('Invalid file type. Please select a PNG image.');
+        toast.error('Invalid file type. Please select a PNG or JPEG image.');
         handleCropperClose();
         setValues((prev) => ({ ...prev, logo_file: null }));
         input.value = '';
@@ -512,15 +539,23 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
   const validateSection2 = () => {
     const errors = new Set<string>();
     for (const grade of GRADE_RENDER_ORDER) {
-        const gradeEntry = values.grades[grade];
-        if (gradeEntry.enabled && !gradeEntry.label.trim()) {
-            errors.add(`grade-${grade}`);
-        }
+      const gradeEntry = values.grades[grade];
+      if (gradeEntry.enabled && !gradeEntry.label.trim()) {
+        errors.add(`grade-${grade}`);
+      }
+    }
+    const hasSelectedGrade = GRADE_RENDER_ORDER.some((grade) => values.grades[grade].enabled);
+    if (mode === 'create' && !hasSelectedGrade) {
+      errors.add('grade-selection');
     }
     setInvalidFields(errors);
     if (errors.size > 0) {
-        toast.error("Please provide a name for all enabled grades.");
-        return false;
+      if (errors.has('grade-selection')) {
+        toast.error('Please select at least one class before continuing.');
+      } else {
+        toast.error('Please provide a name for all enabled grades.');
+      }
+      return false;
     }
     return true;
   };
@@ -544,10 +579,46 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
     return true;
   };
 
-  const handleNextSection = () => {
+  const ensureEmailIsUnique = useCallback(async () => {
+    if (mode !== 'create' || !checkEmailAvailability) {
+      return true;
+    }
+
+    const trimmedEmail = values.email?.trim();
+    if (!trimmedEmail) {
+      return true;
+    }
+
+    setIsEmailChecking(true);
+    try {
+      await checkEmailAvailability(trimmedEmail);
+      return true;
+    } catch (error) {
+      const detail =
+        axios.isAxiosError(error) && error.response?.data
+          ? error.response.data.detail
+          : 'Unable to verify this email address right now.';
+      const message = detail || 'Unable to verify this email address right now.';
+      setEmailError(message);
+      setInvalidFields((prev) => {
+        const next = new Set(prev);
+        next.add('email');
+        return next;
+      });
+      toast.error(message);
+      return false;
+    } finally {
+      setIsEmailChecking(false);
+    }
+  }, [checkEmailAvailability, mode, values.email]);
+
+  const handleNextSection = async () => {
     let isValid = true;
     if (currentSection === 1) {
         isValid = validateSection1();
+        if (isValid) {
+          isValid = await ensureEmailIsUnique();
+        }
     } else if (currentSection === 2) {
         isValid = validateSection2();
     }
@@ -652,6 +723,9 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                         required
                         className={cn(invalidFields.has('email') && 'border-red-500')}
                       />
+                      {emailError && (
+                        <p className="text-xs text-red-600">{emailError}</p>
+                      )}
                     </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
@@ -874,6 +948,9 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                     ))}
                   </div>
                 </section>
+                {invalidFields.has('grade-selection') && (
+                  <p className="text-xs text-red-600">Please select at least one class before continuing.</p>
+                )}
               </div>
             )}
 
@@ -1052,7 +1129,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({ mode, initialValues, sub
                 type="button"
                 variant="outline"
                 onClick={handleNextSection}
-                disabled={currentSection === TOTAL_SECTIONS}
+                disabled={currentSection === TOTAL_SECTIONS || isEmailChecking}
               >
                 Next
               </Button>

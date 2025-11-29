@@ -34,7 +34,7 @@ export const getCroppedImg = (imageSrc: string, pixelCrop: any): Promise<Blob> =
             reject(new Error('Failed to generate cropped image'));
           }
         },
-        'image/jpeg'
+        'image/png'
       );
     };
     image.onerror = (error) => {
