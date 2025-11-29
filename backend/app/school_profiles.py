@@ -390,6 +390,62 @@ def _clean_optional_string(value: Optional[str]) -> Optional[str]:
     return value
 
 
+def _normalize_email(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed.lower() if trimmed else None
+
+
+def _find_conflicting_school_by_email(
+    db_client: firestore.Client,
+    normalized_email: Optional[str],
+    *,
+    exclude_school_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    if not normalized_email:
+        return None
+
+    for field in ("email", "principal_email"):
+        snapshots = (
+            db_client.collection("schools")
+            .where(field, "==", normalized_email)
+            .limit(1)
+            .get()
+        )
+        if not snapshots:
+            continue
+        snapshot = snapshots[0]
+        if exclude_school_id and snapshot.id == exclude_school_id:
+            continue
+        return snapshot.to_dict()
+
+    return None
+
+
+def _ensure_unique_email(
+    db_client: firestore.Client,
+    raw_value: Optional[str],
+    label: str,
+    *,
+    exclude_school_id: Optional[str] = None,
+) -> Optional[str]:
+    normalized = _normalize_email(raw_value)
+    if not normalized:
+        return None
+
+    conflict = _find_conflicting_school_by_email(
+        db_client, normalized, exclude_school_id=exclude_school_id
+    )
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A school with this {label} already exists. Please use a different {label}.",
+        )
+
+    return normalized
+
+
 def _find_user_by_email(
     db_client: firestore.Client, email: Optional[str]
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
@@ -485,31 +541,23 @@ def create_school_profile(
     if not user_id:
         raise HTTPException(status_code=400, detail="User record is missing a user id")
 
-    email_query = (
-        db.collection("schools").where("email", "==", str(payload.email)).limit(1).get()
-    )
+    normalized_school_email = _ensure_unique_email(db, str(payload.email), "school email")
+    normalized_principal_email = _ensure_unique_email(db, str(payload.principal_email), "principal email")
     phone_query = (
         db.collection("schools").where("phone", "==", payload.phone).limit(1).get()
     )
 
-    errors = []
-    if email_query:
-        errors.append("email")
     if phone_query:
-        errors.append("phone number")
-
-    if errors:
-        error_parts = " and ".join(errors)
         raise HTTPException(
             status_code=409,
-            detail=f"A school with this {error_parts} already exists. Please use a different {error_parts}.",
+            detail="A school with this phone number already exists. Please use a different phone number.",
         )
 
     school_id = generate_school_id(db)
     now = datetime.utcnow()
 
     owner_email_input = _clean_optional_string(str(payload.email) if payload.email else None)
-    owner_email_value = owner_email_input.lower() if owner_email_input else None
+    owner_email_value = normalized_school_email or user_record.get("email")
     is_creator_super_admin = user_record.get("role") == "super-admin"
     assignee_id: Optional[str] = user_id
     assignee_record: Optional[Dict[str, Any]] = user_record
@@ -530,7 +578,7 @@ def create_school_profile(
         "school_name": payload.school_name.strip(),
         "logo_blob": logo_blob,
         "logo_mime_type": logo_mime_type,
-        "email": _clean_optional_string(str(payload.email) if payload.email else None),
+        "email": normalized_school_email,
         "phone": _clean_optional_string(payload.phone),
         "address": compose_address(address_line1, city, state, pin),
         "address_line1": address_line1,
@@ -540,7 +588,7 @@ def create_school_profile(
         "tagline": _clean_optional_string(payload.tagline),
         "website": _clean_optional_string(payload.website),
         "principal_name": _clean_optional_string(payload.principal_name),
-        "principal_email": _clean_optional_string(str(payload.principal_email) if payload.principal_email else None),
+        "principal_email": normalized_principal_email,
         "principal_phone": _clean_optional_string(payload.principal_phone),
         "service_type": services_from_status(service_status_map),
         "service_status": service_status_map,
@@ -591,6 +639,8 @@ def create_branch_profile(
     if role != "super-admin" and parent_school_id not in user_record.get("school_ids", []):
         raise HTTPException(status_code=403, detail="You do not have permission to add a branch to this school")
 
+    normalized_branch_email = _ensure_unique_email(db, str(payload.coordinator_email), "branch email")
+
     branch_id = generate_school_id(db)
     now = datetime.utcnow()
 
@@ -612,7 +662,7 @@ def create_branch_profile(
     branch_website = _clean_optional_string(parent_record.get("website"))
     parent_logo_blob = parent_record.get("logo_blob")
     parent_logo_mime_type = parent_record.get("logo_mime_type")
-    coordinator_email = _clean_optional_string(str(payload.coordinator_email))
+    coordinator_email = normalized_branch_email
     coordinator_phone = _clean_optional_string(payload.coordinator_phone)
 
     branch_payload = {

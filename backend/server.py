@@ -487,6 +487,20 @@ async def update_school_profile(
         raise HTTPException(status_code=403, detail="You do not have permission to edit this school")
 
     raw_updates = payload.dict(exclude_unset=True)
+    email_provided = "email" in raw_updates
+    principal_email_provided = "principal_email" in raw_updates
+    raw_email_value = raw_updates.pop("email", None) if email_provided else None
+    raw_principal_value = raw_updates.pop("principal_email", None) if principal_email_provided else None
+    normalized_email = None
+    normalized_principal_email = None
+    if email_provided:
+        normalized_email = school_profiles._ensure_unique_email(
+            db, raw_email_value, "school email", exclude_school_id=school_id
+        )
+    if principal_email_provided:
+        normalized_principal_email = school_profiles._ensure_unique_email(
+            db, raw_principal_value, "principal email", exclude_school_id=school_id
+        )
     logo_blob, logo_mime_type = await _read_upload_file(logo_file)
 
     def _clean(value: Optional[str]) -> Optional[str]:
@@ -532,6 +546,11 @@ async def update_school_profile(
     if logo_blob is not None:
         updates["logo_blob"] = logo_blob
         updates["logo_mime_type"] = logo_mime_type
+
+    if email_provided:
+        updates["email"] = normalized_email
+    if principal_email_provided:
+        updates["principal_email"] = normalized_principal_email
 
     if not updates:
         existing.setdefault("id", snapshot.id)

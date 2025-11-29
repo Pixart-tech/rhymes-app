@@ -569,7 +569,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         setBranchParent(null);
       } catch (error) {
         console.error('Failed to create branch', error);
-        toast.error('Unable to create branch. Please try again.');
+        if (axios.isAxiosError(error) && error.response?.status === 409) {
+          toast.error(error.response.data.detail);
+        } else {
+          toast.error('Unable to create branch. Please try again.');
+        }
       } finally {
         setBranchSubmitting(false);
       }
@@ -772,7 +776,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         setView('list');
       } catch (error) {
         console.error('Failed to update school', error);
-        toast.error('Unable to update school. Please try again.');
+        if (axios.isAxiosError(error) && error.response?.status === 409) {
+          toast.error(error.response.data.detail);
+        } else {
+          toast.error('Unable to update school. Please try again.');
+        }
       } finally {
         setSubmitting(false);
       }
