@@ -206,6 +206,10 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
         return svg_markup
 
 
+cors_origins = _parse_csv(os.environ.get("CORS_ORIGINS"), default=["*"])
+allow_all_origins = "*" in cors_origins or not cors_origins
+normalized_origins = [origin for origin in cors_origins if origin != "*"]
+
 app = FastAPI()
 origins = [
     
@@ -214,8 +218,10 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    
     allow_credentials=True,
+    allow_origins=[] if allow_all_origins else normalized_origins,
+    allow_origin_regex=".*" if allow_all_origins else None,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -438,8 +444,13 @@ def get_selected_rhymes(school_id: str):
 def get_selected_rhymes_other_grades(school_id: str, grade: str):
     """Get rhymes selected in other grades that can be reused"""
     selections_ref = db.collection("rhyme_selections")
-    query = selections_ref.where("school_id", "==", school_id).where("grade", "!=", grade)
-    selections = [doc.to_dict() for doc in query.stream()]
+    query = selections_ref.where("school_id", "==", school_id)
+    selections = []
+    for doc in query.stream():
+        data = doc.to_dict()
+        if not data or data.get("grade") == grade:
+            continue
+        selections.append(data)
 
     # Get unique rhymes from other gra  des
     selected_rhymes = {}

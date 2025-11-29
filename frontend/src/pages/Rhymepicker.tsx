@@ -1206,7 +1206,11 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
     }
 
     if (Math.abs(numericKey - 2) < 0.001) {
-      return 'Page 2.0 Rhymes';
+      return '2-Page Rhymes';
+    }
+
+    if (Math.abs(numericKey - 3) < 0.001) {
+      return '3-Page Rhymes';
     }
 
     const normalized = numericKey % 1 === 0 ? numericKey.toFixed(1) : numericKey.toString();
@@ -1347,7 +1351,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const selectedRhymesRef = useRef([]);
   const pageFetchPromisesRef = useRef(new Map());
 
-  const MAX_RHYMES_PER_GRADE = 25;
+  const MAX_PAGES_PER_GRADE = 44;
 
   useEffect(() => {
     selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
@@ -1640,7 +1644,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const computeNextAvailablePageInfoFromUsage = ({ usageMap, highestIndex }) => {
-    for (let index = 0; index < MAX_RHYMES_PER_GRADE; index += 1) {
+    for (let index = 0; index < MAX_PAGES_PER_GRADE; index += 1) {
       const entry = usageMap.get(index);
       if (!entry) {
         return { index, hasCapacity: true, highestIndex };
@@ -1650,7 +1654,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       }
     }
 
-    const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_RHYMES_PER_GRADE - 1);
+    const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_PAGES_PER_GRADE - 1);
     return { index: fallbackIndex, hasCapacity: false, highestIndex };
   };
 
@@ -1719,7 +1723,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         }
 
         const nextPageIndex = initialIndex + 1;
-        if (nextPageIndex < MAX_RHYMES_PER_GRADE) {
+        if (nextPageIndex < MAX_PAGES_PER_GRADE) {
           ensurePageAssets(nextPageIndex, sortedSelections).catch((prefetchError) => {
             console.error('Error preloading upcoming rhyme SVGs:', prefetchError);
           });
@@ -1840,11 +1844,11 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       };
 
       const nextArray = sortSelections([...filtered, baseRhyme]);
-      const totalSelected = nextArray.length;
       const isReplacement = removals.length > 0;
+      const nextInfo = computeNextAvailablePageInfo(nextArray);
 
-      if (!isReplacement && totalSelected > MAX_RHYMES_PER_GRADE) {
-        toast.error('Max of 25 rhymes per grade');
+      if (!isReplacement && !nextInfo.hasCapacity) {
+        toast.error('Maximum of 44 pages reached. Remove a rhyme to add another.');
         setShowTreeMenu(false);
         setCurrentPosition(null);
         return;
@@ -1895,8 +1899,6 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       } catch (svgError) {
         console.error('Error fetching rhyme SVG:', svgError);
       }
-
-      const nextInfo = computeNextAvailablePageInfo(nextArray);
 
       if (isReplacement) {
         setCurrentPageIndex(pageIndex);
@@ -2018,7 +2020,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const handlePageChange = (newPageIndex) => {
-    const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_RHYMES_PER_GRADE - 1));
+    const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_PAGES_PER_GRADE - 1));
 
     setCurrentPageIndex(clampedIndex);
 
@@ -2028,7 +2030,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       });
 
       const nextIndex = clampedIndex + 1;
-      if (nextIndex < MAX_RHYMES_PER_GRADE) {
+      if (nextIndex < MAX_PAGES_PER_GRADE) {
         ensurePageAssets(nextIndex).catch((error) => {
           console.error('Error prefetching next rhyme page:', error);
         });
@@ -2057,7 +2059,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
     const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
 
-    return Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
+    return Math.min(maxIndex + 1, MAX_PAGES_PER_GRADE);
   };
 
   useEffect(() => {
@@ -2069,7 +2071,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       .filter(index => Number.isFinite(index) && index >= 0);
 
     const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
-    const total = Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
+    const total = Math.min(maxIndex + 1, MAX_PAGES_PER_GRADE);
 
     if (total <= 0) {
       if (currentPageIndex !== 0) {
