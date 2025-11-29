@@ -46,29 +46,19 @@ if __package__ in {None, ""}:
     project_root = current_dir.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from backend.app import auth, config, rhymes, school_profiles, svg_processing, unc_path_utils  # type: ignore
+    from backend.app import auth, config, rhymes, svg_processing, unc_path_utils  # type: ignore
+    from backend.app.routes import schools, workspace  # type: ignore
     from backend.app.firebase_service import (  # type: ignore
-        DEFAULT_USER_ROLE,
         db,
-        ensure_user_document as _ensure_user_document,
-        firestore,
-        verify_and_decode_token as _verify_and_decode_token,
     )
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
-    from .app import auth, config, rhymes, school_profiles, svg_processing, unc_path_utils
+    from .app import auth, config, rhymes, svg_processing, unc_path_utils
+    from .app.routes import schools, workspace  # type: ignore
     from .app.firebase_service import (
-        DEFAULT_USER_ROLE,
         db,
-        ensure_user_document as _ensure_user_document,
-        firestore,
-        verify_and_decode_token as _verify_and_decode_token,
     )
     from .app.svg_processing import SvgDocument as _SvgDocument
-
-School = auth.School
-SchoolCreatePayload = school_profiles.SchoolCreatePayload
-SchoolUpdatePayload = school_profiles.SchoolUpdatePayload
 
 logger = logging.getLogger(__name__)
 
@@ -216,28 +206,6 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
         return svg_markup
 
 
-async def _read_upload_file(upload_file: Optional[UploadFile]) -> Tuple[Optional[bytes], Optional[str]]:
-    if not upload_file:
-        return None, None
-    contents = await upload_file.read()
-    if not contents:
-        return None, None
-    return contents, upload_file.content_type or "application/octet-stream"
-
-
-def _build_workspace_user(record: Dict[str, Any]) -> "WorkspaceUser":
-    return WorkspaceUser(
-        uid=record["uid"],
-        email=record.get("email"),
-        display_name=record.get("display_name"),
-        role=record.get("role", DEFAULT_USER_ROLE),
-        school_ids=list(record.get("school_ids", [])),
-        created_at=record.get("created_at") or datetime.utcnow(),
-        updated_at=record.get("updated_at") or datetime.utcnow(),
-    )
-
-
-
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -251,7 +219,6 @@ app.add_middleware(
 class PDFDependencyUnavailableError(RuntimeError):
       """Raised when the core PDF toolchain cannot be imported at runtime."""
     
-
 
 
 @dataclass(frozen=True)
@@ -346,6 +313,8 @@ def _load_pdf_dependencies() -> _PdfResources:
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.create_auth_router(db))
+api_router.include_router(workspace.router)
+api_router.include_router(schools.router)
 
 
 # Models
@@ -369,224 +338,6 @@ class RhymeSelectionCreate(BaseModel):
     position: Optional[str] = None
 
 
-class GradeStatus(BaseModel):
-    grade: str
-    selected_count: int
-    total_available: int
-
-
-class RhymeSelectionDetail(BaseModel):
-    id: Optional[str] = None
-    page_index: int
-    rhyme_code: str
-    rhyme_name: str
-    pages: float
-    position: Optional[str] = None
-    timestamp: Optional[datetime] = None
-
-
-class SchoolWithSelections(School):
-    total_selections: int = 0
-    last_updated: Optional[datetime] = None
-    grade_selections: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
-
-
-class WorkspaceUser(BaseModel):
-    uid: str
-    email: Optional[EmailStr] = None
-    display_name: Optional[str] = None
-    role: Literal["super-admin", "user"] = DEFAULT_USER_ROLE
-    school_ids: List[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class UserSessionResponse(BaseModel):
-    user: WorkspaceUser
-    schools: List[School] = Field(default_factory=list)
-
-
-class WorkspaceUserUpdatePayload(BaseModel):
-    display_name: Optional[str] = Field(default=None, min_length=2)
-    email: Optional[EmailStr] = None
-
-class PaginatedSchoolResponse(BaseModel):
-    schools: List[SchoolWithSelections]
-    total_count: int
-
-
-# Workspace endpoints
-@api_router.get("/users/me", response_model=UserSessionResponse)
-def get_current_workspace_user(authorization: Optional[str] = Header(None)):
-    decoded_token = _verify_and_decode_token(authorization)
-    user_record = _ensure_user_document(decoded_token)
-    workspace_user = _build_workspace_user(user_record)
-
-    schools: List[School] = []
-    for school_id in workspace_user.school_ids:
-        if not school_id:
-            continue
-        doc_ref = db.collection("schools").document(school_id)
-        snapshot = doc_ref.get()
-        if not snapshot.exists:
-            continue
-        record = snapshot.to_dict() or {}
-        record.setdefault("id", snapshot.id)
-        record.setdefault("school_id", record.get("school_id") or snapshot.id)
-        schools.append(school_profiles.build_school_from_record(record))
-
-    return UserSessionResponse(user=workspace_user, schools=schools)
-
-
-@api_router.patch("/users/me", response_model=WorkspaceUser)
-def update_current_workspace_user(
-    payload: WorkspaceUserUpdatePayload, authorization: Optional[str] = Header(None)
-):
-    decoded_token = _verify_and_decode_token(authorization)
-    user_record = _ensure_user_document(decoded_token)
-
-    updates: Dict[str, Any] = {}
-    if payload.display_name is not None:
-        display_name = payload.display_name.strip()
-        if not display_name:
-            raise HTTPException(status_code=400, detail="Display name cannot be empty")
-        updates["display_name"] = display_name
-
-    if payload.email is not None:
-        updates["email"] = str(payload.email)
-
-    if not updates:
-        return _build_workspace_user(user_record)
-
-    updates["updated_at"] = datetime.utcnow()
-    uid = user_record["uid"]
-    db.collection("users").document(uid).update(updates)
-    user_record.update(updates)
-    return _build_workspace_user(user_record)
-
-
-@api_router.post("/schools", response_model=School)
-async def create_school_profile(
-    payload: SchoolCreatePayload = Depends(SchoolCreatePayload.as_form),
-    logo_file: Optional[UploadFile] = File(None),
-    authorization: Optional[str] = Header(None),
-):
-    decoded_token = _verify_and_decode_token(authorization)
-    user_record = _ensure_user_document(decoded_token)
-    logo_blob, logo_mime_type = await _read_upload_file(logo_file)
-    return school_profiles.create_school_profile(db, payload, user_record, logo_blob, logo_mime_type)
-
-
-@api_router.put("/schools/{school_id}", response_model=School)
-async def update_school_profile(
-    school_id: str,
-    payload: SchoolUpdatePayload = Depends(SchoolUpdatePayload.as_form),
-    logo_file: Optional[UploadFile] = File(None),
-    authorization: Optional[str] = Header(None),
-):
-    decoded_token = _verify_and_decode_token(authorization)
-    user_record = _ensure_user_document(decoded_token)
-    uid = user_record["uid"]
-    role = user_record.get("role", DEFAULT_USER_ROLE)
-
-    doc_ref = db.collection("schools").document(school_id)
-    snapshot = doc_ref.get()
-    if not snapshot.exists:
-        raise HTTPException(status_code=404, detail="School not found")
-
-    existing = snapshot.to_dict() or {}
-    if existing.get("created_by_user_id") != uid and role != "super-admin":
-        raise HTTPException(status_code=403, detail="You do not have permission to edit this school")
-
-    raw_updates = payload.dict(exclude_unset=True)
-    logo_blob, logo_mime_type = await _read_upload_file(logo_file)
-
-    def _clean(value: Optional[str]) -> Optional[str]:
-        if isinstance(value, str):
-            stripped = value.strip()
-            return stripped or None
-        return value
-
-    service_status_raw = raw_updates.pop("service_status", None)
-    grades_raw = raw_updates.pop("grades", None)
-    address_fields = ("address_line1", "city", "state", "pin")
-    address_overrides: Dict[str, Any] = {field: raw_updates.pop(field) for field in address_fields if field in raw_updates}
-
-    updates: Dict[str, Any] = {}
-    for key, value in raw_updates.items():
-        if key == "service_type":
-            updates[key] = school_profiles.normalize_service_types(value)
-        else:
-            updates[key] = _clean(value)
-
-    if address_overrides:
-        cleaned_address = {field: _clean(address_overrides[field]) for field in address_overrides}
-        updates.update(cleaned_address)
-        merged_address = {
-            field: cleaned_address[field] if field in cleaned_address else existing.get(field)
-            for field in address_fields
-        }
-     
-
-    if service_status_raw is not None:
-        normalized_status = school_profiles.normalize_service_status(service_status_raw)
-        updates["service_status"] = normalized_status
-        updates["service_type"] = school_profiles.services_from_status(normalized_status)
-    elif "service_type" in updates:
-        updates["service_status"] = {
-            service: ("yes" if service in updates["service_type"] else "no")
-            for service in school_profiles.SERVICE_TYPE_VALUES
-        }
-
-    if grades_raw is not None:
-        updates["grades"] = school_profiles.normalize_grades(grades_raw)
-
-    if logo_blob is not None:
-        updates["logo_blob"] = logo_blob
-        updates["logo_mime_type"] = logo_mime_type
-
-    if not updates:
-        existing.setdefault("id", snapshot.id)
-        existing.setdefault("school_id", snapshot.id)
-        return school_profiles.build_school_from_record(existing)
-
-    now = datetime.utcnow()
-    updates["updated_at"] = now
-    updates["timestamp"] = now
-    doc_ref.update(updates)
-    existing.update(updates)
-    existing.setdefault("id", snapshot.id)
-    existing.setdefault("school_id", snapshot.id)
-
-    return school_profiles.build_school_from_record(existing)
-
-
-@api_router.get("/schools/{school_id}/logo")
-def get_school_logo(school_id: str):
-    doc_ref = db.collection("schools").document(school_id)
-    snapshot = doc_ref.get()
-    if not snapshot.exists:
-        raise HTTPException(status_code=404, detail="School not found")
-
-    record = snapshot.to_dict() or {}
-    logo_blob = record.get("logo_blob")
-    if logo_blob is None:
-        raise HTTPException(status_code=404, detail="Logo not found")
-
-    if isinstance(logo_blob, memoryview):
-        logo_blob = logo_blob.tobytes()
-    elif isinstance(logo_blob, bytearray):
-        logo_blob = bytes(logo_blob)
-
-    if not isinstance(logo_blob, (bytes, bytearray)):
-        raise HTTPException(status_code=404, detail="Logo not found")
-
-    media_type = record.get("logo_mime_type") or "image/jpeg"
-    headers = {"Cache-Control": "no-store"}
-    return Response(content=bytes(logo_blob), media_type=media_type, headers=headers)
-
-
-# Rhymes data endpoints
 @api_router.get("/rhymes")
 async def get_all_rhymes():
     """Get all rhymes organized by pages"""

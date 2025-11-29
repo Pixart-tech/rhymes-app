@@ -13,23 +13,25 @@ import {
   Trash2,
   UserRoundPen,
   Search,
-  Filter,
-  Clock,
+  MoreVertical,
   TrendingUp
 } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth';
 import { storage } from '../lib/firebase';
-import { API_BASE_URL } from '../lib/utils';
+import { API_BASE_URL, cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from './ui/card';
 import {
   AdminSchoolProfile,
+  BranchStatus,
+  GradeKey,
   SchoolProfile,
   SchoolFormValues,
   SchoolServiceType,
   WorkspaceUserUpdatePayload
 } from '../types/types';
+import BranchForm, { type BranchFormValues } from './BranchForm';
 import {
   SchoolForm,
   SchoolFormSubmitPayload,
@@ -39,6 +41,13 @@ import {
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from './ui/dropdown-menu';
 
 const API = API_BASE_URL || '/api';
 
@@ -49,12 +58,26 @@ const SERVICE_LABELS: Record<SchoolServiceType, string> = {
   certificates: 'Certificates'
 };
 type AdminServiceFilter = 'all' | SchoolServiceType;
+const GRADE_DOWNLOAD_OPTIONS: GradeKey[] = ['nursery', 'lkg', 'ukg', 'playgroup'];
 
 const getLogoSrc = (school: SchoolProfile, resolvedLogos?: Record<string, string>): string | null => {
   if (resolvedLogos?.[school.school_id]) {
     return resolvedLogos[school.school_id];
   }
   return school.logo_url ?? null;
+};
+
+const formatBranchAddress = (branch: SchoolProfile): string | null => {
+  const segments = [
+    branch.address_line1?.trim(),
+    branch.city?.trim(),
+    branch.state?.trim(),
+    branch.pin?.trim()
+  ].filter(Boolean);
+  if (segments.length > 0) {
+    return segments.join(', ');
+  }
+  return branch.address?.trim() || null;
 };
 
 
@@ -73,22 +96,27 @@ interface WorkspaceSession {
 
 interface AuthPageProps {
   onAuth: (selection: { school: SchoolProfile; user: WorkspaceUserProfile }) => void;
+  onLogout: () => void;
 }
 
 interface PaginatedAdminSchoolsResponse {
   schools: AdminSchoolProfile[];
-  totalCount: number;
+  totalCount?: number;
+  total_count?: number;
 }
 
-const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
+const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const { user, signInWithGoogle, loading: authLoading, getIdToken } = useAuth();
   const [workspaceUser, setWorkspaceUser] = useState<WorkspaceUserProfile | null>(null);
   const [schools, setSchools] = useState<SchoolProfile[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [view, setView] = useState<'list' | 'create' | 'edit'>('list');
+  const [view, setView] = useState<'list' | 'create' | 'edit' | 'branch'>('list');
   const [editingSchool, setEditingSchool] = useState<SchoolProfile | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [branchParent, setBranchParent] = useState<SchoolProfile | null>(null);
+  const [branchSubmitting, setBranchSubmitting] = useState(false);
+  const [branchStatusUpdatingId, setBranchStatusUpdatingId] = useState<string | null>(null);
   const [adminSchools, setAdminSchools] = useState<AdminSchoolProfile[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState<string | null>(null);
@@ -111,6 +139,27 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     });
     return Object.values(deduped);
   }, [schools, adminSchools]);
+  const branchStructure = useMemo(() => {
+    const rootSchools: SchoolProfile[] = [];
+    const branchMap = new Map<string, SchoolProfile[]>();
+    schools.forEach((school) => {
+      if (school.branch_parent_id) {
+        const current = branchMap.get(school.branch_parent_id) ?? [];
+        current.push(school);
+        branchMap.set(school.branch_parent_id, current);
+      } else {
+        rootSchools.push(school);
+      }
+    });
+    const rootIds = new Set(rootSchools.map((school) => school.school_id));
+    const orphanBranches: SchoolProfile[] = [];
+    branchMap.forEach((list, parentId) => {
+      if (!rootIds.has(parentId)) {
+        orphanBranches.push(...list);
+      }
+    });
+    return { rootSchools, branchMap, orphanBranches };
+  }, [schools]);
   const resolveDirectLogoUrl = useCallback((value?: string | null) => {
     if (!value) {
       return null;
@@ -184,6 +233,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     setProfileDialogOpen(false);
   }, [workspaceUser]);
 
+  useEffect(() => {
+    if (view !== 'branch' && branchParent) {
+      setBranchParent(null);
+    }
+  }, [view, branchParent]);
+
   const fetchAdminSchools = useCallback(async (page: number, limit: number) => {
     if (!workspaceUser || workspaceUser.role !== 'super-admin') {
       return;
@@ -202,7 +257,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
         }
       );
       setAdminSchools(response.data.schools);
-      setTotalAdminSchoolsCount(response.data.totalCount);
+      setTotalAdminSchoolsCount(
+        response.data.totalCount ??
+        response.data.total_count ??
+        response.data.schools.length
+      );
     } catch (error) {
       console.error('Failed to load admin schools', error);
       setAdminError('Unable to load the admin school list. Please try again.');
@@ -350,6 +409,40 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
       lastUpdated
     };
   }, [adminSchools]);
+  const adminBranchCount = useMemo(
+    () => adminSchools.filter((school) => Boolean(school.branch_parent_id)).length,
+    [adminSchools]
+  );
+    const activeAdminSchoolsCount = useMemo(
+      () =>
+        adminSchools.filter((school) => {
+          const status = school.status ?? 'active';
+          return status === 'active';
+        }).length,
+      [adminSchools]
+    );
+    const inactiveAdminSchoolsCount = Math.max(0, totalAdminSchoolsCount - activeAdminSchoolsCount);
+    const adminUserCount = useMemo(() => {
+    const userIds = new Set<string>();
+    adminSchools.forEach((school) => {
+      const identifier = school.created_by_user_id ?? school.created_by_email ?? '';
+      if (identifier) {
+        userIds.add(identifier);
+      }
+    });
+    return userIds.size;
+  }, [adminSchools]);
+  const adminBranchChildren = useMemo(() => {
+    const counts = new Map<string, number>();
+    adminSchools.forEach((school) => {
+      const parentId = school.branch_parent_id;
+      if (!parentId) {
+        return;
+      }
+      counts.set(parentId, (counts.get(parentId) ?? 0) + 1);
+    });
+    return counts;
+  }, [adminSchools]);
   const formatDate = useCallback((value?: string | Date | null) => {
     if (!value) {
       return 'No activity yet';
@@ -415,6 +508,152 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     onAuth({ school, user: workspaceUser });
   };
 
+  const handleDownloadBinder = useCallback((schoolId: string) => {
+    const promptValue = window.prompt(
+      'Enter the grade to download a binder (nursery, lkg, ukg, playgroup):',
+      'nursery'
+    );
+    if (!promptValue) {
+      return;
+    }
+    const normalizedGrade = promptValue.trim().toLowerCase();
+    if (!GRADE_DOWNLOAD_OPTIONS.includes(normalizedGrade as GradeKey)) {
+      toast.error('Please enter a valid grade (nursery, lkg, ukg, or playgroup).');
+      return;
+    }
+    const gradeKey = normalizedGrade as GradeKey;
+    const downloadUrl = `${API}/rhymes/binder/${schoolId}/${gradeKey}`;
+    window.open(downloadUrl, '_blank', 'noopener,noreferrer');
+  }, []);
+
+  const handleBranchSubmit = useCallback(
+    async (values: BranchFormValues) => {
+      if (!workspaceUser || !branchParent) {
+        return;
+      }
+
+      setBranchSubmitting(true);
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+        const cleanString = (value: string) => value.trim() || undefined;
+        const payload = {
+          parent_school_id: branchParent.school_id,
+          branch_name: values.branch_name.trim(),
+          coordinator_name: values.coordinator_name.trim(),
+          coordinator_email: values.coordinator_email.trim(),
+          coordinator_phone: values.coordinator_phone.trim(),
+          address_line1: cleanString(values.address_line1),
+          city: cleanString(values.city),
+          state: cleanString(values.state),
+          pin: cleanString(values.pin)
+        };
+        const response = await axios.post<SchoolProfile>(`${API}/branches`, payload, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const createdBranch = response.data;
+        setSchools((prev) => [...prev, createdBranch]);
+        setWorkspaceUser((prev) => {
+          if (!prev) {
+            return prev;
+          }
+          if (prev.school_ids.includes(createdBranch.school_id)) {
+            return prev;
+          }
+          return { ...prev, school_ids: [...prev.school_ids, createdBranch.school_id] };
+        });
+        toast.success('Branch created');
+        setView('list');
+        setBranchParent(null);
+      } catch (error) {
+        console.error('Failed to create branch', error);
+        if (axios.isAxiosError(error) && error.response?.status === 409) {
+          toast.error(error.response.data.detail);
+        } else {
+          toast.error('Unable to create branch. Please try again.');
+        }
+      } finally {
+        setBranchSubmitting(false);
+      }
+    },
+    [branchParent, getIdToken, workspaceUser]
+  );
+
+  const handleBranchCancel = useCallback(() => {
+    setBranchParent(null);
+    setView('list');
+  }, []);
+
+  const handleEditSchool = useCallback(
+    (school: SchoolProfile) => {
+      setEditingSchool(school);
+      setView('edit');
+    },
+    [setView]
+  );
+
+  const handleEditBranch = useCallback(
+    (branch: SchoolProfile) => {
+      setEditingSchool(branch);
+      setView('edit');
+    },
+    [setView]
+  );
+
+  const handleBranchStatusChange = useCallback(
+    async (branch: SchoolProfile, targetStatus: BranchStatus) => {
+      if (!workspaceUser) {
+        return;
+      }
+      if (targetStatus === 'inactive') {
+        const confirmed = window.confirm('Are you sure you want to discontinue this branch? This cannot be undone.');
+        if (!confirmed) {
+          return;
+        }
+      }
+      setBranchStatusUpdatingId(branch.school_id);
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+        const response = await axios.patch<SchoolProfile>(
+          `${API}/schools/${branch.school_id}/status`,
+          { status: targetStatus },
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        const updatedBranch = response.data;
+        setSchools((prev) => prev.map((school) => (school.school_id === updatedBranch.school_id ? updatedBranch : school)));
+        setAdminSchools((prev) =>
+          prev.map((school) => (school.school_id === updatedBranch.school_id ? { ...school, ...updatedBranch } : school))
+        );
+        toast.success(
+          targetStatus === 'active' ? 'Branch activated' : 'Branch discontinued'
+        );
+      } catch (error) {
+        console.error('Failed to update branch status', error);
+        toast.error(
+          `Unable to ${targetStatus === 'active' ? 'activate' : 'discontinue'} branch. Please try again.`
+        );
+      } finally {
+        setBranchStatusUpdatingId(null);
+      }
+    },
+    [getIdToken, setAdminSchools, setSchools, workspaceUser]
+  );
+
+  const handleAddBranch = useCallback(
+    (school: SchoolProfile) => {
+      setBranchParent(school);
+      setView('branch');
+    },
+    [setView, setBranchParent]
+  );
+
   const handleAdminDelete = useCallback(
     async (schoolId: string) => {
       if (!workspaceUser || workspaceUser.role !== 'super-admin') {
@@ -450,13 +689,13 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
       if (!workspaceUser) {
         return;
       }
-      const hasSelectedService = Object.values(values.service_status).some(
-        (status) => status === 'yes'
-      );
-      if (!hasSelectedService) {
-        toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
-        return;
-      }
+    const serviceStatusAnswered = Object.values(values.service_status).every(
+      (status) => status === 'yes' || status === 'no'
+    );
+    if (!serviceStatusAnswered) {
+      toast.error('Please confirm for each service whether you are taking it.');
+      return;
+    }
       setSubmitting(true);
       try {
         const token = await getIdToken();
@@ -485,7 +724,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
         onAuth({ school: createdSchool, user: updatedUser });
       } catch (error) {
         console.error('Failed to create school', error);
-        toast.error('Unable to create school. Please try again.');
+        if (axios.isAxiosError(error) && error.response?.status === 409) {
+          toast.error(error.response.data.detail);
+        } else {
+          toast.error('Unable to create school. Please try again.');
+        }
       } finally {
         setSubmitting(false);
       }
@@ -533,7 +776,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
         setView('list');
       } catch (error) {
         console.error('Failed to update school', error);
-        toast.error('Unable to update school. Please try again.');
+        if (axios.isAxiosError(error) && error.response?.status === 409) {
+          toast.error(error.response.data.detail);
+        } else {
+          toast.error('Unable to update school. Please try again.');
+        }
       } finally {
         setSubmitting(false);
       }
@@ -553,100 +800,259 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
   const isSuperAdmin = workspaceUser?.role === 'super-admin';
   const isCreateView = view === 'create' || (!isSuperAdmin && schools.length === 0);
   const isEditView = view === 'edit' && Boolean(editingSchool);
+  const isBranchView = view === 'branch' && Boolean(branchParent);
 
-  const renderUserDashboard = () => (
-    <Card className="w-full max-w-5xl border-0 bg-white/85 backdrop-blur">
-      <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-sm text-gray-500">Signed in as</p>
-          <CardTitle className="text-2xl text-gray-800">
-            {workspaceUser?.display_name || user?.name || 'School Admin'}
-          </CardTitle>
-          <p className="text-gray-600">{workspaceUser?.email}</p>
-        </div>
-        <div className="flex flex-wrap gap-3">
-          <Button variant="outline" onClick={() => setProfileDialogOpen(true)}>
-            <UserRoundPen className="h-4 w-4" />
-            Edit profile
-          </Button>
-          <Button
-            onClick={() => {
-              setEditingSchool(null);
-              setView('create');
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            Create new school
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {schools.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-gray-600">
-            <p>No schools found yet.</p>
-            <Button className="mt-4" onClick={() => setView('create')}>
-              Create your first school
-            </Button>
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {schools.map((school) => {
-              const logoSrc = getLogoSrc(school, logoMap);
-              const canEdit = school.created_by_user_id === workspaceUser?.uid;
-              return (
-                <Card key={school.school_id} className="border border-orange-100 shadow-sm">
-                  <CardHeader className="space-y-2">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 text-orange-600">
-                        {logoSrc ? (
-                          <img
-                            src={logoSrc}
-                            alt={school.school_name}
-                            className="h-12 w-12 rounded-full object-cover"
-                          />
+  const renderUserDashboard = () => {
+    const { rootSchools, branchMap, orphanBranches } = branchStructure;
+    const hasSchools = schools.length > 0;
+    const hasRootSchools = rootSchools.length > 0;
+    const primarySchool = hasRootSchools ? rootSchools[0] : null;
+    const primaryBranches = primarySchool ? branchMap.get(primarySchool.school_id) ?? [] : [];
+
+    return (
+      <div className="space-y-6">
+        <Card className="border border-slate-200 bg-white shadow-sm">
+          <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Signed in as</p>
+              <CardTitle className="text-2xl text-slate-900 font-semibold">
+                {workspaceUser?.display_name || user?.name || 'School Admin'}
+              </CardTitle>
+              <p className="text-sm text-slate-600">{workspaceUser?.email}</p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                variant="outline"
+                className="border-slate-200 text-slate-700 hover:border-slate-300"
+                onClick={() => setProfileDialogOpen(true)}
+              >
+                <UserRoundPen className="h-4 w-4" />
+                Edit profile
+              </Button>
+              <Button
+                variant="outline"
+                className="border-rose-200 text-rose-700 hover:border-rose-300"
+                onClick={onLogout}
+              >
+                Logout
+              </Button>
+            </div>
+          </CardHeader>
+          <div className="h-1 w-28 rounded-full bg-gradient-to-r from-sky-300 via-cyan-200 to-emerald-200 mx-auto md:mx-0" aria-hidden="true" />
+          <CardContent className="space-y-6">
+            {!hasSchools ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-8 text-center text-slate-500">
+                <p>No schools found yet.</p>
+                <Button className="mt-4 border border-slate-300 text-slate-700 bg-white" onClick={() => setView('create')}>
+                  Create your first school
+                </Button>
+              </div>
+            ) : (
+              <>
+                {!hasRootSchools ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-8 text-center text-slate-500">
+                    <p>No parent school profiles found yet.</p>
+                    <Button className="mt-4 border border-slate-300 text-slate-700 bg-white" onClick={() => setView('create')}>
+                      Create a parent school
+                    </Button>
+                  </div>
+                ) : primarySchool ? (
+                  <div className="space-y-5">
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-6 shadow-inner">
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-sky-100 to-emerald-100 text-slate-700 shadow">
+                          {getLogoSrc(primarySchool, logoMap) ? (
+                            <img
+                              src={getLogoSrc(primarySchool, logoMap)}
+                              alt={primarySchool.school_name}
+                              className="h-14 w-14 rounded-full object-cover"
+                            />
+                          ) : (
+                            <School className="h-6 w-6" />
+                          )}
+                        </div>
+                        <div>
+                          <CardTitle className="text-xl text-slate-900">{primarySchool.school_name}</CardTitle>
+                          <p className="text-xs uppercase tracking-wide text-slate-500">ID: {primarySchool.school_id}</p>
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-1 text-sm text-slate-600">
+                        {primarySchool.email && <p>Email: {primarySchool.email}</p>}
+                        {primarySchool.phone && <p>Phone: {primarySchool.phone}</p>}
+                        {primarySchool.address && <p className="line-clamp-2">Address: {primarySchool.address}</p>}
+                        {primarySchool.tagline && <p className="italic text-slate-500">{primarySchool.tagline}</p>}
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          className="flex items-center gap-2 border-slate-200 text-slate-700 hover:border-slate-300"
+                          onClick={() => handleSchoolSelect(primarySchool)}
+                        >
+                          <Eye className="h-4 w-4" />
+                          View
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="flex items-center gap-2 border-amber-200 text-amber-700 hover:border-amber-300"
+                          onClick={() => handleEditSchool(primarySchool)}
+                        >
+                          <Edit3 className="h-4 w-4" />
+                          Edit
+                        </Button>
+                      </div>
+                      <div className="mt-5 space-y-3 rounded-2xl border border-slate-100 bg-white/70 p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-slate-700">Branches ({primaryBranches.length})</p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-1 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300"
+                            onClick={() => {
+                              if (primarySchool) handleAddBranch(primarySchool);
+                            }}
+                          >
+                            <Plus className="h-4 w-4" />
+                            Add branch
+                          </Button>
+                        </div>
+                        {primaryBranches.length === 0 ? (
+                          <p className="text-xs text-slate-500">No branches yet.</p>
                         ) : (
-                          <School className="h-6 w-6" />
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {primaryBranches.map((branch) => {
+                              const branchAddress = formatBranchAddress(branch);
+                              const branchStatus = branch.status ?? 'active';
+                              const isActive = branchStatus === 'active';
+                              const isUpdating = branchStatusUpdatingId === branch.school_id;
+                              return (
+                                <div
+                                  key={branch.school_id}
+                                  className={cn(
+                                    'rounded-2xl border p-3 transition-colors',
+                                    isActive ? 'border-slate-200 bg-slate-50/70' : 'border-rose-200 bg-rose-50/80'
+                                  )}
+                                >
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                      <p className="text-sm font-semibold text-slate-900">{branch.school_name}</p>
+                                      <p className="text-xs text-slate-500">ID: {branch.school_id}</p>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 space-y-1 text-xs text-slate-500">
+                                    {branch.principal_name && <p>Coordinator: {branch.principal_name}</p>}
+                                    {branch.principal_email && <p>Email: {branch.principal_email}</p>}
+                                    {branch.principal_phone && <p>Phone: {branch.principal_phone}</p>}
+                                    {branchAddress && <p>Address: {branchAddress}</p>}
+                                  </div>
+                                  {!isActive && (
+                                    <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-rose-700">
+                                      Status: inactive
+                                    </p>
+                                  )}
+                                  <div className="mt-4 flex flex-wrap gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300"
+                                      onClick={() => handleEditBranch(branch)}
+                                      disabled={isUpdating}
+                                    >
+                                      <Edit3 className="h-4 w-4" />
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300"
+                                      onClick={() => handleSchoolSelect(branch)}
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                      View
+                                    </Button>
+                                    {isActive ? (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300 shadow-sm"
+                                        onClick={() => handleBranchStatusChange(branch, 'inactive')}
+                                        disabled={isUpdating}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                        Discontinue
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300"
+                                        onClick={() => handleBranchStatusChange(branch, 'active')}
+                                        disabled={isUpdating}
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                        Activate
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
-                      <div>
-                        <CardTitle className="text-lg text-gray-800">{school.school_name}</CardTitle>
-                        <p className="text-xs uppercase tracking-wide text-gray-500">ID: {school.school_id}</p>
-                      </div>
                     </div>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-sm text-gray-600">
-                    {school.email && <p>Email: {school.email}</p>}
-                    {school.phone && <p>Phone: {school.phone}</p>}
-                    {school.address && <p className="line-clamp-2">Address: {school.address}</p>}
-                    {school.tagline && <p className="italic text-gray-500">{school.tagline}</p>}
-                  </CardContent>
-                  <CardFooter className="flex items-center gap-2">
-                    <Button variant="secondary" className="flex-1" onClick={() => handleSchoolSelect(school)}>
-                      <Eye className="h-4 w-4" />
-                      View
-                    </Button>
-                    {canEdit && (
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => {
-                          setEditingSchool(school);
-                          setView('edit');
-                        }}
-                      >
-                        <Edit3 className="h-4 w-4" />
-                        Edit
-                      </Button>
-                    )}
-                  </CardFooter>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
+                  </div>
+                ) : null}
+                {orphanBranches.length > 0 && (
+                  <Card className="border border-slate-100 bg-white/80 shadow-sm">
+                    <CardHeader className="space-y-2">
+                      <CardTitle className="text-lg text-slate-900">Branches without a parent school</CardTitle>
+                      <p className="text-sm text-slate-500">
+                        These branches reference a school that is not currently listed in your workspace.
+                      </p>
+                    </CardHeader>
+                    <CardContent className="grid gap-3 sm:grid-cols-2">
+                      {orphanBranches.map((branch) => {
+                        const branchAddress = formatBranchAddress(branch);
+                        return (
+                          <div
+                            key={branch.school_id}
+                            className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-900">{branch.school_name}</p>
+                                <p className="text-xs text-slate-500">ID: {branch.school_id}</p>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:border-sky-300"
+                                onClick={() => handleSchoolSelect(branch)}
+                              >
+                                <Eye className="h-4 w-4" />
+                                View
+                              </Button>
+                            </div>
+                            <p className="text-xs text-slate-500">Parent ID: {branch.branch_parent_id}</p>
+                            <div className="mt-2 space-y-1 text-xs text-slate-500">
+                              {branch.principal_name && <p>Coordinator: {branch.principal_name}</p>}
+                              {branch.principal_email && <p>Email: {branch.principal_email}</p>}
+                              {branch.principal_phone && <p>Phone: {branch.principal_phone}</p>}
+                              {branchAddress && <p>Address: {branchAddress}</p>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
 
   const renderAdminDashboard = () => {
     const serviceFilterOptions: { label: string; value: AdminServiceFilter }[] = [
@@ -658,31 +1064,31 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
       adminSchools.length === 0 ? 'No schools available yet.' : 'No schools match the current filters.';
 
     return (
-      <div className="flex w-full max-w-6xl flex-col gap-6">
-        <Card className="border-0 bg-gradient-to-br from-orange-500 via-red-500 to-rose-500 text-white shadow-2xl">
-          <CardHeader className="space-y-6">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p className="text-sm uppercase tracking-wide text-white/80">Super admin</p>
-                <CardTitle className="text-3xl font-semibold">
+      <div className="space-y-6">
+        <Card className="border border-slate-200 bg-white shadow-sm">
+        <CardHeader className="space-y-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Super admin</p>
+                <CardTitle className="text-3xl font-semibold text-slate-900">
                   {workspaceUser?.display_name || user?.name || 'Admin'}
                 </CardTitle>
-                <p className="text-sm text-white/80">{workspaceUser?.email}</p>
+                <p className="text-sm text-slate-600">{workspaceUser?.email}</p>
               </div>
               <div className="flex flex-wrap gap-3">
                 <Button
                   variant="outline"
-                  className="border-white/40 text-white hover:bg-white/10"
+                  className="border-slate-200 text-slate-700 hover:border-slate-300"
                   onClick={() => setProfileDialogOpen(true)}
                 >
                   <UserRoundPen className="h-4 w-4" />
                   Edit profile
                 </Button>
-                <Button asChild variant="outline" className="border-white/40 text-white hover:bg-white/10">
+                <Button asChild variant="outline" className="border-slate-200 text-slate-700 hover:border-slate-300">
                   <Link to="/admin/upload">Admin tools</Link>
                 </Button>
                 <Button
-                  className="bg-white text-orange-600 hover:bg-white/90"
+                  className="bg-slate-900 text-white hover:bg-slate-800"
                   onClick={() => {
                     setEditingSchool(null);
                     setView('create');
@@ -691,66 +1097,77 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                   <Plus className="h-4 w-4" />
                   Create school
                 </Button>
-              </div>
             </div>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-2xl bg-white/20 p-4 backdrop-blur">
-              <p className="text-sm text-white/80">Total selections</p>
-              <p className="text-3xl font-semibold">{adminStats.totalSelections}</p>
-              <span className="mt-2 inline-flex items-center gap-1 text-xs text-white/80">
+          </div>
+        </CardHeader>
+            <div className="h-1 w-32 rounded-full bg-gradient-to-r from-sky-300 via-cyan-100 to-emerald-200" aria-hidden="true" />
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5">
+              <p className="text-sm text-slate-500">Total selections</p>
+              <p className="text-3xl font-semibold text-slate-900">{adminStats.totalSelections}</p>
+              <span className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500">
                 <TrendingUp className="h-3.5 w-3.5" />
                 Last update {formatDate(adminStats.lastUpdated)}
               </span>
             </div>
-            <div className="rounded-2xl bg-white/20 p-4 backdrop-blur">
-              <p className="text-sm text-white/80">Total schools</p>
-              <p className="text-3xl font-semibold">{totalAdminSchoolsCount}</p>
-              <span className="mt-2 inline-flex items-center gap-1 text-xs text-white/80">
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5">
+              <p className="text-sm text-slate-500">Total schools</p>
+              <p className="text-3xl font-semibold text-slate-900">{totalAdminSchoolsCount}</p>
+              <span className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500">
                 <School className="h-3.5 w-3.5" />
                 All schools currently listed
               </span>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-100 bg-emerald-50 p-4">
+                  <p className="text-xs uppercase tracking-wide text-emerald-700">Active schools</p>
+                  <p className="text-2xl font-semibold text-emerald-900">{activeAdminSchoolsCount}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-100 bg-rose-50 p-4">
+                  <p className="text-xs uppercase tracking-wide text-rose-700">Inactive schools</p>
+                  <p className="text-2xl font-semibold text-rose-900">{inactiveAdminSchoolsCount}</p>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border-0 bg-white/95 shadow-2xl backdrop-blur">
-          <CardHeader className="space-y-6">
+        <Card className="border border-slate-200 bg-white shadow-sm">
+          <CardHeader className="space-y-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="relative w-full flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
                   placeholder="Search by school name, email, or ID"
-                  className="pl-10"
+                  className="pl-10 border border-slate-200 bg-slate-50 focus:border-slate-300"
                   value={adminSearch}
                   onChange={(event) => setAdminSearch(event.target.value)}
                 />
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {serviceFilterOptions.map((option) => (
-                  <Button
-                    key={option.value}
-                    type="button"
-                    size="sm"
-                    variant={serviceFilter === option.value ? 'default' : 'outline'}
-                    className={serviceFilter === option.value ? 'bg-orange-500 hover:bg-orange-500/90' : ''}
-                    onClick={() => setServiceFilter(option.value)}
-                  >
-                    {option.value === 'all' ? (
-                      <>
-                        <Filter className="h-4 w-4" />
+              <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-slate-100 px-4 py-3 shadow-sm">
+                <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                  Filter by service
+                </span>
+                <Select
+                  value={serviceFilter}
+                  onValueChange={(value) => setServiceFilter(value as AdminServiceFilter)}
+                >
+                  <SelectTrigger className="w-48 rounded-2xl border border-slate-200 bg-white px-3 shadow-sm">
+                    <SelectValue placeholder="All services" />
+                  </SelectTrigger>
+                  <SelectContent className="border border-slate-100 bg-white shadow-lg">
+                    {serviceFilterOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
                         {option.label}
-                      </>
-                    ) : (
-                      option.label
-                    )}
-                  </Button>
-                ))}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
+                  className="border-slate-200 text-slate-700 hover:border-slate-300"
                   onClick={() => {
                     void fetchAdminSchools(currentPage, schoolsPerPage);
                   }}
@@ -767,136 +1184,219 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
           </CardHeader>
           <CardContent className="space-y-5">
             {adminLoading ? (
-              <div className="flex items-center justify-center gap-3 rounded-xl border border-dashed border-gray-200 px-6 py-10 text-gray-600">
-                <Loader2 className="h-5 w-5 animate-spin text-orange-500" />
+              <div className="flex items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 px-6 py-10 text-slate-600">
+                <Loader2 className="h-5 w-5 animate-spin text-slate-700" />
                 Fetching the latest schools…
               </div>
             ) : schoolsToRender.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-gray-200 px-6 py-12 text-center text-gray-500">
+              <div className="rounded-xl border border-dashed border-slate-200 px-6 py-12 text-center text-slate-500">
                 {emptyStateMessage}
               </div>
             ) : (
-              <><div className="overflow-x-auto rounded-2xl border border-gray-100">
-                    <table className="min-w-full divide-y divide-gray-200 text-sm">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                            School
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                            Services
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                            Selections
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                            Grades
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                            Last updated
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                            Actions
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100 bg-white">
-                        {schoolsToRender.map((school) => {
-                          const logoSrc = getLogoSrc(school, logoMap);
-                          const gradeCount = Object.values(school.grades || {}).filter(
-                            (grade) => grade.enabled
-                          ).length;
-                          const isDeleting = deletingSchoolId === school.school_id;
-                          const services = school.service_type ?? [];
+              <>
+                <div className="overflow-x-auto rounded-2xl border border-slate-100">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          School
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Services
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          User
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Branches
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Status
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Selections
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Grades
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Last updated
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {schoolsToRender.map((school) => {
+                        const logoSrc = getLogoSrc(school, logoMap);
+                        const gradeCount = Object.values(school.grades || {}).filter((grade) => grade.enabled).length;
+                        const isDeleting = deletingSchoolId === school.school_id;
+                        const branchStatus = school.status ?? 'active';
+                        const isBranch = Boolean(school.branch_parent_id);
+                        const isBranchUpdating = branchStatusUpdatingId === school.school_id;
+                        const services = school.service_type ?? [];
 
-                          return (
-                            <tr key={school.school_id} className="hover:bg-orange-50/40">
-                              <td className="px-4 py-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-50 text-orange-500">
-                                    {logoSrc ? (
-                                      <img
-                                        src={logoSrc}
-                                        alt={school.school_name}
-                                        className="h-11 w-11 rounded-full object-cover" />
-                                    ) : (
-                                      <School className="h-5 w-5" />
-                                    )}
-                                  </div>
-                                  <div>
-                                    <div className="font-semibold text-gray-800">{school.school_name}</div>
-                                    <p className="text-xs text-gray-500">ID: {school.school_id}</p>
-                                  </div>
+                        return (
+                          <tr key={school.school_id} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-4 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-50 text-slate-500">
+                                  {logoSrc ? (
+                                    <img
+                                      src={logoSrc}
+                                      alt={school.school_name}
+                                      className="h-11 w-11 rounded-full object-cover"
+                                    />
+                                  ) : (
+                                    <School className="h-5 w-5" />
+                                  )}
                                 </div>
-                              </td>
-                              <td className="px-4 py-4">
-                                <div className="flex flex-wrap gap-1">
-                                  {services.length === 0
-                                    ? '—'
-                                    : services.map((service) => (
-                                      <span key={service} className="rounded-full bg-orange-50 px-2 py-0.5 text-xs text-orange-700">
+                                <div>
+                                  <div className="font-semibold text-slate-900">{school.school_name}</div>
+                                  <p className="text-xs text-slate-500">ID: {school.school_id}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex flex-wrap gap-1">
+                                {services.length === 0
+                                  ? '—'
+                                  : services.map((service) => (
+                                      <span
+                                        key={service}
+                                        className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600"
+                                      >
                                         {SERVICE_LABELS[service]}
                                       </span>
                                     ))}
-                                </div>
-                              </td>
-                              <td className="px-4 py-4 text-gray-700">{school.total_selections ?? 0}</td>
-                              <td className="px-4 py-4 text-gray-700">{gradeCount}</td>
-                              <td className="px-4 py-4 text-gray-700">{formatDate(school.last_updated ?? school.timestamp ?? null)}</td>
-                              <td className="px-4 py-4">
-                                <div className="flex flex-wrap gap-2">
-                                  <Button variant="secondary" size="sm" onClick={() => handleSchoolSelect(school)}>
-                                    <Eye className="h-4 w-4" />
-                                    Open
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 text-slate-700">
+                              <p className="font-semibold text-slate-900">
+                                {school.created_by_email ?? school.created_by_user_id ?? '—'}
+                              </p>
+                              <p className="text-xs uppercase tracking-wide text-slate-400">
+                                {school.created_by_email ? 'Email' : school.created_by_user_id ? 'User' : '—'}
+                              </p>
+                            </td>
+                            <td className="px-4 py-4 text-slate-700">
+                              {school.branch_parent_id ? (
+                                <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                                  Child of {school.branch_parent_id}
+                                </span>
+                              ) : (
+                                <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800">
+                                  {adminBranchChildren.get(school.school_id) ?? 0} branch
+                                  {(adminBranchChildren.get(school.school_id) ?? 0) === 1 ? '' : 'es'}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-4">
+                              <span
+                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                                  branchStatus === 'active'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-rose-50 text-rose-700'
+                                }`}
+                              >
+                                {branchStatus === 'active' ? 'Active' : 'Inactive'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 text-slate-700">{school.total_selections ?? 0}</td>
+                            <td className="px-4 py-4 text-slate-700">{gradeCount}</td>
+                            <td className="px-4 py-4 text-slate-700">
+                              {formatDate(school.last_updated ?? school.timestamp ?? null)}
+                            </td>
+                            <td className="px-4 py-4">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger
+                                  className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-white shadow hover:bg-slate-800"
+                                  aria-label="More actions"
+                                >
+                                  <MoreVertical className="h-4 w-4" />
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent
+                                  align="end"
+                                  className="w-48 rounded-2xl border border-slate-100 bg-white shadow-lg"
+                                >
+                                  <DropdownMenuItem onClick={() => handleSchoolSelect(school)}>
+                                    View
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
                                     onClick={() => {
                                       setEditingSchool(school);
                                       setView('edit');
-                                    } }
+                                    }}
                                   >
-                                    <Edit3 className="h-4 w-4" />
                                     Edit
-                                  </Button>
-                                  <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    onClick={() => void handleAdminDelete(school.school_id)}
-                                    disabled={isDeleting}
-                                  >
-                                    {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                                    Delete
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div><div className="flex items-center justify-between space-x-2 py-4">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                        disabled={currentPage === 1}
-                      >
-                        Previous
-                      </Button>
-                      <div className="text-sm font-medium">
-                        Page {currentPage} of {Math.ceil(totalAdminSchoolsCount / schoolsPerPage)}
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage((prev) => Math.min(Math.ceil(totalAdminSchoolsCount / schoolsPerPage), prev + 1))}
-                        disabled={currentPage === Math.ceil(totalAdminSchoolsCount / schoolsPerPage)}
-                      >
-                        Next
-                      </Button>
-                    </div></>
+                                  </DropdownMenuItem>
+                                  {school.branch_parent_id ? (
+                                    branchStatus === 'inactive' ? (
+                                      <DropdownMenuItem
+                                        onClick={() => handleBranchStatusChange(school, 'active')}
+                                        disabled={isBranchUpdating}
+                                      >
+                                        Activate
+                                      </DropdownMenuItem>
+                                    ) : (
+                                      <DropdownMenuItem
+                                        onClick={() => handleBranchStatusChange(school, 'inactive')}
+                                        disabled={isBranchUpdating}
+                                        className="text-rose-600"
+                                      >
+                                        Discontinue
+                                      </DropdownMenuItem>
+                                    )
+                                  ) : (
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        void handleAdminDelete(school.school_id);
+                                      }}
+                                      disabled={deletingSchoolId === school.school_id}
+                                      className="text-red-600"
+                                    >
+                                      Delete
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem onClick={() => handleDownloadBinder(school.school_id)}>
+                                    Binder
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex items-center justify-between space-x-2 py-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-slate-200 text-slate-700 hover:border-slate-300"
+                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <div className="text-sm font-medium text-slate-700">
+                    Page {currentPage} of {Math.ceil(totalAdminSchoolsCount / schoolsPerPage)}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-slate-200 text-slate-700 hover:border-slate-300"
+                    onClick={() =>
+                      setCurrentPage((prev) => Math.min(Math.ceil(totalAdminSchoolsCount / schoolsPerPage), prev + 1))
+                    }
+                    disabled={currentPage === Math.ceil(totalAdminSchoolsCount / schoolsPerPage)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -945,10 +1445,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                   </>
                 )}
               </Button>
-              <p className="text-sm text-gray-600 text-center">
-                Choose your Google account to access your workspace. Roles are detected automatically—no manual email
-                entry needed.
-              </p>
             </div>
           </CardContent>
         </Card>
@@ -987,32 +1483,47 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     return null;
   }
 
+  const dashboardContent = isSuperAdmin ? renderAdminDashboard() : renderUserDashboard();
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center p-4">
-      {isCreateView ? (
-        <SchoolForm
-          mode="create"
-          initialValues={currentFormValues}
-          submitting={submitting}
-          onSubmit={handleCreateSubmit}
-          onCancel={isSuperAdmin || schools.length > 0 ? () => setView('list') : undefined}
-        />
-      ) : isEditView && editingSchool ? (
-        <SchoolForm
-          mode="edit"
-          initialValues={currentFormValues}
-          submitting={submitting}
-          onSubmit={handleEditSubmit}
-          onCancel={() => {
-            setEditingSchool(null);
-            setView('list');
-          }}
-        />
-      ) : isSuperAdmin ? (
-        renderAdminDashboard()
-      ) : (
-        renderUserDashboard()
-      )}
+    <div className="min-h-screen bg-slate-50 flex items-start justify-center px-4 py-10">
+      <div className="w-full max-w-6xl space-y-6">
+        {isCreateView ? (
+          <div className="w-full max-w-4xl">
+            <SchoolForm
+              mode="create"
+              initialValues={currentFormValues}
+              submitting={submitting}
+              onSubmit={handleCreateSubmit}
+              onCancel={isSuperAdmin || schools.length > 0 ? () => setView('list') : undefined}
+            />
+          </div>
+        ) : isEditView && editingSchool ? (
+          <div className="w-full max-w-4xl">
+            <SchoolForm
+              mode="edit"
+              initialValues={currentFormValues}
+              submitting={submitting}
+              onSubmit={handleEditSubmit}
+              onCancel={() => {
+                setEditingSchool(null);
+                setView('list');
+              }}
+            />
+          </div>
+        ) : isBranchView && branchParent ? (
+          <div className="w-full max-w-4xl">
+            <BranchForm
+              parentSchool={branchParent}
+              submitting={branchSubmitting}
+              onSubmit={handleBranchSubmit}
+              onCancel={handleBranchCancel}
+            />
+          </div>
+        ) : (
+          <div className="w-full">{dashboardContent}</div>
+        )}
+      </div>
       <Dialog
         open={profileDialogOpen}
         onOpenChange={(open) => {
@@ -1020,6 +1531,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
             setProfileDialogOpen(open);
           }
         }}
+        className="z-50"
       >
         <DialogContent>
           <form
@@ -1031,7 +1543,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
           >
             <DialogHeader>
               <DialogTitle>Edit profile</DialogTitle>
-              <p className="text-sm text-gray-500">Update the name and email associated with your workspace.</p>
+              <p className="text-sm text-slate-500">Update the name and email associated with your workspace.</p>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">

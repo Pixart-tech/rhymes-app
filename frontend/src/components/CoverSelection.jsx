@@ -1,28 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
+import { COVER_THEME_CATALOGUE } from '../theme';
 
 const COVER_SELECTION_STORAGE_KEY = 'cover-selection-preferences';
-
-const themeCatalogue = [
-  {
-    id: 'theme1',
-    label: 'Theme 1',
-    number: 1,
-    colours: [
-      { id: 'colour1', label: 'Colour 1', number: 1 },
-      { id: 'colour2', label: 'Colour 2', number: 2 }
-    ]
-  },
-  {
-    id: 'theme2',
-    label: 'Theme 2',
-    number: 2,
-    colours: [
-      { id: 'colour1', label: 'Colour 1', number: 1 }
-    ]
-  }
-];
+const themeCatalogue = COVER_THEME_CATALOGUE;
 
 const restorePersistedSelection = () => {
   if (typeof window === 'undefined' || !window.sessionStorage) {

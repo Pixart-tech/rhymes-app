@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import random
 import string
 from datetime import datetime
 import json
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Literal, Optional, Set, Tuple
 
 from fastapi import Form, HTTPException
 from firebase_admin import firestore
@@ -25,6 +26,10 @@ GradeKey = Literal["toddler", "playgroup", "nursery", "lkg", "ukg"]
 GRADE_KEYS: Tuple[GradeKey, ...] = ("toddler", "playgroup", "nursery", "lkg", "ukg")
 
 SCHOOL_ID_ALPHABET = string.ascii_uppercase + string.digits
+
+BranchStatus = Literal["active", "inactive"]
+BRANCH_STATUS_ACTIVE: BranchStatus = "active"
+BRANCH_STATUS_INACTIVE: BranchStatus = "inactive"
 
 
 def normalize_service_types(values: Optional[Iterable[SchoolServiceType]]) -> List[SchoolServiceType]:
@@ -61,6 +66,34 @@ def _parse_json_field(value: Any) -> Optional[Any]:
             return json.loads(value)
         except json.JSONDecodeError:
             return None
+    return None
+
+
+def _normalize_id_card_fields(value: Optional[Any]) -> Optional[List[str]]:
+    if value is None or value == "":
+        return None
+
+    parsed: Any = value
+    if isinstance(value, str):
+        parsed = _parse_json_field(value)
+
+    if parsed is None:
+        return None
+
+    normalized: List[str] = []
+    seen: Set[str] = set()
+
+    if isinstance(parsed, list):
+        for entry in parsed:
+            if not isinstance(entry, str):
+                continue
+            trimmed = entry.strip()
+            if not trimmed or trimmed in seen:
+                continue
+            seen.add(trimmed)
+            normalized.append(trimmed)
+        return normalized
+
     return None
 
 
@@ -136,6 +169,7 @@ class SchoolCreatePayload(BaseModel):
     service_type: List[SchoolServiceType] = Field(default_factory=list)
     service_status: Optional[Dict[SchoolServiceType, ServiceStatus]] = None
     grades: Optional[Dict[GradeKey, Dict[str, Any]]] = None
+    id_card_fields: Optional[List[str]] = None
 
     @field_validator("service_type", mode="before")
     @classmethod
@@ -180,6 +214,11 @@ class SchoolCreatePayload(BaseModel):
                 }
         return normalized or None
 
+    @field_validator("id_card_fields", mode="before")
+    @classmethod
+    def _coerce_id_card_fields(cls, value: Any) -> Optional[List[str]]:
+        return _normalize_id_card_fields(value)
+
     @classmethod
     def as_form(
         cls,
@@ -198,6 +237,7 @@ class SchoolCreatePayload(BaseModel):
         service_type: Optional[Any] = Form(default=None),
         service_status: Optional[Any] = Form(default=None),
         grades: Optional[Any] = Form(default=None),
+        id_card_fields: Optional[Any] = Form(default=None),
     ) -> "SchoolCreatePayload":
         return cls(
             school_name=school_name,
@@ -215,7 +255,21 @@ class SchoolCreatePayload(BaseModel):
             service_type=service_type,
             service_status=service_status,
             grades=grades,
+            id_card_fields=id_card_fields,
         )
+
+
+class BranchCreatePayload(BaseModel):
+    parent_school_id: str = Field(..., min_length=1)
+    branch_name: str = Field(..., min_length=2)
+    coordinator_name: str = Field(..., min_length=2)
+    coordinator_email: EmailStr
+    coordinator_phone: str = Field(..., min_length=5)
+
+    address_line1: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pin: Optional[str] = None
 
 
 class SchoolUpdatePayload(BaseModel):
@@ -235,6 +289,7 @@ class SchoolUpdatePayload(BaseModel):
     service_type: Optional[List[SchoolServiceType]] = None
     service_status: Optional[Dict[SchoolServiceType, ServiceStatus]] = None
     grades: Optional[Dict[GradeKey, Dict[str, Any]]] = None
+    id_card_fields: Optional[List[str]] = None
 
     @field_validator("service_type", mode="before")
     @classmethod
@@ -279,6 +334,13 @@ class SchoolUpdatePayload(BaseModel):
                 }
         return normalized or None
 
+    @field_validator("id_card_fields", mode="before")
+    @classmethod
+    def _coerce_id_card_fields(cls, value: Any) -> Optional[List[str]]:
+        if value is None or value == "":
+            return None
+        return _normalize_id_card_fields(value)
+
     @classmethod
     def as_form(
         cls,
@@ -298,6 +360,7 @@ class SchoolUpdatePayload(BaseModel):
         service_type: Optional[Any] = Form(default=None),
         service_status: Optional[Any] = Form(default=None),
         grades: Optional[Any] = Form(default=None),
+        id_card_fields: Optional[Any] = Form(default=None),
     ) -> "SchoolUpdatePayload":
         return cls(
             school_name=school_name,
@@ -316,6 +379,7 @@ class SchoolUpdatePayload(BaseModel):
             service_type=service_type,
             service_status=service_status,
             grades=grades,
+            id_card_fields=id_card_fields,
         )
 
 
@@ -324,6 +388,94 @@ def _clean_optional_string(value: Optional[str]) -> Optional[str]:
         stripped = value.strip()
         return stripped or None
     return value
+
+
+def _normalize_email(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed.lower() if trimmed else None
+
+
+def _find_conflicting_school_by_email(
+    db_client: firestore.Client,
+    normalized_email: Optional[str],
+    *,
+    exclude_school_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    if not normalized_email:
+        return None
+
+    for field in ("email", "principal_email"):
+        snapshots = (
+            db_client.collection("schools")
+            .where(field, "==", normalized_email)
+            .limit(1)
+            .get()
+        )
+        if not snapshots:
+            continue
+        snapshot = snapshots[0]
+        if exclude_school_id and snapshot.id == exclude_school_id:
+            continue
+        return snapshot.to_dict()
+
+    return None
+
+
+def _ensure_unique_email(
+    db_client: firestore.Client,
+    raw_value: Optional[str],
+    label: str,
+    *,
+    exclude_school_id: Optional[str] = None,
+) -> Optional[str]:
+    normalized = _normalize_email(raw_value)
+    if not normalized:
+        return None
+
+    conflict = _find_conflicting_school_by_email(
+        db_client, normalized, exclude_school_id=exclude_school_id
+    )
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A school with this {label} already exists. Please use a different {label}.",
+        )
+
+    return normalized
+
+
+def _find_user_by_email(
+    db_client: firestore.Client, email: Optional[str]
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    if not email:
+        return None, None
+
+    normalized = email.strip()
+    if not normalized:
+        return None, None
+
+    candidates = []
+    normalized_lower = normalized.lower()
+    if normalized_lower:
+        candidates.append(normalized_lower)
+    if normalized_lower != normalized:
+        candidates.append(normalized)
+
+    seen: Set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        snapshots = (
+            db_client.collection("users").where("email", "==", candidate).limit(1).get()
+        )
+        if snapshots:
+            document = snapshots[0]
+            return document.id, document.to_dict() or {}
+
+    return None, None
 
 
 def build_school_from_record(record: Dict[str, Any]) -> School:
@@ -358,8 +510,11 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         service_type=extract_service_type(record.get("service_type")),
         service_status=normalize_service_status(record.get("service_status")),
         grades=normalize_grades(grades_from_record),
+        branch_parent_id=record.get("branch_parent_id"),
+        status=record.get("status") or BRANCH_STATUS_ACTIVE,
         created_by_user_id=record.get("created_by_user_id"),
         created_by_email=record.get("created_by_email"),
+        id_card_fields=record.get("id_card_fields"),
         created_at=record.get("created_at") or record.get("timestamp") or now,
         updated_at=record.get("updated_at") or record.get("timestamp") or now,
         timestamp=record.get("timestamp") or record.get("updated_at") or now,
@@ -386,8 +541,29 @@ def create_school_profile(
     if not user_id:
         raise HTTPException(status_code=400, detail="User record is missing a user id")
 
+    normalized_school_email = _ensure_unique_email(db, str(payload.email), "school email")
+    normalized_principal_email = _ensure_unique_email(db, str(payload.principal_email), "principal email")
+    phone_query = (
+        db.collection("schools").where("phone", "==", payload.phone).limit(1).get()
+    )
+
+    if phone_query:
+        raise HTTPException(
+            status_code=409,
+            detail="A school with this phone number already exists. Please use a different phone number.",
+        )
+
     school_id = generate_school_id(db)
     now = datetime.utcnow()
+
+    owner_email_input = _clean_optional_string(str(payload.email) if payload.email else None)
+    owner_email_value = normalized_school_email or user_record.get("email")
+    is_creator_super_admin = user_record.get("role") == "super-admin"
+    assignee_id: Optional[str] = user_id
+    assignee_record: Optional[Dict[str, Any]] = user_record
+
+    if is_creator_super_admin:
+        assignee_id, assignee_record = _find_user_by_email(db, owner_email_input)
 
     address_line1 = _clean_optional_string(payload.address_line1)
     city = _clean_optional_string(payload.city)
@@ -402,9 +578,9 @@ def create_school_profile(
         "school_name": payload.school_name.strip(),
         "logo_blob": logo_blob,
         "logo_mime_type": logo_mime_type,
-        "email": _clean_optional_string(str(payload.email) if payload.email else None),
+        "email": normalized_school_email,
         "phone": _clean_optional_string(payload.phone),
-        "address": _clean_optional_string(payload.address),
+        "address": compose_address(address_line1, city, state, pin),
         "address_line1": address_line1,
         "city": city,
         "state": state,
@@ -412,11 +588,106 @@ def create_school_profile(
         "tagline": _clean_optional_string(payload.tagline),
         "website": _clean_optional_string(payload.website),
         "principal_name": _clean_optional_string(payload.principal_name),
-        "principal_email": _clean_optional_string(str(payload.principal_email) if payload.principal_email else None),
+        "principal_email": normalized_principal_email,
         "principal_phone": _clean_optional_string(payload.principal_phone),
         "service_type": services_from_status(service_status_map),
         "service_status": service_status_map,
         "grades": grade_map,
+        "id_card_fields": payload.id_card_fields if payload.id_card_fields is not None else [],
+        "created_by_user_id": assignee_id,
+        "created_by_email": owner_email_value or user_record.get("email"),
+        "created_at": now,
+        "updated_at": now,
+        "timestamp": now,
+    }
+
+    db.collection("schools").document(school_id).set(school_payload)
+    if assignee_id:
+        db.collection("users").document(assignee_id).update(
+            {"school_ids": firestore.ArrayUnion([school_id]), "updated_at": now}
+        )
+        if assignee_record is not None:
+            existing_ids = set(assignee_record.get("school_ids", []))
+            existing_ids.add(school_id)
+            assignee_record["school_ids"] = list(existing_ids)
+
+    return build_school_from_record(school_payload)
+
+
+def create_branch_profile(
+    db: firestore.Client,
+    payload: BranchCreatePayload,
+    user_record: Dict[str, Any],
+) -> School:
+    user_id = user_record.get("uid")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="User record is missing a user id")
+
+    parent_school_id = (payload.parent_school_id or "").strip()
+    if not parent_school_id:
+        raise HTTPException(status_code=400, detail="Parent school id is required")
+
+    parent_snapshot = db.collection("schools").document(parent_school_id).get()
+    if not parent_snapshot.exists:
+        raise HTTPException(status_code=404, detail="Parent school not found")
+
+    parent_record = parent_snapshot.to_dict() or {}
+    if parent_record.get("branch_parent_id"):
+        raise HTTPException(status_code=400, detail="Cannot add a branch to another branch")
+
+    role = user_record.get("role")
+    if role != "super-admin" and parent_school_id not in user_record.get("school_ids", []):
+        raise HTTPException(status_code=403, detail="You do not have permission to add a branch to this school")
+
+    normalized_branch_email = _ensure_unique_email(db, str(payload.coordinator_email), "branch email")
+
+    branch_id = generate_school_id(db)
+    now = datetime.utcnow()
+
+    address_line1 = _clean_optional_string(payload.address_line1)
+    city = _clean_optional_string(payload.city)
+    state = _clean_optional_string(payload.state)
+    pin = _clean_optional_string(payload.pin)
+
+    parent_school_name = _clean_optional_string(parent_record.get("school_name"))
+    branch_display_name = (
+        f"{parent_school_name} - {payload.branch_name.strip()}"
+        if parent_school_name
+        else payload.branch_name.strip()
+    )
+    branch_service_status = normalize_service_status(parent_record.get("service_status"))
+    branch_service_type = services_from_status(branch_service_status)
+    branch_grades = normalize_grades(parent_record.get("grades"))
+    branch_tagline = _clean_optional_string(parent_record.get("tagline"))
+    branch_website = _clean_optional_string(parent_record.get("website"))
+    parent_logo_blob = parent_record.get("logo_blob")
+    parent_logo_mime_type = parent_record.get("logo_mime_type")
+    coordinator_email = normalized_branch_email
+    coordinator_phone = _clean_optional_string(payload.coordinator_phone)
+
+    branch_payload = {
+        "id": branch_id,
+        "school_id": branch_id,
+        "school_name": branch_display_name,
+        "address": compose_address(address_line1, city, state, pin),
+        "address_line1": address_line1,
+        "city": city,
+        "state": state,
+        "pin": pin,
+        "email": coordinator_email,
+        "phone": coordinator_phone,
+        "tagline": branch_tagline,
+        "website": branch_website,
+        "principal_name": _clean_optional_string(payload.coordinator_name),
+        "principal_email": coordinator_email,
+        "principal_phone": coordinator_phone,
+        "service_type": branch_service_type,
+        "service_status": branch_service_status,
+        "grades": branch_grades,
+        "logo_blob": parent_logo_blob,
+        "logo_mime_type": parent_logo_mime_type,
+        "status": BRANCH_STATUS_ACTIVE,
+        "branch_parent_id": parent_school_id,
         "created_by_user_id": user_id,
         "created_by_email": user_record.get("email"),
         "created_at": now,
@@ -424,29 +695,34 @@ def create_school_profile(
         "timestamp": now,
     }
 
-    db.collection("schools").document(school_id).set(school_payload)
+    db.collection("schools").document(branch_id).set(branch_payload)
     db.collection("users").document(user_id).update(
-        {"school_ids": firestore.ArrayUnion([school_id]), "updated_at": now}
+        {"school_ids": firestore.ArrayUnion([branch_id]), "updated_at": now}
     )
 
     existing_ids = set(user_record.get("school_ids", []))
-    existing_ids.add(school_id)
+    existing_ids.add(branch_id)
     user_record["school_ids"] = list(existing_ids)
 
-    return build_school_from_record(school_payload)
+    return build_school_from_record(branch_payload)
 
 
 __all__ = [
     "SchoolServiceType",
     "SERVICE_TYPE_VALUES",
     "SchoolCreatePayload",
+    "BranchCreatePayload",
     "SchoolUpdatePayload",
     "build_school_from_record",
     "create_school_profile",
+    "create_branch_profile",
     "extract_service_type",
     "normalize_service_types",
     "normalize_service_status",
     "services_from_status",
     "normalize_grades",
     "compose_address",
+    "BranchStatus",
+    "BRANCH_STATUS_ACTIVE",
+    "BRANCH_STATUS_INACTIVE",
 ]

@@ -25,8 +25,11 @@ class School(BaseModel):
     service_type: Optional[List[str]] = None
     service_status: Optional[Dict[str, str]] = None
     grades: Optional[Dict[str, Dict[str, Any]]] = None
+    branch_parent_id: Optional[str] = None
+    status: str = Field(default="active")
     created_by_user_id: Optional[str] = None
     created_by_email: Optional[str] = None
+    id_card_fields: Optional[List[str]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     timestamp: datetime = Field(default_factory=datetime.utcnow)

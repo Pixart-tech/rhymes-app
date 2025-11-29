@@ -13,6 +13,7 @@ import { API_BASE_URL, cn } from '../lib/utils';
 import InlineSvg from './InlineSvg';
 import NetworkSvgImage from './NetworkSvgImage';
 import { loadCoverWorkflowState, saveCoverWorkflowState } from '../lib/storage';
+import { COVER_COLOUR_OPTIONS, COVER_THEME_OPTIONS } from '../theme';
 
 const GRADE_LABELS = {
   nursery: 'Nursery',
@@ -20,26 +21,6 @@ const GRADE_LABELS = {
   ukg: 'UKG',
   playgroup: 'Playgroup'
 };
-
-const THEME_OPTIONS = [
-  {
-    id: 'theme1',
-    label: 'Theme 1',
-    description: 'Soft introductory theme designed for playful, imaginative cover layouts.'
-  },
-  {
-    id: 'theme2',
-    label: 'Theme 2',
-    description: 'Bold shapes and accents ideal for energetic class storytelling covers.'
-  }
-];
-
-const COLOUR_OPTIONS = [
-  { id: 'colour1', label: 'Colour 1', hex: '#eea0c6' },
-  { id: 'colour2', label: 'Colour 2', hex: '#8faedb' },
-  { id: 'colour3', label: 'Colour 3', hex: '#f9b475' },
-  { id: 'colour4', label: 'Colour 4', hex: '#c8e9f1' }
-];
 
 const createBlankPersonalisation = (defaults = {}, defaultGradeLabel = '') => ({
   schoolLogo: defaults.schoolLogo || '',
@@ -403,12 +384,12 @@ const CoverPageWorkflow = ({
   }, [school?.school_id, grade, coverDefaults, gradeLabel, gradeDetailsSanitised]);
 
   const selectedTheme = useMemo(
-    () => THEME_OPTIONS.find((theme) => theme.id === selectedThemeId) || null,
+    () => COVER_THEME_OPTIONS.find((theme) => theme.id === selectedThemeId) || null,
     [selectedThemeId]
   );
 
   const selectedColour = useMemo(
-    () => COLOUR_OPTIONS.find((colour) => colour.id === selectedColourId) || null,
+    () => COVER_COLOUR_OPTIONS.find((colour) => colour.id === selectedColourId) || null,
     [selectedColourId]
   );
 
@@ -628,7 +609,7 @@ const CoverPageWorkflow = ({
       return;
     }
 
-    const defaultColourId = COLOUR_OPTIONS[0]?.id;
+    const defaultColourId = COVER_COLOUR_OPTIONS[0]?.id;
     if (!defaultColourId) {
       setThemeThumbnails([]);
       setThemeThumbnailError('');
@@ -691,7 +672,7 @@ const CoverPageWorkflow = ({
       setColourPreviewError('');
 
       const results = await Promise.all(
-        COLOUR_OPTIONS.map(async (colour) => {
+        COVER_COLOUR_OPTIONS.map(async (colour) => {
           const selectionKey = buildSelectionKey(selectedThemeId, colour.id);
           if (!selectionKey) {
             return [colour.id, null];
@@ -1032,7 +1013,7 @@ const CoverPageWorkflow = ({
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="cover-theme-grid">
-          {THEME_OPTIONS.map((theme) => {
+          {COVER_THEME_OPTIONS.map((theme) => {
             const isSelected = selectedThemeId === theme.id;
             return (
               <button
@@ -1138,7 +1119,7 @@ const CoverPageWorkflow = ({
           )}
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {COLOUR_OPTIONS.map((colour) => {
+            {COVER_COLOUR_OPTIONS.map((colour) => {
               const isSelected = selectedColourId === colour.id;
               const previewAsset = colourThumbnails[colour.id] || null;
               return (
