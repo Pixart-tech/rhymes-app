@@ -713,6 +713,7 @@ const GradeSelectionPage = ({
   const [downloadingGradeId, setDownloadingGradeId] = useState(null);
   const [bookSelectionCounts, setBookSelectionCounts] = useState({});
   const navigate = useNavigate();
+  const { getIdToken } = useAuth();
   const isCoverMode = mode === 'cover';
   const isRhymeMode = mode === 'rhymes';
   const isBookMode = mode === 'books';
@@ -764,7 +765,9 @@ const GradeSelectionPage = ({
 
   const fetchGradeStatus = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/status/${school.school_id}`);
+      const token = await getIdToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const response = await axios.get(`${API}/rhymes/status/${school.school_id}`, { headers });
       setGradeStatus(response.data);
     } catch (error) {
       console.error('Error fetching grade status:', error);
@@ -1343,6 +1346,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const [currentPosition, setCurrentPosition] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const { getIdToken } = useAuth();
 
   const svgCacheRef = useRef(new Map());
   const svgInFlightRef = useRef(new Map());
@@ -1356,6 +1360,16 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   useEffect(() => {
     selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
   }, [selectedRhymes]);
+
+  const buildAuthHeaders = useCallback(async () => {
+    try {
+      const token = await getIdToken();
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    } catch (error) {
+      console.error('Error retrieving auth token:', error);
+      return {};
+    }
+  }, [getIdToken]);
 
   const extractImageUrlsFromSvg = useCallback((svgContent) => {
     if (!svgContent || typeof svgContent !== 'string') {
@@ -1482,8 +1496,10 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         return pending;
       }
 
+      const headers = await buildAuthHeaders();
+
       const requestPromise = axios
-        .get(`${API}/rhymes/svg/${code}`, { responseType: 'arraybuffer' })
+        .get(`${API}/rhymes/svg/${code}`, { responseType: 'arraybuffer', headers })
         .then((response) => {
           const decoded = decodeSvgPayload(response.data, response.headers);
           const svgContent = sanitizeRhymeSvgContent(decoded, code);
@@ -1553,9 +1569,14 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
           })
         );
 
-        const successful = results.filter((result) => typeof result.svgContent === 'string' && result.svgContent.trim());
+        const successful = results.filter(
+          (result) => typeof result.svgContent === 'string' && result.svgContent.trim()
+        );
+        const failed = results.filter(
+          (result) => !result.svgContent || !result.svgContent.toString().trim()
+        );
 
-        if (successful.length === 0) {
+        if (successful.length === 0 && failed.length === 0) {
           return;
         }
 
@@ -1576,11 +1597,21 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                 Number(result.page_index) === Number(existing.page_index)
             );
 
-            if (!match) {
-              return existing;
+            if (match) {
+              return { ...existing, svgContent: match.svgContent, svgFetchFailed: false };
             }
 
-            return { ...existing, svgContent: match.svgContent };
+            const failure = failed.find(
+              (result) =>
+                result.code === existing.code &&
+                Number(result.page_index) === Number(existing.page_index)
+            );
+
+            if (failure) {
+              return { ...existing, svgContent: '', svgFetchFailed: true };
+            }
+
+            return existing;
           });
 
           selectedRhymesRef.current = updated;
@@ -1669,7 +1700,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   const fetchAvailableRhymes = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/available/${school.school_id}/${grade}`);
+      const headers = await buildAuthHeaders();
+      const response = await axios.get(`${API}/rhymes/available/${school.school_id}/${grade}`, { headers });
       setAvailableRhymes(response.data);
     } catch (error) {
       console.error('Error fetching available rhymes:', error);
@@ -1678,7 +1710,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   const fetchReusableRhymes = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/selected/other-grades/${school.school_id}/${grade}`);
+      const headers = await buildAuthHeaders();
+      const response = await axios.get(`${API}/rhymes/selected/other-grades/${school.school_id}/${grade}`, { headers });
       setReusableRhymes(response.data);
     } catch (error) {
       console.error('Error fetching reusable rhymes:', error);
@@ -1687,7 +1720,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   const fetchSelectedRhymes = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
+      const headers = await buildAuthHeaders();
+      const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`, { headers });
       const gradeSelections = response.data[grade] || [];
 
       const rhymesWithPlaceholders = gradeSelections.map((rhyme) => {
@@ -1699,7 +1733,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         return {
           ...rhyme,
           position: rhyme.position || null,
-          svgContent: existingContent
+          svgContent: existingContent,
+          svgFetchFailed: false
         };
       });
 
@@ -1840,6 +1875,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         name: rhyme.name,
         pages: rhyme.pages,
         svgContent: null,
+        svgFetchFailed: false,
         position: normalizedPosition
       };
 
@@ -1854,13 +1890,15 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         return;
       }
 
+      const headers = await buildAuthHeaders();
+
       await axios.post(`${API}/rhymes/select`, {
         school_id: school.school_id,
         grade: grade,
         page_index: pageIndex,
         rhyme_code: rhyme.code,
         position: normalizedPosition
-      });
+      }, { headers });
 
       setSelectedRhymes(nextArray);
       selectedRhymesRef.current = nextArray;
@@ -1868,36 +1906,68 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       try {
         const svgContent = await fetchSvgForRhyme(rhyme.code);
 
-        if (svgContent) {
-          setSelectedRhymes((prev) => {
-            const prevArrayInner = Array.isArray(prev) ? prev : [];
+        setSelectedRhymes((prev) => {
+          const prevArrayInner = Array.isArray(prev) ? prev : [];
 
-            const updated = prevArrayInner.map((existing) => {
-              if (!existing) return existing;
-              if (Number(existing.page_index) !== Number(pageIndex)) {
-                return existing;
-              }
+          const updated = prevArrayInner.map((existing) => {
+            if (!existing) return existing;
+            if (Number(existing.page_index) !== Number(pageIndex)) {
+              return existing;
+            }
 
-              const candidatePosition = resolveRhymePosition(existing, {
-                rhymesForContext: prevArrayInner
-              });
+            const candidatePosition = resolveRhymePosition(existing, {
+              rhymesForContext: prevArrayInner
+            });
 
-              if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+              if (svgContent) {
                 return {
                   ...existing,
-                  svgContent
+                  svgContent,
+                  svgFetchFailed: false
                 };
               }
 
-              return existing;
-            });
+              return {
+                ...existing,
+                svgContent: '',
+                svgFetchFailed: true
+              };
+            }
 
-            selectedRhymesRef.current = updated;
-            return updated;
+            return existing;
           });
-        }
+
+          selectedRhymesRef.current = updated;
+          return updated;
+        });
       } catch (svgError) {
         console.error('Error fetching rhyme SVG:', svgError);
+        setSelectedRhymes((prev) => {
+          const prevArrayInner = Array.isArray(prev) ? prev : [];
+          const updated = prevArrayInner.map((existing) => {
+            if (!existing) return existing;
+            if (Number(existing.page_index) !== Number(pageIndex)) {
+              return existing;
+            }
+
+            const candidatePosition = resolveRhymePosition(existing, {
+              rhymesForContext: prevArrayInner
+            });
+
+            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+              return {
+                ...existing,
+                svgContent: '',
+                svgFetchFailed: true
+              };
+            }
+
+            return existing;
+          });
+          selectedRhymesRef.current = updated;
+          return updated;
+        });
       }
 
       if (isReplacement) {
@@ -1995,8 +2065,10 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     });
 
     try {
+      const headers = await buildAuthHeaders();
       const res = await axios.delete(
-        `/api/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`
+        `${API}/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`,
+        { headers }
       );
       console.log("← Delete response:", res.data);
 
@@ -2154,8 +2226,10 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const bottomSelection = currentPageRhymes.bottom;
   const topSvgContent = typeof topSelection?.svgContent === 'string' ? topSelection.svgContent.trim() : '';
   const bottomSvgContent = typeof bottomSelection?.svgContent === 'string' ? bottomSelection.svgContent.trim() : '';
-  const topReady = !topSelection || topSvgContent.length > 0;
-  const bottomReady = !showBottomContainer || !bottomSelection || bottomSvgContent.length > 0;
+  const topFailed = Boolean(topSelection?.svgFetchFailed);
+  const bottomFailed = Boolean(bottomSelection?.svgFetchFailed);
+  const topReady = !topSelection || topFailed || topSvgContent.length > 0;
+  const bottomReady = !showBottomContainer || !bottomSelection || bottomFailed || bottomSvgContent.length > 0;
   const isTopLoading = !!topSelection && !topReady;
   const isBottomLoading = showBottomContainer && !!bottomSelection && !bottomReady;
   const canShowNextButton = topReady && bottomReady;
