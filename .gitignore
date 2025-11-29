@@ -51,8 +51,11 @@ __pycache__/
 *pyc*
 venv/
 .venv/
-virtualenv/
-
+virtual_env/
+backend/firebase_key.json
+backend/images/
+package.json
+yarn.lock
 # Development tools
 chainlit.md
 .chainlit
