@@ -14,6 +14,7 @@ print("Forced working directory:", os.getcwd())
 
 
 import logging
+import mimetypes
 import os
 import sys
 import tempfile
@@ -23,11 +24,17 @@ from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path, PureWindowsPath
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile
-from fastapi.responses import Response
+
 from pydantic import BaseModel, EmailStr, Field
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
+from urllib.parse import quote
+from shutil import copy2
+from fastapi.responses import JSONResponse, Response
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
 
 load_dotenv()
@@ -85,6 +92,53 @@ def _ensure_image_cache_dir() -> Path:
 
 def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]|List[Path]:
     return svg_processing.resolve_rhyme_svg_path(RHYME_SVG_BASE_PATH, rhyme_code)
+
+
+def _get_rhyme_image_cache_dir(rhyme_code: str) -> Path:
+    """Return a rhyme-specific cache directory for external image assets."""
+
+    rhyme_cache_dir = config.IMAGE_CACHE_DIR / "rhymes" / rhyme_code
+    return svg_processing.ensure_image_cache_dir(rhyme_cache_dir)
+
+
+def _resolve_rhyme_image_path(rhyme_code: str, file_name: str) -> Path:
+    """Return a cached rhyme image path, populating the cache on demand."""
+
+    sanitized_name = Path(file_name).name
+    if not sanitized_name:
+        raise HTTPException(status_code=400, detail="Image file name is required")
+
+    cache_dir = _get_rhyme_image_cache_dir(rhyme_code)
+    candidate_path = (cache_dir / sanitized_name).resolve()
+
+    try:
+        candidate_path.relative_to(cache_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid image file path")
+
+    if candidate_path.exists() and candidate_path.is_file():
+        return candidate_path
+
+    source_dir = RHYME_SVG_BASE_PATH / rhyme_code
+    source_path = (source_dir / sanitized_name).resolve()
+
+    try:
+        source_path.relative_to(source_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid image file path")
+
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    try:
+        copy2(source_path, candidate_path)
+    except OSError as exc:
+        logger.warning(
+            "Unable to cache image %s for rhyme %s: %s", sanitized_name, rhyme_code, exc
+        )
+        return source_path
+
+    return candidate_path
 
 
 def _ensure_cover_assets_base_path() -> Path:
@@ -150,7 +204,8 @@ def _localize_cover_svg_markup(svg_markup: str, svg_path: Path) -> str:
             svg_markup,
             svg_path,
             f"cover::{svg_path.name}",
-            inline_mode=True,
+            inline_mode=False,
+            asset_url_prefix="/api/cover-assets/images",
         )
     except Exception as exc:  # pragma: no cover - defensive fallback
         logger.warning(
@@ -957,25 +1012,36 @@ async def delete_school(school_id: str, authorization: Optional[str] = Header(No
     }
 
 
-@api_router.get("/rhymes/svg/{rhyme_code}")
-async def get_rhyme_svg(rhyme_code: str):
-    """Return SVG markup for the requested rhyme.
+def _localize_rhyme_svg_markup(svg_markup: str, source_path: Optional[Path], rhyme_code: str) -> str:
+    """Rewrite external image references without inlining bitmap data."""
 
-    When ``RHYME_SVG_BASE_PATH`` is configured the endpoint first attempts to
-    resolve ``<rhyme_code>.svg`` within that directory so real artwork from a
-    network share or mounted volume can be exercised. If the environment
-    variable is unset or the file is missing, the lookup falls back to the
-    repository ``images`` directory before ultimately generating the placeholder
-    SVG so the frontend continues to work for missing assets.
-    """
+    try:
+        return _localize_svg_image_assets(
+            svg_markup,
+            source_path or Path("."),
+            rhyme_code,
+            inline_mode=False,
+            cache_dir=_get_rhyme_image_cache_dir(rhyme_code),
+            asset_url_prefix=f"/api/rhymes/images/{quote(rhyme_code, safe='')}",
+        )
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        logger.warning(
+            "Unable to rewrite image assets for rhyme %s from %s: %s",
+            rhyme_code,
+            source_path,
+            exc,
+        )
+        return svg_markup
 
-    svg_content: Optional[str] = None
-    svg_pages: List[str] = []
+
+@lru_cache(maxsize=256)
+def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
+    """Return a cached list of localised SVG pages for ``rhyme_code``."""
 
     svg_path = _resolve_rhyme_svg_path(rhyme_code)
-    
 
-    svg_source_path: Optional[Path] = None
+    svg_pages: List[str] = []
+
     if svg_path is not None:
         # svg_path may be a single Path, a directory Path, or a list of Path
         candidates: List[Path] = []
@@ -992,41 +1058,82 @@ async def get_rhyme_svg(rhyme_code: str):
 
         for candidate in candidates:
             try:
-                svg_markup = candidate.read_text(encoding="utf-8")
+                svg_content = candidate.read_text(encoding="utf-8")
             except OSError as exc:
                 logger.error(
                     "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, candidate, exc
                 )
                 continue
 
-            localized_markup = _localize_svg_image_assets(
-                svg_markup, candidate, rhyme_code, inline_mode=True
-            )
-
+            localized_markup = _localize_rhyme_svg_markup(svg_content, candidate, rhyme_code)
             svg_pages.append(localized_markup)
-            svg_source_path = candidate
 
     if svg_pages:
-        if len(svg_pages) == 1:
-            svg_content = svg_pages[0]
-        else:
-            return JSONResponse({"pages": svg_pages})
+        return svg_pages
 
-    if svg_content is None:
-        try:
-            svg_content = generate_rhyme_svg(rhyme_code)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Rhyme not found")
-    else:
-        # Pass a Path (if available) to the localizer; fall back to base path
-        localize_source = svg_source_path or (svg_path if isinstance(svg_path, Path) else None)
-        if localize_source is None:
-            # No concrete file path available; call localizer with a harmless placeholder
-            svg_content = _localize_svg_image_assets(svg_content, Path("."), rhyme_code, inline_mode=True)
-        else:
-            svg_content = _localize_svg_image_assets(svg_content, localize_source, rhyme_code, inline_mode=True)
+    try:
+        document = _load_rhyme_svg_markup(rhyme_code)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Rhyme not found") from exc
 
-    return Response(content=svg_content, media_type="image/svg+xml")
+    localized_markup = _localize_rhyme_svg_markup(
+        document.markup, document.source_path, rhyme_code
+    )
+
+    return [localized_markup]
+
+
+@api_router.get("/rhymes/svg/{rhyme_code}")
+async def get_rhyme_svg(rhyme_code: str):
+    """Return all SVG pages for the requested rhyme as a JSON list.
+
+    The results are cached to avoid repeated filesystem reads and asset
+    localisation work, ensuring multi-page rhymes can be stepped through on the
+    frontend without repeatedly hitting the backend.
+    """
+
+    svg_pages = _get_cached_rhyme_pages(rhyme_code)
+
+    if not svg_pages:
+        raise HTTPException(status_code=404, detail="Rhyme not found")
+
+    return JSONResponse({"pages": svg_pages})
+
+
+@api_router.get("/rhymes/svg-image/{rhyme_code}")
+async def get_rhyme_svg_image(rhyme_code: str, file: str):
+    """Return a bitmap asset referenced by a rhyme SVG (legacy query API)."""
+
+    image_path = _resolve_rhyme_image_path(rhyme_code, file)
+    mime_type, _ = mimetypes.guess_type(image_path.name)
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    try:
+        content = image_path.read_bytes()
+    except OSError as exc:
+        logger.error("Unable to read image %s for rhyme %s: %s", image_path, rhyme_code, exc)
+        raise HTTPException(status_code=500, detail="Unable to read image file") from exc
+
+    return Response(content=content, media_type=mime_type)
+
+
+@api_router.get("/rhymes/images/{rhyme_code}/{file_name}")
+async def get_rhyme_image(rhyme_code: str, file_name: str):
+    """Serve cached rhyme image assets as regular files for browser consumption."""
+
+    image_path = _resolve_rhyme_image_path(rhyme_code, file_name)
+    mime_type, _ = mimetypes.guess_type(image_path.name)
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    try:
+        content = image_path.read_bytes()
+    except OSError as exc:
+        logger.error("Unable to read image %s for rhyme %s: %s", image_path, rhyme_code, exc)
+        raise HTTPException(status_code=500, detail="Unable to read image file") from exc
+
+    return Response(content=content, media_type=mime_type)
 
 
 # @api_router.get("/cover-assets/manifest")
@@ -1134,6 +1241,26 @@ async def get_cover_assets_network_paths(selection_key: str):
         )
 
     return {"assets": assets}
+
+
+@api_router.get("/cover-assets/images/{file_name}")
+async def get_cover_asset_image(file_name: str):
+    """Serve cached cover asset images as standard files instead of base64 data URIs."""
+
+    cache_dir = _ensure_image_cache_dir()
+    candidate_path = (cache_dir / file_name).resolve()
+
+    try:
+        candidate_path.relative_to(cache_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid image requested.")
+
+    if not candidate_path.exists() or not candidate_path.is_file():
+        raise HTTPException(status_code=404, detail="Cover asset image not found.")
+
+    media_type, _ = mimetypes.guess_type(candidate_path.name)
+    content = candidate_path.read_bytes()
+    return Response(content=content, media_type=media_type or "application/octet-stream")
 
 
 @api_router.get("/cover-assets/svg/{relative_path:path}")
@@ -1439,7 +1566,7 @@ def _render_svg_on_canvas(
 @api_router.get("/rhymes/binder/{school_id}/{grade}")
 async def download_rhyme_binder(school_id: str, grade: str):
     """Generate a PDF binder containing all rhymes for the specified grade."""
-    print("Iam running")
+
 
     try:
         pdf_resources = _load_pdf_dependencies()
@@ -1580,4 +1707,5 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
 

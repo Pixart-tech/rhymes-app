@@ -473,7 +473,9 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
         gradeSelections.map(async (rhyme) => {
           try {
             const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-            return { ...rhyme, position: rhyme.position || null, svgContent: svgResponse.data };
+            const svgData = svgResponse?.data;
+            const normalizedSvg = svgData && svgData.pages ? svgData.pages[0] : svgData;
+            return { ...rhyme, position: rhyme.position || null, svgContent: normalizedSvg };
           } catch (error) {
             return { ...rhyme, position: rhyme.position || null, svgContent: null };
           }
@@ -629,7 +631,8 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
       try {
         const svgResponse = await axios.get(`${API}/rhymes/svg/${rhyme.code}`);
-        const svgContent = svgResponse.data;
+        const svgData = svgResponse?.data;
+        const svgContent = svgData && svgData.pages ? svgData.pages[0] : svgData;
 
         setSelectedRhymes(prev => {
           const prevArrayInner = Array.isArray(prev) ? prev : [];

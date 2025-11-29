@@ -4,7 +4,7 @@ import InlineSvg from './InlineSvg';
 import DocumentPage from './DocumentPage';
 import { Button } from './ui/button';
 import { API_BASE_URL, cn } from '../lib/utils';
-import { decodeSvgPayload, sanitizeRhymeSvgContent } from '../lib/svgUtils';
+import { decodeSvgPayload, prepareRhymeSvgPages } from '../lib/svgUtils';
 
 const parsePagesValue = (value) => {
   if (typeof value === 'number') {
@@ -121,10 +121,12 @@ const RhymeCarousel = ({ schoolId, grade, apiBaseUrl = API }) => {
           const response = await axios.get(`${resolvedApi}/rhymes/svg/${code}`, {
             responseType: 'arraybuffer'
           });
-          const svgContent = sanitizeRhymeSvgContent(
-            decodeSvgPayload(response.data, response.headers),
-            code
-          );
+          const decoded = decodeSvgPayload(response.data, response.headers);
+          const rawPages = decoded && typeof decoded === 'object' && Array.isArray(decoded.pages)
+            ? decoded.pages
+            : decoded;
+          const preparedPages = await prepareRhymeSvgPages(rawPages, code, resolvedApi);
+          const svgContent = Array.isArray(preparedPages) && preparedPages.length > 0 ? preparedPages[0] : '';
           svgCacheRef.current.set(code, svgContent);
           return svgContent;
         } catch (fetchError) {

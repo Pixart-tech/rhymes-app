@@ -11,6 +11,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
+  font-size: clamp(14px, 0.9vw + 11px, 17px);
+  line-height: 1.6;
 }
 
 .App {
@@ -176,6 +178,13 @@ body {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   overflow: hidden;
   gap: 0;
+}
+
+@media (max-width: 540px) {
+  .rhyme-page-grid {
+    aspect-ratio: auto;
+    min-height: 560px;
+  }
 }
 
 .rhyme-slot + .rhyme-slot {
@@ -352,6 +361,26 @@ body {
 @media (max-width: 768px) {
   .rhyme-slot-wrapper {
     min-height: clamp(220px, 52vh, 420px);
+  }
+}
+
+.rhyme-slot-footnote {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  box-shadow: 0 10px 30px -18px rgba(15, 23, 42, 0.45);
+  font-size: 0.85rem;
+  color: #0f172a;
+  text-align: center;
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .rhyme-slot-footnote {
+    font-size: 0.8rem;
+    margin-top: 8px;
   }
 }
 

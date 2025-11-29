@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -260,84 +261,7 @@ const ModeSelectionPage = ({
     </div>
   );
 };
-// const Header: React.FC = ({onBackToMode}) => {
-//   const { user, signIn, signOut } = useAuth();
-//   const navigate = useNavigate();
 
-//   const activeLinkClass = "text-white bg-primary-700";
-//   const inactiveLinkClass = "text-gray-300 hover:bg-primary-600 hover:text-white";
-//   const linkBaseClass = "px-3 py-2 rounded-md text-sm font-medium transition-colors";
-
-//   const handleBackToMenu = () => {
-//     if (typeof onBackToMode === 'function') {
-//       onBackToMode();
-//     }
-//     navigate('/');
-//   };
-
-//   return (
-//     <header className="bg-primary-800 shadow-md">
-//       <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-//         <div className="flex items-center justify-between h-16">
-//           <div className="flex items-center">
-//             <div className="flex-shrink-0">
-//                <NavLink to="/" className="text-white text-xl font-bold">Book Selector</NavLink>
-//             </div>
-//             <div className="hidden md:block">
-//               <div className="ml-10 flex items-baseline space-x-4">
-                
-//                 {user && (
-//                   <>
-//                     <NavLink to="/questionnaire" className={({isActive}) => `${linkBaseClass} ${isActive ? activeLinkClass : inactiveLinkClass}`}>Questionnaire</NavLink>
-//                     <NavLink to="/grid" className={({isActive}) => `${linkBaseClass} ${isActive ? activeLinkClass : inactiveLinkClass}`}>View Grid</NavLink>
-//                     <NavLink to="/admin/upload" className={({isActive}) => `${linkBaseClass} ${isActive ? activeLinkClass : inactiveLinkClass}`}>Upload PDF</NavLink>
-                   
-
-
-
-
-
-
-
-                    
-//                   </>
-//                 )}
-//                  <Button
-//                 onClick={handleBackToMenu}
-//                 variant="outline"
-//                 className="bg-white/80 hover:bg-white border-gray-200"
-//               >
-//                 Back to Menu
-//               </Button>
-//               </div>
-//             </div>
-//           </div>
-//           <div className="flex items-center">
-//             {user ? (
-//               <>
-//                 <span className="text-gray-300 text-sm mr-4 hidden sm:inline">School ID: {user.schoolId}</span>
-//                 <button
-//                   onClick={signOut}
-//                   className="bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
-//                 >
-//                   Sign Out
-//                 </button>
-//               </>
-//             ) : (
-//               <button
-//                 onClick={signIn}
-//                 className="bg-primary-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-primary-700 transition-colors"
-//               >
-//                 Sign in with Google
-//               </button>
-//             )}
-//           </div>
-//         </div>
-//       </nav>
-//     </header>
-//   );
-// };
-// Cover Details Page
 const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout }) => {
   const navigate = useNavigate();
   const [formState, setFormState] = useState(() => ({
@@ -1006,7 +930,7 @@ const GradeSelectionPage = ({
             </Card>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-4">
             {GRADE_OPTIONS.map((grade) => {
               const resolvedGradeName = isCoverMode
                 ? gradeNameOverrides[grade.id] || grade.name
@@ -1018,27 +942,24 @@ const GradeSelectionPage = ({
                   className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
                   onClick={() => handleGradeCardSelect(grade.id)}
                 >
-                  <CardContent className="p-6 text-center space-y-4">
-                    <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                      <span className="text-2xl">{grade.icon}</span>
-                    </div>
-                    <h3 className="text-xl font-bold text-gray-800 mb-2">{resolvedGradeName}</h3>
+                  <CardContent className="p-5 text-center space-y-4">
+                    <h3 className="text-base font-semibold text-gray-800 sm:text-lg">{resolvedGradeName}</h3>
                     {isCoverMode ? (
-                      <p className="text-sm text-gray-600">
+                      <p className="text-xs text-gray-600 sm:text-sm">
                         Start crafting personalised cover pages for {resolvedGradeName}.
                       </p>
                     ) : isBookMode ? (
                       <div className="space-y-3">
-                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm font-medium text-gray-800">
+                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-xs font-medium text-gray-800 sm:text-sm">
                           {(bookSelectionCounts[grade.id] ?? 0)} book{(bookSelectionCounts[grade.id] ?? 0) === 1 ? '' : 's'} planned
                         </div>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-xs text-gray-600 sm:text-sm">
                           Curate engaging reading experiences for {resolvedGradeName}.
                         </p>
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm font-medium text-gray-800">
+                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-xs font-medium text-gray-800 sm:text-sm">
                           {getGradeStatusInfo(grade.id)} Rhymes Selected
                         </div>
                         <Button
@@ -1259,9 +1180,6 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
         {sortedGroups.map(([pageKey, rhymes]) => {
           if (!rhymes || rhymes.length === 0) return null;
           const numericKey = Number.parseFloat(pageKey);
-          if (Number.isFinite(numericKey) && Math.abs(numericKey - 0.5) < 0.001) {
-            return null;
-          }
           const badgeLabel = Number.isFinite(numericKey)
             ? (Math.abs(numericKey - Math.round(numericKey)) < 0.001
               ? numericKey.toFixed(1)
@@ -1324,6 +1242,7 @@ const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onT
   );
 };
 
+
 // Main Rhyme Selection Interface
 const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }) => {
   const [availableRhymes, setAvailableRhymes] = useState({});
@@ -1338,116 +1257,134 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   const svgCacheRef = useRef(new Map());
   const svgInFlightRef = useRef(new Map());
-  const imageAssetCacheRef = useRef(new Set());
-  const imageInFlightRef = useRef(new Map());
   const selectedRhymesRef = useRef([]);
   const pageFetchPromisesRef = useRef(new Map());
 
-  const MAX_RHYMES_PER_GRADE = 25;
+  const MAX_PAGES_PER_GRADE = 44;
 
   useEffect(() => {
     selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
   }, [selectedRhymes]);
 
-  const extractImageUrlsFromSvg = useCallback((svgContent) => {
-    if (!svgContent || typeof svgContent !== 'string') {
-      return [];
-    }
+  const selectedRhymeCodes = useMemo(
+    () => new Set((selectedRhymes || []).map((rhyme) => rhyme?.code).filter(Boolean)),
+    [selectedRhymes]
+  );
 
-    if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
-      return [];
-    }
+  const filterRhymesDataBySelection = useCallback(
+    (rhymesData) => {
+      if (!rhymesData || typeof rhymesData !== 'object') {
+        return {};
+      }
 
-    try {
-      const parser = new window.DOMParser();
-      const doc = parser.parseFromString(svgContent, 'image/svg+xml');
-      const imageNodes = doc.querySelectorAll('image, img');
-      const urls = new Set();
+      return Object.entries(rhymesData).reduce((acc, [pageKey, rhymes]) => {
+        const filtered = Array.isArray(rhymes)
+          ? rhymes.filter((item) => item && !selectedRhymeCodes.has(item.code))
+          : [];
 
-      imageNodes.forEach((node) => {
-        if (!node) {
-          return;
+        if (filtered.length > 0) {
+          acc[pageKey] = filtered;
         }
 
-        const candidates = [
-          node.getAttribute('href'),
-          node.getAttribute('xlink:href'),
-          node.getAttribute('data-href'),
-          node.getAttribute('src')
-        ];
-
-        candidates.forEach((candidate) => {
-          if (typeof candidate !== 'string') {
-            return;
-          }
-
-          const trimmed = candidate.trim();
-
-          if (!trimmed || /^data:/i.test(trimmed)) {
-            return;
-          }
-
-          if (trimmed.startsWith('//') && typeof window !== 'undefined' && window.location?.protocol) {
-            urls.add(`${window.location.protocol}${trimmed}`);
-            return;
-          }
-
-          if (/^https?:/i.test(trimmed)) {
-            urls.add(trimmed);
-          }
-        });
-      });
-
-      return Array.from(urls);
-    } catch (error) {
-      console.error('Error parsing SVG for image asset references:', error);
-      return [];
-    }
-  }, []);
-
-  const prefetchImageAssets = useCallback(
-    async (svgMarkup) => {
-      if (!svgMarkup || typeof svgMarkup !== 'string') {
-        return;
-      }
-
-      const assetUrls = extractImageUrlsFromSvg(svgMarkup);
-      if (!assetUrls.length) {
-        return;
-      }
-
-      const tasks = assetUrls
-        .map((url) => {
-          if (imageAssetCacheRef.current.has(url)) {
-            return null;
-          }
-
-          if (imageInFlightRef.current.has(url)) {
-            return imageInFlightRef.current.get(url);
-          }
-
-          const request = axios
-            .get(url, { responseType: 'blob' })
-            .then(() => {
-              imageAssetCacheRef.current.add(url);
-            })
-            .catch((error) => {
-              console.error('Error prefetching image asset:', url, error);
-            })
-            .finally(() => {
-              imageInFlightRef.current.delete(url);
-            });
-
-          imageInFlightRef.current.set(url, request);
-          return request;
-        })
-        .filter(Boolean);
-
-      if (tasks.length > 0) {
-        await Promise.allSettled(tasks);
-      }
+        return acc;
+      }, {});
     },
-    [extractImageUrlsFromSvg]
+    [selectedRhymeCodes]
+  );
+
+  const filteredAvailableRhymes = useMemo(
+    () => filterRhymesDataBySelection(availableRhymes),
+    [availableRhymes, filterRhymesDataBySelection]
+  );
+
+  // Reusable rhymes remain visible even when selected, so they are not filtered out
+  const filteredReusableRhymes = reusableRhymes;
+
+
+  const normalizeSvgPages = useCallback(
+    (svgContent) => {
+      if (!svgContent) {
+        return [];
+      }
+
+      const pages = Array.isArray(svgContent) ? svgContent : [svgContent];
+
+      return pages.filter((page) => typeof page === 'string' && page.trim().length > 0);
+    },
+    []
+  );
+
+  const getSvgPages = useCallback(
+    (selection) => normalizeSvgPages(selection?.svgContent, selection?.code || 'rhyme'),
+    [normalizeSvgPages]
+  );
+
+  const hasSvgPages = useCallback(
+    (svgContent) => normalizeSvgPages(svgContent).length > 0,
+    [normalizeSvgPages]
+  );
+
+  const parsePagesValue = (pagesValue) => {
+    if (typeof pagesValue === 'number') {
+      return Number.isFinite(pagesValue) ? pagesValue : null;
+    }
+    if (typeof pagesValue === 'string') {
+      const trimmed = pagesValue.trim();
+      if (trimmed === '') {
+        return null;
+      }
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+
+  const getPageSpan = (pagesValue) => {
+    const parsed = parsePagesValue(pagesValue);
+
+    if (parsed === null || parsed <= 0.5) {
+      return 1;
+    }
+
+    return Math.max(1, Math.floor(parsed));
+  };
+
+  const getPageOffsetForSelection = useCallback(
+    (selection, targetPageIndex) => {
+      if (!selection) return 0;
+
+      const startIndex = Number(selection?.page_index);
+      const span = getPageSpan(selection?.pages);
+
+      if (!Number.isFinite(startIndex)) {
+        return 0;
+      }
+
+      const offset = targetPageIndex - startIndex;
+      if (offset < 0 || offset >= span) {
+        return 0;
+      }
+
+      return offset;
+    },
+    [getPageSpan]
+  );
+
+  const getSvgForSelectionPage = useCallback(
+    (selection, targetPageIndex) => {
+      const pages = getSvgPages(selection);
+      if (pages.length === 0) return '';
+
+      const startIndex = Number(selection?.page_index);
+      const offset = Number.isFinite(startIndex) ? targetPageIndex - startIndex : 0;
+
+      if (offset < 0 || offset >= pages.length) {
+        return pages[0];
+      }
+
+      return pages[offset];
+    },
+    [getSvgPages]
   );
 
   const fetchSvgForRhyme = useCallback(
@@ -1459,28 +1396,24 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       }
 
       if (svgCacheRef.current.has(code)) {
-        const cached = svgCacheRef.current.get(code);
-        if (cached) {
-          await prefetchImageAssets(cached);
-        }
-        return cached;
+        return svgCacheRef.current.get(code);
       }
 
       if (svgInFlightRef.current.has(code)) {
-        const pending = await svgInFlightRef.current.get(code);
-        if (pending) {
-          await prefetchImageAssets(pending);
-        }
-        return pending;
+        return svgInFlightRef.current.get(code);
       }
 
       const requestPromise = axios
         .get(`${API}/rhymes/svg/${code}`, { responseType: 'arraybuffer' })
-        .then((response) => {
+        .then(async (response) => {
           const decoded = decodeSvgPayload(response.data, response.headers);
-          const svgContent = sanitizeRhymeSvgContent(decoded, code);
-          svgCacheRef.current.set(code, svgContent);
-          return svgContent;
+          const rawPages =
+            decoded && typeof decoded === 'object' && Array.isArray(decoded.pages)
+              ? decoded.pages
+              : decoded;
+          const svgPages = await prepareRhymeSvgPages(rawPages, code, API);
+          svgCacheRef.current.set(code, svgPages);
+          return svgPages;
         })
         .catch((error) => {
           console.error('Error fetching rhyme SVG:', error);
@@ -1492,14 +1425,9 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
       svgInFlightRef.current.set(code, requestPromise);
 
-      const svgContent = await requestPromise;
-      if (svgContent) {
-        await prefetchImageAssets(svgContent);
-      }
-
-      return svgContent;
+      return requestPromise;
     },
-    [prefetchImageAssets]
+    []
   );
 
   const ensurePageAssets = useCallback(
@@ -1519,10 +1447,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         (rhyme) => Number(rhyme?.page_index) === normalizedPageIndex
       );
 
-      const missingRhymes = rhymesForPage.filter((rhyme) => {
-        const content = typeof rhyme?.svgContent === 'string' ? rhyme.svgContent.trim() : '';
-        return content.length === 0;
-      });
+      const missingRhymes = rhymesForPage.filter((rhyme) => !hasSvgPages(rhyme?.svgContent));
 
       if (missingRhymes.length === 0) {
         return;
@@ -1545,7 +1470,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
           })
         );
 
-        const successful = results.filter((result) => typeof result.svgContent === 'string' && result.svgContent.trim());
+        const successful = results.filter((result) => hasSvgPages(result.svgContent));
 
         if (successful.length === 0) {
           return;
@@ -1588,7 +1513,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         pageFetchPromisesRef.current.delete(normalizedPageIndex);
       }
     },
-    [fetchSvgForRhyme]
+    [fetchSvgForRhyme, hasSvgPages]
   );
 
   useEffect(() => {
@@ -1610,21 +1535,25 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
           return;
         }
 
-        const pageIndex = numericIndex;
         const pagesValue = parsePagesValue(selection?.pages);
-        const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
+        const span = getPageSpan(pagesValue);
 
-        if (pagesValue === 0.5) {
-          const slot = normalizeSlot(selection?.position, 'top') || 'top';
-          entry[slot] = true;
-        } else {
-          entry.top = true;
-          entry.bottom = true;
+        for (let offset = 0; offset < span; offset += 1) {
+          const pageIndex = numericIndex + offset;
+          const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
+
+          if (pagesValue === 0.5) {
+            const slot = normalizeSlot(selection?.position, 'top') || 'top';
+            entry[slot] = true;
+          } else {
+            entry.top = true;
+            entry.bottom = true;
+          }
+
+          usageMap.set(pageIndex, entry);
+          highestIndex = Math.max(highestIndex, pageIndex);
+          lowestIndex = Math.min(lowestIndex, pageIndex);
         }
-
-        usageMap.set(pageIndex, entry);
-        highestIndex = Math.max(highestIndex, pageIndex);
-        lowestIndex = Math.min(lowestIndex, pageIndex);
       });
     }
 
@@ -1635,8 +1564,20 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     };
   };
 
+  const countUsedPages = (usageMap) => {
+    let usedPages = 0;
+
+    usageMap.forEach((entry) => {
+      if (entry?.top || entry?.bottom) {
+        usedPages += 1;
+      }
+    });
+
+    return usedPages;
+  };
+
   const computeNextAvailablePageInfoFromUsage = ({ usageMap, highestIndex }) => {
-    for (let index = 0; index < MAX_RHYMES_PER_GRADE; index += 1) {
+    for (let index = 0; index < MAX_PAGES_PER_GRADE; index += 1) {
       const entry = usageMap.get(index);
       if (!entry) {
         return { index, hasCapacity: true, highestIndex };
@@ -1646,7 +1587,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       }
     }
 
-    const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_RHYMES_PER_GRADE - 1);
+    const fallbackIndex = highestIndex < 0 ? 0 : Math.min(highestIndex, MAX_PAGES_PER_GRADE - 1);
     return { index: fallbackIndex, hasCapacity: false, highestIndex };
   };
 
@@ -1683,10 +1624,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       const gradeSelections = response.data[grade] || [];
 
       const rhymesWithPlaceholders = gradeSelections.map((rhyme) => {
-        const existingContent =
-          typeof rhyme?.svgContent === 'string' && rhyme.svgContent.trim().length > 0
-            ? sanitizeRhymeSvgContent(rhyme.svgContent, rhyme.code)
-            : null;
+        const existingContent = normalizeSvgPages(rhyme?.svgContent, rhyme.code);
 
         return {
           ...rhyme,
@@ -1715,7 +1653,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         }
 
         const nextPageIndex = initialIndex + 1;
-        if (nextPageIndex < MAX_RHYMES_PER_GRADE) {
+        if (nextPageIndex < MAX_PAGES_PER_GRADE) {
           ensurePageAssets(nextPageIndex, sortedSelections).catch((prefetchError) => {
             console.error('Error preloading upcoming rhyme SVGs:', prefetchError);
           });
@@ -1740,19 +1678,18 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     return normalized === 'top' || normalized === 'bottom' ? normalized : fallback;
   };
 
-  const parsePagesValue = (pagesValue) => {
-    if (typeof pagesValue === 'number') {
-      return Number.isFinite(pagesValue) ? pagesValue : null;
+  const selectionCoversPage = (selection, targetPageIndex) => {
+    if (!selection) return false;
+
+    const startIndex = Number(selection?.page_index);
+    if (!Number.isFinite(startIndex)) {
+      return false;
     }
-    if (typeof pagesValue === 'string') {
-      const trimmed = pagesValue.trim();
-      if (trimmed === '') {
-        return null;
-      }
-      const parsed = Number(trimmed);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    return null;
+
+    const span = getPageSpan(selection?.pages);
+    const endIndex = startIndex + span - 1;
+
+    return targetPageIndex >= startIndex && targetPageIndex <= endIndex;
   };
 
   const sortSelections = (selections) => {
@@ -1778,13 +1715,27 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const computeRemovalsForSelection = ({ selections, pageIndex, normalizedPosition, newPages }) => {
+    const newSpan = getPageSpan(newPages);
+    const newStart = pageIndex;
+    const newEnd = pageIndex + newSpan - 1;
+
     if (!Array.isArray(selections) || selections.length === 0) {
       return [];
     }
 
     return selections.filter(existing => {
       if (!existing) return false;
-      if (Number(existing.page_index) !== Number(pageIndex)) {
+      const existingStart = Number(existing.page_index);
+
+      if (!Number.isFinite(existingStart)) {
+        return false;
+      }
+
+      const existingSpan = getPageSpan(existing.pages);
+      const existingEnd = existingStart + existingSpan - 1;
+      const overlaps = existingStart <= newEnd && newStart <= existingEnd;
+
+      if (!overlaps) {
         return false;
       }
 
@@ -1836,11 +1787,11 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       };
 
       const nextArray = sortSelections([...filtered, baseRhyme]);
-      const totalSelected = nextArray.length;
-      const isReplacement = removals.length > 0;
+      const usage = computePageUsage(nextArray);
+      const totalPagesSelected = countUsedPages(usage.usageMap);
 
-      if (!isReplacement && totalSelected > MAX_RHYMES_PER_GRADE) {
-        toast.error('Max of 25 rhymes per grade');
+      if (totalPagesSelected > MAX_PAGES_PER_GRADE) {
+        toast.error('Max of 44 pages can be selected');
         setShowTreeMenu(false);
         setCurrentPosition(null);
         return;
@@ -1940,7 +1891,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     if (pages === 1 || pages === 1.0) {
       return 'top';
     }
-
+    
     if (pages === 0.5) {
       const pageIndex = Number(rhyme?.page_index);
       const normalizedPageIndex = Number.isFinite(pageIndex)
@@ -2014,7 +1965,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const handlePageChange = (newPageIndex) => {
-    const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_RHYMES_PER_GRADE - 1));
+    const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_PAGES_PER_GRADE - 1));
 
     setCurrentPageIndex(clampedIndex);
 
@@ -2024,7 +1975,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       });
 
       const nextIndex = clampedIndex + 1;
-      if (nextIndex < MAX_RHYMES_PER_GRADE) {
+      if (nextIndex < MAX_PAGES_PER_GRADE) {
         ensurePageAssets(nextIndex).catch((error) => {
           console.error('Error prefetching next rhyme page:', error);
         });
@@ -2037,6 +1988,10 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const pageUsage = useMemo(() => computePageUsage(selectedRhymes), [selectedRhymes]);
+  const totalPagesSelected = useMemo(
+    () => countUsedPages(pageUsage.usageMap),
+    [pageUsage]
+  );
   const nextPageInfo = useMemo(() => computeNextAvailablePageInfoFromUsage(pageUsage), [pageUsage]);
   const nextAvailablePageIndex = nextPageInfo.index;
   const hasNextPageCapacity = nextPageInfo.hasCapacity;
@@ -2044,28 +1999,27 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   // Calculate total pages
   const calculateTotalPages = () => {
-    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex : -1;
-    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex : 0;
-    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex : 0;
+    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex + 1 : 0;
+    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex + 1 : 0;
+    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex + 1 : 0;
 
-    const candidates = [normalizedHighest, normalizedNext, normalizedCurrent]
-      .filter(index => Number.isFinite(index) && index >= 0);
+    const candidates = [totalPagesSelected, normalizedHighest, normalizedNext, normalizedCurrent]
+      .filter((index) => Number.isFinite(index) && index > 0);
 
-    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
+    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 1;
 
-    return Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
+    return Math.min(maxIndex, MAX_PAGES_PER_GRADE);
   };
 
   useEffect(() => {
-    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex : -1;
-    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex : 0;
-    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex : 0;
+    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex + 1 : 0;
+    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex + 1 : 0;
+    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex + 1 : 0;
 
-    const candidates = [normalizedHighest, normalizedNext, normalizedCurrent]
-      .filter(index => Number.isFinite(index) && index >= 0);
+    const candidates = [totalPagesSelected, normalizedHighest, normalizedNext, normalizedCurrent]
+      .filter((index) => Number.isFinite(index) && index > 0);
 
-    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
-    const total = Math.min(maxIndex + 1, MAX_RHYMES_PER_GRADE);
+    const total = Math.min(candidates.length > 0 ? Math.max(...candidates) : 1, MAX_PAGES_PER_GRADE);
 
     if (total <= 0) {
       if (currentPageIndex !== 0) {
@@ -2078,7 +2032,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     if (currentPageIndex > maxAllowed) {
       setCurrentPageIndex(Math.max(0, maxAllowed));
     }
-  }, [highestFilledIndex, nextAvailablePageIndex, currentPageIndex]);
+  }, [highestFilledIndex, nextAvailablePageIndex, currentPageIndex, totalPagesSelected]);
 
   // Get rhymes for current page
   const getCurrentPageRhymes = () => {
@@ -2086,15 +2040,13 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
     if (!Array.isArray(selectedRhymes) || selectedRhymes.length === 0) return pageRhymes;
 
-    // Double-page rhymes (occupy both containers and mirror the SVG)
+    // Rhymes that span multiple pages should occupy each covered page individually
     for (const r of selectedRhymes) {
       if (!r) continue;
-      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+      if (!selectionCoversPage(r, Number(currentPageIndex))) continue;
       const pages = parsePagesValue(r.pages);
-      if (pages === 2 || pages === 2.0) {
+      if (pages !== null && pages > 1) {
         pageRhymes.top = r;
-        pageRhymes.bottom = r;
-        pageRhymes.layout = 'double';
         return pageRhymes;
       }
     }
@@ -2102,7 +2054,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     // Prefer full-page rhyme
     for (const r of selectedRhymes) {
       if (!r) continue;
-      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+      if (!selectionCoversPage(r, Number(currentPageIndex))) continue;
       const pages = parsePagesValue(r.pages);
       if (pages === 1) {
         pageRhymes.top = r;
@@ -2114,7 +2066,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     // Place half-page rhymes by explicit position (do not infer)
     for (const r of selectedRhymes) {
       if (!r) continue;
-      if (Number(r.page_index) !== Number(currentPageIndex)) continue;
+      if (!selectionCoversPage(r, Number(currentPageIndex))) continue;
       const pages = parsePagesValue(r.pages);
       if (pages === 0.5) {
         const pos = normalizeSlot(r.position, 'top') || 'top';
@@ -2142,18 +2094,27 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const hasTopRhyme = currentPageRhymes.top !== null;
   const hasBottomRhyme = currentPageRhymes.bottom !== null;
   const isDoublePageLayout = currentPageRhymes.layout === 'double';
-  const isTopFullPage = hasTopRhyme && !isDoublePageLayout && parsePagesValue(currentPageRhymes.top.pages) === 1;
+  const topPagesValue = parsePagesValue(currentPageRhymes.top?.pages);
+  const isTopFullPage = hasTopRhyme && !isDoublePageLayout && (topPagesValue !== null && topPagesValue >= 1);
   const showBottomContainer = isDoublePageLayout ? false : !isTopFullPage;
   const topSelection = currentPageRhymes.top;
   const bottomSelection = currentPageRhymes.bottom;
-  const topSvgContent = typeof topSelection?.svgContent === 'string' ? topSelection.svgContent.trim() : '';
-  const bottomSvgContent = typeof bottomSelection?.svgContent === 'string' ? bottomSelection.svgContent.trim() : '';
-  const topReady = !topSelection || topSvgContent.length > 0;
-  const bottomReady = !showBottomContainer || !bottomSelection || bottomSvgContent.length > 0;
+  const topSvgPages = getSvgPages(topSelection);
+  const bottomSvgPages = getSvgPages(bottomSelection);
+  const topPageOffset = hasTopRhyme ? getPageOffsetForSelection(topSelection, currentPageIndex) : 0;
+  const bottomPageOffset = hasBottomRhyme ? getPageOffsetForSelection(bottomSelection, currentPageIndex) : 0;
+  const topSvgContent = hasTopRhyme ? getSvgForSelectionPage(topSelection, currentPageIndex) : '';
+  const bottomSvgContent = hasBottomRhyme ? getSvgForSelectionPage(bottomSelection, currentPageIndex) : '';
+  const topReady = !topSelection || topSvgPages.length > 0;
+  const bottomReady = !showBottomContainer || !bottomSelection || bottomSvgPages.length > 0;
   const isTopLoading = !!topSelection && !topReady;
   const isBottomLoading = showBottomContainer && !!bottomSelection && !bottomReady;
   const canShowNextButton = topReady && bottomReady;
   const doublePageSvgContent = isDoublePageLayout ? topSvgContent : '';
+  const isTopContinuation = hasTopRhyme && topPageOffset > 0;
+  const isBottomContinuation = hasBottomRhyme && bottomPageOffset > 0;
+  const showTopContinuationNote = hasTopRhyme && topSvgPages.length > topPageOffset + 1;
+  const showBottomContinuationNote = hasBottomRhyme && bottomSvgPages.length > bottomPageOffset + 1;
 
   const renderLoadingIndicator = (label) => (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-white/80 p-6">
@@ -2229,7 +2190,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
                 {/* Navigation Controls */}
                 <div className="flex-shrink-0 space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
                     <Button
                       onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
                       disabled={currentPageIndex === 0}
@@ -2313,21 +2274,33 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                 >
                                   {hasTopRhyme ? (
                                     <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper">
-                                      <Button
-                                        onClick={() => handleAddRhyme('top')}
-                                        variant="outline"
-                                        className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
-                                      >
-                                        <Replace className="w-4 h-4 mr-2" />
-                                        Replace
-                                      </Button>
+                                      {!isTopContinuation ? (
+                                        <Button
+                                          onClick={() => handleAddRhyme('top')}
+                                          variant="outline"
+                                          className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
+                                        >
+                                          <Replace className="w-4 h-4 mr-2" />
+                                          Replace
+                                        </Button>
+                                      ) : (
+                                        <div className="absolute top-4 right-4 z-10 rounded-lg bg-white/90 px-3 py-2 text-xs font-semibold text-orange-600 shadow-md">
+                                          Visit the first page of this rhyme to replace it.
+                                        </div>
+                                      )}
+
+                                      {topSvgPages.length > 1 && (
+                                        <div className="absolute left-4 top-4 z-10 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-orange-600 shadow">
+                                          Page {Math.min(topPageOffset + 1, topSvgPages.length)} of {topSvgPages.length}
+                                        </div>
+                                      )}
 
                                       <div className={`rhyme-slot-container${hasTopRhyme ? ' has-svg' : ''}`}>
                                         {isTopLoading ? (
                                           renderLoadingIndicator(currentPageRhymes.top?.name || 'rhyme')
-                                        ) : topSvgContent.length > 0 ? (
+                                        ) : topSvgContent && topSvgContent.length > 0 ? (
                                           <InlineSvg
-                                            markup={currentPageRhymes.top?.svgContent || ''}
+                                            markup={topSvgContent || ''}
                                             className="rhyme-svg-content"
                                             sanitize={false}
                                             ariaLabel={`${currentPageRhymes.top?.name || 'Rhyme'} illustration`}
@@ -2338,6 +2311,11 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                           </div>
                                         )}
                                       </div>
+                                      {showTopContinuationNote && (
+                                        <div className="rhyme-slot-footnote">
+                                          Remaining pages for this rhyme continue on the next page.
+                                        </div>
+                                      )}
                                     </div>
                                   ) : (
                                     <div className="rhyme-slot-container">
@@ -2360,21 +2338,33 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
                                     {hasBottomRhyme ? (
                                       <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper">
-                                        <Button
-                                          onClick={() => handleAddRhyme('bottom')}
-                                          variant="outline"
-                                          className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
-                                        >
-                                          <Replace className="w-4 h-4 mr-2" />
-                                          Replace
-                                        </Button>
+                                        {!isBottomContinuation ? (
+                                          <Button
+                                            onClick={() => handleAddRhyme('bottom')}
+                                            variant="outline"
+                                            className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
+                                          >
+                                            <Replace className="w-4 h-4 mr-2" />
+                                            Replace
+                                          </Button>
+                                        ) : (
+                                          <div className="absolute top-4 right-4 z-10 rounded-lg bg-white/90 px-3 py-2 text-xs font-semibold text-orange-600 shadow-md">
+                                            Visit the first page of this rhyme to replace it.
+                                          </div>
+                                        )}
+
+                                        {bottomSvgPages.length > 1 && (
+                                          <div className="absolute left-4 top-4 z-10 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-orange-600 shadow">
+                                            Page {Math.min(bottomPageOffset + 1, bottomSvgPages.length)} of {bottomSvgPages.length}
+                                          </div>
+                                        )}
 
                                         <div className={`rhyme-slot-container${hasBottomRhyme ? ' has-svg' : ''}`}>
                                           {isBottomLoading ? (
                                             renderLoadingIndicator(currentPageRhymes.bottom?.name || 'rhyme')
-                                          ) : bottomSvgContent.length > 0 ? (
+                                          ) : bottomSvgContent && bottomSvgContent.length > 0 ? (
                                             <InlineSvg
-                                              markup={currentPageRhymes.bottom?.svgContent || ''}
+                                              markup={bottomSvgContent || ''}
                                               className="rhyme-svg-content"
                                               sanitize={false}
                                               ariaLabel={`${currentPageRhymes.bottom?.name || 'Rhyme'} illustration`}
@@ -2385,6 +2375,11 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                             </div>
                                           )}
                                         </div>
+                                        {showBottomContinuationNote && (
+                                          <div className="rhyme-slot-footnote">
+                                            Remaining pages for this rhyme continue on the next page.
+                                          </div>
+                                        )}
                                       </div>
                                     ) : (
                                       <div className="rhyme-slot-container">
@@ -2432,8 +2427,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                 </div>
                 <div className="flex-1 min-h-0 overflow-hidden px-2 pb-4 sm:px-4">
                   <TreeMenu
-                    rhymesData={availableRhymes}
-                    reusableRhymes={reusableRhymes}
+                    rhymesData={filteredAvailableRhymes}
+                    reusableRhymes={filteredReusableRhymes}
                     showReusable={showReusable}
                     onRhymeSelect={handleRhymeSelect}
                     onToggleReusable={handleToggleReusable}
@@ -2474,7 +2469,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   );
 };
 
-// Main App Component
+
+
 export function RhymesWorkflowApp() {
   const persistedStateRef = useRef(null);
   if (persistedStateRef.current === null) {
@@ -2795,3 +2791,8 @@ export function RhymesWorkflowApp() {
 }
 
 export default RhymeSelectionPage;
+
+
+
+
+
