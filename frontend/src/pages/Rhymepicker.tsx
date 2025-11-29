@@ -1553,9 +1553,14 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
           })
         );
 
-        const successful = results.filter((result) => typeof result.svgContent === 'string' && result.svgContent.trim());
+        const successful = results.filter(
+          (result) => typeof result.svgContent === 'string' && result.svgContent.trim()
+        );
+        const failed = results.filter(
+          (result) => !result.svgContent || !result.svgContent.toString().trim()
+        );
 
-        if (successful.length === 0) {
+        if (successful.length === 0 && failed.length === 0) {
           return;
         }
 
@@ -1576,11 +1581,21 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                 Number(result.page_index) === Number(existing.page_index)
             );
 
-            if (!match) {
-              return existing;
+            if (match) {
+              return { ...existing, svgContent: match.svgContent, svgFetchFailed: false };
             }
 
-            return { ...existing, svgContent: match.svgContent };
+            const failure = failed.find(
+              (result) =>
+                result.code === existing.code &&
+                Number(result.page_index) === Number(existing.page_index)
+            );
+
+            if (failure) {
+              return { ...existing, svgContent: '', svgFetchFailed: true };
+            }
+
+            return existing;
           });
 
           selectedRhymesRef.current = updated;
@@ -1699,7 +1714,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         return {
           ...rhyme,
           position: rhyme.position || null,
-          svgContent: existingContent
+          svgContent: existingContent,
+          svgFetchFailed: false
         };
       });
 
@@ -1840,6 +1856,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         name: rhyme.name,
         pages: rhyme.pages,
         svgContent: null,
+        svgFetchFailed: false,
         position: normalizedPosition
       };
 
@@ -1868,36 +1885,68 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       try {
         const svgContent = await fetchSvgForRhyme(rhyme.code);
 
-        if (svgContent) {
-          setSelectedRhymes((prev) => {
-            const prevArrayInner = Array.isArray(prev) ? prev : [];
+        setSelectedRhymes((prev) => {
+          const prevArrayInner = Array.isArray(prev) ? prev : [];
 
-            const updated = prevArrayInner.map((existing) => {
-              if (!existing) return existing;
-              if (Number(existing.page_index) !== Number(pageIndex)) {
-                return existing;
-              }
+          const updated = prevArrayInner.map((existing) => {
+            if (!existing) return existing;
+            if (Number(existing.page_index) !== Number(pageIndex)) {
+              return existing;
+            }
 
-              const candidatePosition = resolveRhymePosition(existing, {
-                rhymesForContext: prevArrayInner
-              });
+            const candidatePosition = resolveRhymePosition(existing, {
+              rhymesForContext: prevArrayInner
+            });
 
-              if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+              if (svgContent) {
                 return {
                   ...existing,
-                  svgContent
+                  svgContent,
+                  svgFetchFailed: false
                 };
               }
 
-              return existing;
-            });
+              return {
+                ...existing,
+                svgContent: '',
+                svgFetchFailed: true
+              };
+            }
 
-            selectedRhymesRef.current = updated;
-            return updated;
+            return existing;
           });
-        }
+
+          selectedRhymesRef.current = updated;
+          return updated;
+        });
       } catch (svgError) {
         console.error('Error fetching rhyme SVG:', svgError);
+        setSelectedRhymes((prev) => {
+          const prevArrayInner = Array.isArray(prev) ? prev : [];
+          const updated = prevArrayInner.map((existing) => {
+            if (!existing) return existing;
+            if (Number(existing.page_index) !== Number(pageIndex)) {
+              return existing;
+            }
+
+            const candidatePosition = resolveRhymePosition(existing, {
+              rhymesForContext: prevArrayInner
+            });
+
+            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+              return {
+                ...existing,
+                svgContent: '',
+                svgFetchFailed: true
+              };
+            }
+
+            return existing;
+          });
+          selectedRhymesRef.current = updated;
+          return updated;
+        });
       }
 
       if (isReplacement) {
@@ -2154,8 +2203,10 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const bottomSelection = currentPageRhymes.bottom;
   const topSvgContent = typeof topSelection?.svgContent === 'string' ? topSelection.svgContent.trim() : '';
   const bottomSvgContent = typeof bottomSelection?.svgContent === 'string' ? bottomSelection.svgContent.trim() : '';
-  const topReady = !topSelection || topSvgContent.length > 0;
-  const bottomReady = !showBottomContainer || !bottomSelection || bottomSvgContent.length > 0;
+  const topFailed = Boolean(topSelection?.svgFetchFailed);
+  const bottomFailed = Boolean(bottomSelection?.svgFetchFailed);
+  const topReady = !topSelection || topFailed || topSvgContent.length > 0;
+  const bottomReady = !showBottomContainer || !bottomSelection || bottomFailed || bottomSvgContent.length > 0;
   const isTopLoading = !!topSelection && !topReady;
   const isBottomLoading = showBottomContainer && !!bottomSelection && !bottomReady;
   const canShowNextButton = topReady && bottomReady;
