@@ -1558,49 +1558,6 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     [fetchSvgForRhyme]
   );
 
-  const normalizeSlot = (value, fallback = '') => {
-    if (value === null || value === undefined) return fallback;
-    const normalized = value.toString().trim().toLowerCase();
-    return normalized === 'top' || normalized === 'bottom' ? normalized : fallback;
-  };
-
-  const parsePagesValue = (pagesValue) => {
-    if (typeof pagesValue === 'number') {
-      return Number.isFinite(pagesValue) ? pagesValue : null;
-    }
-    if (typeof pagesValue === 'string') {
-      const trimmed = pagesValue.trim();
-      if (trimmed === '') {
-        return null;
-      }
-      const parsed = Number(trimmed);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    return null;
-  };
-
-  const sortSelections = (selections) => {
-    if (!Array.isArray(selections)) {
-      return [];
-    }
-
-    const getPositionWeight = (selection) => {
-      const normalized = normalizeSlot(selection?.position, 'top');
-      return normalized === 'bottom' ? 1 : 0;
-    };
-
-    return [...selections].sort((a, b) => {
-      const indexA = Number(a?.page_index ?? 0);
-      const indexB = Number(b?.page_index ?? 0);
-
-      if (indexA !== indexB) {
-        return indexA - indexB;
-      }
-
-      return getPositionWeight(a) - getPositionWeight(b);
-    });
-  };
-
   const computePageUsage = (rhymesList = selectedRhymes) => {
     const usageMap = new Map();
     let highestIndex = -1;
@@ -1764,6 +1721,36 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   useEffect(() => {
     let isActive = true;
+
+    (async () => {
+      setLoading(true);
+      try {
+        const selections = await fetchSelectedRhymes();
+        if (!isActive) return;
+
+        await Promise.all([
+          fetchReusableRhymes(),
+          fetchAvailableRhymes(selections)
+        ]);
+      } catch (error) {
+        console.error('Error initializing rhyme data:', error);
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [fetchAvailableRhymes, fetchReusableRhymes, fetchSelectedRhymes]);
+
+  const handleAddRhyme = (position) => {
+    setCurrentPosition(position);
+    setShowTreeMenu(true);
+    setShowReusable(false);
+  };
 
     (async () => {
       setLoading(true);
