@@ -43,18 +43,14 @@ def resolve_rhyme_svg_path(base_path: Optional[Path], rhyme_code: str):
     if base_path is None:
         return None
 
-    # prefer a file named {rhyme_code}.svg but also accept a directory named {rhyme_code}
     candidate = base_path / f"{rhyme_code}.svg"
     dir_candidate = base_path / f"{rhyme_code}"
 
-   
-
-    # Ensure svg_files is defined for all code paths to avoid UnboundLocalError.
     svg_files: List[Path] = []
 
     try:
         if candidate.is_file():
-            return candidate
+            return [candidate]
 
         if dir_candidate.is_dir():
             svg_files = [
@@ -62,10 +58,11 @@ def resolve_rhyme_svg_path(base_path: Optional[Path], rhyme_code: str):
                 for svg in sorted(dir_candidate.iterdir())
                 if svg.is_file() and svg.suffix.lower() == ".svg"
             ]
+
         if svg_files:
             return svg_files
 
-        if (dir_candidate).exists():
+        if dir_candidate.exists():
             logger.warning(
                 "Authored SVG for rhyme %s exists at %s but is not a file.",
                 rhyme_code,
