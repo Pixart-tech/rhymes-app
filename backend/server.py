@@ -811,6 +811,7 @@ def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
     """Return a cached list of localised SVG pages for ``rhyme_code``."""
 
     svg_path = _resolve_rhyme_svg_path(rhyme_code)
+    print(svg_path)
 
     svg_pages: List[str] = []
 
@@ -857,6 +858,7 @@ def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
 
 @api_router.get("/rhymes/svg/{rhyme_code}")
 async def get_rhyme_svg(rhyme_code: str):
+    
     """Return all SVG pages for the requested rhyme as a JSON list.
 
     The results are cached to avoid repeated filesystem reads and asset
@@ -865,6 +867,7 @@ async def get_rhyme_svg(rhyme_code: str):
     """
 
     svg_pages = _get_cached_rhyme_pages(rhyme_code)
+    print(svg_pages)
 
     if not svg_pages:
         raise HTTPException(status_code=404, detail="Rhyme not found")
