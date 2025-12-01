@@ -1,10 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { CATALOG } from '../data/catalog';
 import { Book } from '../types';
 import { savePdf, deletePdf, listPdfKeys, clearPdfs } from '../services/api';
-import { ChevronLeft } from 'lucide-react';
 
 interface UploadState {
   status: 'idle' | 'uploading' | 'success' | 'error';
@@ -129,7 +128,6 @@ const BookUploadRow: React.FC<{ book: Book, initialHasPdf: boolean, onUploadComp
 
 
 const AdminUploadPage: React.FC = () => {
-  const navigate = useNavigate();
   const [uploadedPdfIds, setUploadedPdfIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [isClearing, setIsClearing] = useState(false);
@@ -173,25 +171,15 @@ const AdminUploadPage: React.FC = () => {
   return (
     <div className="container mx-auto max-w-5xl">
       <div className="bg-gray-50 p-4 sm:p-6 md:p-8 rounded-lg">
-        <div className="flex flex-col gap-4 mb-2">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-2 gap-4">
+            <h1 className="text-2xl font-bold text-gray-800">Manage Book PDF Previews</h1>
             <button
-              type="button"
-              onClick={() => navigate(-1)}
-              className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-white/80"
+                onClick={handleClearAll}
+                disabled={isClearing}
+                className="bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-red-700 disabled:bg-gray-400 self-start sm:self-center"
             >
-              <ChevronLeft className="h-4 w-4" />
-              Back to previous page
+                {isClearing ? 'Clearing...' : 'Clear All PDFs'}
             </button>
-            <button
-              onClick={handleClearAll}
-              disabled={isClearing}
-              className="bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-red-700 disabled:bg-gray-400"
-            >
-              {isClearing ? 'Clearing...' : 'Clear All PDFs'}
-            </button>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-800">Manage Book PDF Previews</h1>
         </div>
         <p className="text-gray-600 mb-6">Upload a PDF preview for each book. Uploaded files are stored in your browser and will persist between sessions.</p>
         <p className="text-sm text-gray-500 mb-6 italic">Note: A sample PDF for 'Nursery - English Skill - ABCD (Caps)' is pre-loaded for demonstration. You can override it by uploading your own file.</p>

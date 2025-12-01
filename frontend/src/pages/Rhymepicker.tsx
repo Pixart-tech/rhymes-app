@@ -18,7 +18,7 @@ import { toast } from 'sonner';
 import { Toaster } from '../components/ui/sonner';
 import CoverPageWorkflow from '../components/CoverPageWorkflow';
 import HomePage from '../pages/HomePage';
-import BookWorkflow from '../components/BookWorkflow';
+
 import InlineSvg from '../components/InlineSvg';
 import {
   SchoolForm,

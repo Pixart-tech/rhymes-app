@@ -1565,7 +1565,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                 />
               </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="flex gap-3">
               <Button type="button" variant="outline" onClick={() => setProfileDialogOpen(false)} disabled={profileSubmitting}>
                 Cancel
               </Button>
