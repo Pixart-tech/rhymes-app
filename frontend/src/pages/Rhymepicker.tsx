@@ -1175,110 +1175,10 @@ const FeaturePlaceholderPage = ({ school, mode, grade, onBackToGrades, onBackToM
 
 // Tree Menu Component
 const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onToggleReusable, hideFullPageRhymes }) => {
-  const [expandedGroups, setExpandedGroups] = useState({});
-
-  const toggleGroup = (pageKey) => {
-    setExpandedGroups((prev) => ({
-      ...prev,
-      [pageKey]: !prev[pageKey]
-    }));
-  };
-
-  const currentRhymes = showReusable ? reusableRhymes : rhymesData;
-
-  // Filter out 1.0 page rhymes if hideFullPageRhymes is true
-  const filteredRhymes = hideFullPageRhymes
-    ? Object.fromEntries(
-        Object.entries(currentRhymes).filter(([pageKey]) => parseFloat(pageKey) !== 1.0)
-      )
-    : currentRhymes;
-
-  if (!filteredRhymes || Object.keys(filteredRhymes).length === 0) {
-    return (
-      <div className="p-4 text-center text-gray-500">
-        <Music className="w-12 h-12 mx-auto mb-2 opacity-50" />
-        <p>{showReusable ? 'No reusable rhymes available' : 'No rhymes available'}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-full max-h-[calc(100vh-220px)] flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm">
-      <div className="border-b bg-white/80 p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-            <BookOpen className="w-5 h-5" />
-            {showReusable ? 'Reusable Rhymes' : 'Available Rhymes'}
-          </h3>
-          <Button onClick={onToggleReusable} variant="outline" size="sm" className="text-xs">
-            <Eye className="w-3 h-3 mr-1" />
-            {showReusable ? 'Show Available' : 'Show Reusable'}
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-2">
-        {Object.entries(filteredRhymes).map(([pageKey, rhymes]) => {
-          if (!rhymes || rhymes.length === 0) return null;
-
-          return (
-            <Collapsible key={pageKey} open={expandedGroups[pageKey]} onOpenChange={() => toggleGroup(pageKey)}>
-              <CollapsibleTrigger className="flex items-center justify-between w-full p-3 text-left hover:bg-white/50 rounded-lg transition-colors duration-200">
-                <span className="font-medium text-gray-700 flex items-center gap-2">
-                  <div className="w-6 h-6 bg-gradient-to-r from-orange-400 to-red-400 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                    {pageKey}
-                  </div>
-                  {pageKey} Page{parseFloat(pageKey) !== 1 ? 's' : ''} ({rhymes.length})
-                </span>
-                {expandedGroups[pageKey] ? (
-                  <ChevronDown className="w-4 h-4 text-gray-500" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-gray-500" />
-                )}
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pl-4">
-                <div className="mt-2 space-y-1">
-                  {rhymes.map((rhyme) => (
-                    <div
-                      key={rhyme.code}
-                      className="group flex items-center justify-between gap-3 rounded-lg border border-transparent bg-white/50 p-3 transition-all duration-200 hover:border-orange-200 hover:bg-white/80"
-                    >
-                      <div className="flex-1">
-                        <p className="font-medium text-gray-800 transition-colors duration-200 group-hover:text-orange-600">
-                          {rhyme.name}
-                        </p>
-                        <p className="mt-1 text-xs text-gray-500">
-                          Code: {rhyme.code} • {rhyme.personalized === 'Yes' ? 'Personalized' : 'Standard'}
-                          {rhyme.used_in_grades && (
-                            <span className="ml-2 text-blue-600">(Used in: {rhyme.used_in_grades.join(', ')})</span>
-                          )}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="outline"
-                        onClick={() => onRhymeSelect(rhyme)}
-                        className="shrink-0 rounded-full border-orange-200 text-orange-500 transition-colors duration-200 hover:border-orange-300 hover:text-orange-600"
-                        aria-label={`Add ${rhyme.name}`}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-          );
-        })}
-      </div>
-    </div>
-  );
 };
 // Main Rhyme Selection Interface
 const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }) => {
   const [availableRhymes, setAvailableRhymes] = useState({});
-  const [rawAvailableRhymes, setRawAvailableRhymes] = useState({});
   const [reusableRhymes, setReusableRhymes] = useState({});
   const [selectedRhymes, setSelectedRhymes] = useState([]);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
@@ -1558,6 +1458,12 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     [fetchSvgForRhyme]
   );
 
+  useEffect(() => {
+    fetchAvailableRhymes();
+    fetchReusableRhymes();
+    fetchSelectedRhymes();
+  }, []);
+
   const computePageUsage = (rhymesList = selectedRhymes) => {
     const usageMap = new Map();
     let highestIndex = -1;
@@ -1620,53 +1526,25 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     };
   };
 
-  const filterAvailableRhymes = useCallback(
-    (availableData, selections = selectedRhymesRef.current) => {
-      const availableEntries = availableData && typeof availableData === 'object' ? availableData : {};
-      const codesInUse = new Set(
-        (Array.isArray(selections) ? selections : [])
-          .map((item) => item?.code)
-          .filter(Boolean)
-      );
+  const fetchAvailableRhymes = async () => {
+    try {
+      const response = await axios.get(`${API}/rhymes/available/${school.school_id}/${grade}`);
+      setAvailableRhymes(response.data);
+    } catch (error) {
+      console.error('Error fetching available rhymes:', error);
+    }
+  };
 
-      return Object.fromEntries(
-        Object.entries(availableEntries).map(([pageKey, rhymes]) => [
-          pageKey,
-          Array.isArray(rhymes) ? rhymes.filter((rhyme) => !codesInUse.has(rhyme?.code)) : []
-        ])
-      );
-    },
-    []
-  );
-
-  const fetchAvailableRhymes = useCallback(
-    async (currentSelections = selectedRhymesRef.current) => {
-      try {
-        const response = await axios.get(`${API}/rhymes/available/${school.school_id}/${grade}`);
-        setRawAvailableRhymes(response.data);
-        const filtered = filterAvailableRhymes(response.data, currentSelections);
-        setAvailableRhymes(filtered);
-        return filtered;
-      } catch (error) {
-        console.error('Error fetching available rhymes:', error);
-        return {};
-      }
-    },
-    [API, grade, school.school_id, filterAvailableRhymes]
-  );
-
-  const fetchReusableRhymes = useCallback(async () => {
+  const fetchReusableRhymes = async () => {
     try {
       const response = await axios.get(`${API}/rhymes/selected/other-grades/${school.school_id}/${grade}`);
       setReusableRhymes(response.data);
-      return response.data;
     } catch (error) {
       console.error('Error fetching reusable rhymes:', error);
-      return {};
     }
-  }, [API, grade, school.school_id]);
+  };
 
-  const fetchSelectedRhymes = useCallback(async () => {
+  const fetchSelectedRhymes = async () => {
     try {
       const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
       const gradeSelections = response.data[grade] || [];
@@ -1711,40 +1589,12 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
           });
         }
       }
-
-      return sortedSelections;
     } catch (error) {
       console.error('Error fetching selected rhymes:', error);
-      return [];
+    } finally {
+      setLoading(false);
     }
-  }, [API, grade, school.school_id, computePageUsage, computeNextAvailablePageInfoFromUsage, sortSelections, ensurePageAssets]);
-
-  useEffect(() => {
-    let isActive = true;
-
-    (async () => {
-      setLoading(true);
-      try {
-        const selections = await fetchSelectedRhymes();
-        if (!isActive) return;
-
-        await Promise.all([
-          fetchReusableRhymes(),
-          fetchAvailableRhymes(selections)
-        ]);
-      } catch (error) {
-        console.error('Error initializing rhyme data:', error);
-      } finally {
-        if (isActive) {
-          setLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      isActive = false;
-    };
-  }, [fetchAvailableRhymes, fetchReusableRhymes, fetchSelectedRhymes]);
+  };
 
   const handleAddRhyme = (position) => {
     setCurrentPosition(position);
@@ -1962,7 +1812,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
         }, 400);
       }
 
-      setAvailableRhymes(filterAvailableRhymes(rawAvailableRhymes, nextArray));
+      await fetchAvailableRhymes();
       await fetchReusableRhymes();
       setShowTreeMenu(false);
       setCurrentPosition(null);
@@ -2053,9 +1903,9 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
           return candidatePosition !== position;
         });
         selectedRhymesRef.current = filtered;
-        setAvailableRhymes(filterAvailableRhymes(rawAvailableRhymes, filtered));
         return filtered;
       });
+      await fetchAvailableRhymes();
       await fetchReusableRhymes();
     } catch (err) {
       console.error("Delete failed:", err.response?.data || err.message);
