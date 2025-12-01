@@ -1174,7 +1174,132 @@ const FeaturePlaceholderPage = ({ school, mode, grade, onBackToGrades, onBackToM
 };
 
 // Tree Menu Component
-const TreeMenu = ({ rhymesData, onRhymeSelect, showReusable, reusableRhymes, onToggleReusable, hideFullPageRhymes }) => {
+type TreeMenuRhyme = {
+  code: string;
+  name: string;
+  pages: number;
+  personalized?: string | boolean;
+  used_in_grades?: string[];
+};
+
+type TreeMenuGroups = Record<string, TreeMenuRhyme[]>;
+
+type TreeMenuProps = {
+  rhymesData: TreeMenuGroups;
+  reusableRhymes: TreeMenuGroups;
+  showReusable: boolean;
+  onToggleReusable: () => void;
+  onRhymeSelect: (rhyme: TreeMenuRhyme) => void;
+  hideFullPageRhymes?: boolean;
+};
+
+// Display available or reusable rhymes grouped by number of pages
+const TreeMenu: React.FC<TreeMenuProps> = ({
+  rhymesData,
+  onRhymeSelect,
+  showReusable,
+  reusableRhymes,
+  onToggleReusable,
+  hideFullPageRhymes
+}) => {
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+
+  const toggleGroup = (pageKey: string) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [pageKey]: !prev[pageKey]
+    }));
+  };
+
+  const currentRhymes = showReusable ? reusableRhymes : rhymesData;
+
+  const filteredRhymes = hideFullPageRhymes
+    ? Object.fromEntries(
+        Object.entries(currentRhymes || {}).filter(([pageKey]) => parseFloat(pageKey) !== 1.0)
+      )
+    : currentRhymes || {};
+
+  if (!filteredRhymes || Object.keys(filteredRhymes).length === 0) {
+    return (
+      <div className="p-4 text-center text-gray-500">
+        <Music className="w-12 h-12 mx-auto mb-2 opacity-50" />
+        <p>{showReusable ? 'No reusable rhymes available' : 'No rhymes available'}</p>
+      </div>
+    );
+  }
+
+  const entries = Object.entries(filteredRhymes) as [string, TreeMenuRhyme[]][];
+
+  return (
+    <div className="flex h-full max-h-[calc(100vh-220px)] flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm">
+      <div className="border-b bg-white/80 p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 font-semibold text-gray-800">
+            <BookOpen className="h-5 w-5" />
+            {showReusable ? 'Reusable Rhymes' : 'Available Rhymes'}
+          </h3>
+          <Button onClick={onToggleReusable} variant="outline" size="sm" className="text-xs">
+            <Eye className="mr-1 h-3 w-3" />
+            {showReusable ? 'Show Available' : 'Show Reusable'}
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-2">
+        {entries.map(([pageKey, rhymes]) => {
+          if (!rhymes || rhymes.length === 0) return null;
+
+          return (
+            <Collapsible key={pageKey} open={Boolean(expandedGroups[pageKey])} onOpenChange={() => toggleGroup(pageKey)}>
+              <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg p-3 text-left transition-colors duration-200 hover:bg-white/50">
+                <span className="flex items-center gap-2 font-medium text-gray-700">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-xs font-bold text-white">
+                    {pageKey}
+                  </div>
+                  {pageKey} Page{parseFloat(pageKey) !== 1 ? 's' : ''} ({rhymes.length})
+                </span>
+                {expandedGroups[pageKey] ? (
+                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-gray-500" />
+                )}
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pl-4">
+                <div className="mt-2 space-y-1">
+                  {rhymes.map((rhyme) => (
+                    <div
+                      key={rhyme.code}
+                      className="group flex items-center justify-between gap-3 rounded-lg border border-transparent bg-white/50 p-3 transition-all duration-200 hover:border-orange-200 hover:bg-white/80"
+                    >
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-800 transition-colors duration-200 group-hover:text-orange-600">{rhyme.name}</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Code: {rhyme.code} • {rhyme.personalized === 'Yes' || rhyme.personalized === true ? 'Personalized' : 'Standard'}
+                          {rhyme.used_in_grades && rhyme.used_in_grades.length > 0 && (
+                            <span className="ml-2 text-blue-600">(Used in: {rhyme.used_in_grades.join(', ')})</span>
+                          )}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        onClick={() => onRhymeSelect(rhyme)}
+                        className="shrink-0 rounded-full border-orange-200 text-orange-500 transition-colors duration-200 hover:border-orange-300 hover:text-orange-600"
+                        aria-label={`Add ${rhyme.name}`}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          );
+        })}
+      </div>
+    </div>
+  );
 };
 // Main Rhyme Selection Interface
 const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }) => {
@@ -1535,21 +1660,34 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
           return;
         }
 
-        const pageIndex = numericIndex;
+        const startIndex = numericIndex;
         const pagesValue = parsePagesValue(selection?.pages);
-        const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
 
+        // Handle half-page rhymes
         if (pagesValue === 0.5) {
+          const entry = usageMap.get(startIndex) || { top: false, bottom: false };
           const slot = normalizeSlot(selection?.position, 'top') || 'top';
           entry[slot] = true;
-        } else {
-          entry.top = true;
-          entry.bottom = true;
+          usageMap.set(startIndex, entry);
+          highestIndex = Math.max(highestIndex, startIndex);
+          lowestIndex = Math.min(lowestIndex, startIndex);
+          return;
         }
 
-        usageMap.set(pageIndex, entry);
-        highestIndex = Math.max(highestIndex, pageIndex);
-        lowestIndex = Math.min(lowestIndex, pageIndex);
+        // Handle full or multi-page rhymes (occupy consecutive pages)
+        const totalPages = pagesValue && pagesValue > 1 ? Math.max(1, Math.round(pagesValue)) : 1;
+
+        for (let offset = 0; offset < totalPages && startIndex + offset < MAX_PAGES_PER_GRADE; offset += 1) {
+          const targetIndex = startIndex + offset;
+          const entry = usageMap.get(targetIndex) || { top: false, bottom: false };
+
+          entry.top = true;
+          entry.bottom = true;
+
+          usageMap.set(targetIndex, entry);
+          highestIndex = Math.max(highestIndex, targetIndex);
+          lowestIndex = Math.min(lowestIndex, targetIndex);
+        }
       });
     }
 
