@@ -1655,6 +1655,30 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     }
   };
 
+  useEffect(() => {
+    if (!school?.school_id || !grade) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+
+    const loadRhymeData = async () => {
+      try {
+        await Promise.all([
+          fetchAvailableRhymes(),
+          fetchReusableRhymes(),
+          fetchSelectedRhymes()
+        ]);
+      } catch (error) {
+        console.error('Error loading rhyme data:', error);
+        setLoading(false);
+      }
+    };
+
+    void loadRhymeData();
+  }, [school?.school_id, grade]);
+
   const handleAddRhyme = (position) => {
     setCurrentPosition(position);
     setShowTreeMenu(true);
@@ -2278,7 +2302,6 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                     )}
                                   </div>
                                 )}
-                              )}
                           </div>
                         </div>
                       </div>
