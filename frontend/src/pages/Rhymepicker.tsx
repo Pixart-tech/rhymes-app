@@ -1752,36 +1752,6 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     setShowReusable(false);
   };
 
-    (async () => {
-      setLoading(true);
-      try {
-        const selections = await fetchSelectedRhymes();
-        if (!isActive) return;
-
-        await Promise.all([
-          fetchReusableRhymes(),
-          fetchAvailableRhymes(selections)
-        ]);
-      } catch (error) {
-        console.error('Error initializing rhyme data:', error);
-      } finally {
-        if (isActive) {
-          setLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      isActive = false;
-    };
-  }, [fetchAvailableRhymes, fetchReusableRhymes, fetchSelectedRhymes]);
-
-  const handleAddRhyme = (position) => {
-    setCurrentPosition(position);
-    setShowTreeMenu(true);
-    setShowReusable(false);
-  };
-
   const computeRemovalsForSelection = ({ selections, pageIndex, normalizedPosition, newPages }) => {
     if (!Array.isArray(selections) || selections.length === 0) {
       return [];
