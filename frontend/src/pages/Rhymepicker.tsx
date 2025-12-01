@@ -1558,33 +1558,6 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
     [fetchSvgForRhyme]
   );
 
-  useEffect(() => {
-    let isActive = true;
-
-    (async () => {
-      setLoading(true);
-      try {
-        const selections = await fetchSelectedRhymes();
-        if (!isActive) return;
-
-        await Promise.all([
-          fetchReusableRhymes(),
-          fetchAvailableRhymes(selections)
-        ]);
-      } catch (error) {
-        console.error('Error initializing rhyme data:', error);
-      } finally {
-        if (isActive) {
-          setLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      isActive = false;
-    };
-  }, [fetchAvailableRhymes, fetchReusableRhymes, fetchSelectedRhymes]);
-
   const computePageUsage = (rhymesList = selectedRhymes) => {
     const usageMap = new Map();
     let highestIndex = -1;
@@ -1745,6 +1718,33 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
       return [];
     }
   }, [API, grade, school.school_id, computePageUsage, computeNextAvailablePageInfoFromUsage, sortSelections, ensurePageAssets]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    (async () => {
+      setLoading(true);
+      try {
+        const selections = await fetchSelectedRhymes();
+        if (!isActive) return;
+
+        await Promise.all([
+          fetchReusableRhymes(),
+          fetchAvailableRhymes(selections)
+        ]);
+      } catch (error) {
+        console.error('Error initializing rhyme data:', error);
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [fetchAvailableRhymes, fetchReusableRhymes, fetchSelectedRhymes]);
 
   const handleAddRhyme = (position) => {
     setCurrentPosition(position);
