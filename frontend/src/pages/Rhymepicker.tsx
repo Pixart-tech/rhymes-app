@@ -2652,7 +2652,7 @@ export function RhymesWorkflowApp() {
           onBackToMenu={handleBackToModeSelection}
           onLogout={handleLogout}
         />
-      ) : !selectedGrade ? (
+      ) : !selectedGrade && selectedMode !== 'books' ? (
         <GradeSelectionPage
           school={school}
           mode={selectedMode}
