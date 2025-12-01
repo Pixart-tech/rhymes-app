@@ -2829,7 +2829,9 @@ export function RhymesWorkflowApp() {
         //   onLogout={handleLogout}
         // />
         <HomePage
-        onBackToMode={handleBackToModeSelection}/>
+          school={school}
+          onBackToMode={handleBackToModeSelection}
+        />
         // <Header
         // onBackToMode={handleBackToModeSelection}
         
@@ -2849,5 +2851,4 @@ export function RhymesWorkflowApp() {
 }
 
 export default RhymeSelectionPage;
-
 

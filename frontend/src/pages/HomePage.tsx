@@ -2,9 +2,25 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
+import { Button } from '../components/ui/button';
+import type { SchoolProfile } from '../types/types';
 
-const HomePage: React.FC = () => {
+interface HomePageProps {
+  onBackToMode?: () => void;
+  school?: SchoolProfile | null;
+}
+
+const HomePage: React.FC<HomePageProps> = ({ onBackToMode, school }) => {
   const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const handleBackToMenu = () => {
+    if (typeof onBackToMode === 'function') {
+      onBackToMode();
+    }
+    navigate('/');
+  };
+  const resolvedSchoolId = school?.school_id;
 
   if (loading) {
     return <div className="text-center p-12">Loading...</div>;
@@ -12,15 +28,23 @@ const HomePage: React.FC = () => {
 
   return (
     <div className="container mx-auto max-w-4xl text-center py-16">
+      <Button onClick={handleBackToMenu}>Back to  menu </Button>
+      <br></br>
       <h1 className="text-4xl md:text-5xl font-extrabold text-primary-800 mb-4">Welcome to the Book Selector</h1>
       <p className="text-lg text-gray-600 mb-8">
         Your one-stop solution for customizing school book packages for Nursery, LKG, and UKG.
-      </p>
+      </p>  
       {user ? (
         <div className="bg-white p-8 rounded-lg shadow-md border border-primary-200">
           <h2 className="text-2xl font-bold text-gray-800">Hello, {user.name}!</h2>
           <p className="mt-2 text-gray-600">Your registered school ID is:</p>
-          <p className="text-4xl font-mono font-bold text-primary-600 my-4 tracking-widest bg-primary-50 p-3 rounded-md inline-block">{user.schoolId}</p>
+          {resolvedSchoolId ? (
+            <p className="text-4xl font-mono font-bold text-primary-600 my-4 tracking-widest bg-primary-50 p-3 rounded-md inline-block">
+              {resolvedSchoolId}
+            </p>
+          ) : (
+            <p className="text-gray-500 italic my-4">School ID will appear once the profile is completed.</p>
+          )}
           <div className="mt-6">
             <Link 
               to="/questionnaire" 
@@ -29,6 +53,7 @@ const HomePage: React.FC = () => {
               Start Your Selection
             </Link>
           </div>
+          
         </div>
       ) : (
         <div className="mt-10">
