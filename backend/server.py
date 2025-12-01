@@ -80,7 +80,7 @@ def _ensure_image_cache_dir() -> Path:
     return svg_processing.ensure_image_cache_dir(config.IMAGE_CACHE_DIR)
 
 
-def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]|List[Path]:
+def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[List[Path]]:
     return svg_processing.resolve_rhyme_svg_path(RHYME_SVG_BASE_PATH, rhyme_code)
 
 
@@ -807,26 +807,16 @@ def _localize_rhyme_svg_markup(svg_markup: str, source_path: Optional[Path], rhy
 
 
 @lru_cache(maxsize=256)
-def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
+def _get_cached_rhyme_pages(rhyme_code: str) -> Dict[str, List[str]]:
     """Return a cached list of localised SVG pages for ``rhyme_code``."""
 
     svg_path = _resolve_rhyme_svg_path(rhyme_code)
 
     svg_pages: List[str] = []
+    source_paths: List[str] = []
 
     if svg_path is not None:
-        # svg_path may be a single Path, a directory Path, or a list of Path
-        candidates: List[Path] = []
-
-        if isinstance(svg_path, list):
-            candidates = svg_path
-        elif isinstance(svg_path, Path):
-            if svg_path.is_dir():
-                candidates = [
-                    p for p in sorted(svg_path.iterdir()) if p.is_file() and p.suffix.lower() == ".svg"
-                ]
-            else:
-                candidates = [svg_path]
+        candidates: List[Path] = list(svg_path)
 
         for candidate in candidates:
             try:
@@ -839,9 +829,10 @@ def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
 
             localized_markup = _localize_rhyme_svg_markup(svg_content, candidate, rhyme_code)
             svg_pages.append(localized_markup)
+            source_paths.append(str(candidate))
 
     if svg_pages:
-        return svg_pages
+        return {"pages": svg_pages, "sources": source_paths}
 
     try:
         document = _load_rhyme_svg_markup(rhyme_code)
@@ -852,7 +843,7 @@ def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
         document.markup, document.source_path, rhyme_code
     )
 
-    return [localized_markup]
+    return {"pages": [localized_markup], "sources": [str(document.source_path or "auto-generated")]} 
 
 
 @api_router.get("/rhymes/svg/{rhyme_code}")
@@ -864,12 +855,12 @@ async def get_rhyme_svg(rhyme_code: str):
     frontend without repeatedly hitting the backend.
     """
 
-    svg_pages = _get_cached_rhyme_pages(rhyme_code)
+    svg_payload = _get_cached_rhyme_pages(rhyme_code)
 
-    if not svg_pages:
+    if not svg_payload.get("pages"):
         raise HTTPException(status_code=404, detail="Rhyme not found")
 
-    return JSONResponse({"pages": svg_pages})
+    return JSONResponse(svg_payload)
 
 
 @api_router.get("/rhymes/svg-image/{rhyme_code}")
