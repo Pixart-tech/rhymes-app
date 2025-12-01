@@ -1660,21 +1660,34 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
           return;
         }
 
-        const pageIndex = numericIndex;
+        const startIndex = numericIndex;
         const pagesValue = parsePagesValue(selection?.pages);
-        const entry = usageMap.get(pageIndex) || { top: false, bottom: false };
 
+        // Handle half-page rhymes
         if (pagesValue === 0.5) {
+          const entry = usageMap.get(startIndex) || { top: false, bottom: false };
           const slot = normalizeSlot(selection?.position, 'top') || 'top';
           entry[slot] = true;
-        } else {
-          entry.top = true;
-          entry.bottom = true;
+          usageMap.set(startIndex, entry);
+          highestIndex = Math.max(highestIndex, startIndex);
+          lowestIndex = Math.min(lowestIndex, startIndex);
+          return;
         }
 
-        usageMap.set(pageIndex, entry);
-        highestIndex = Math.max(highestIndex, pageIndex);
-        lowestIndex = Math.min(lowestIndex, pageIndex);
+        // Handle full or multi-page rhymes (occupy consecutive pages)
+        const totalPages = pagesValue && pagesValue > 1 ? Math.max(1, Math.round(pagesValue)) : 1;
+
+        for (let offset = 0; offset < totalPages && startIndex + offset < MAX_PAGES_PER_GRADE; offset += 1) {
+          const targetIndex = startIndex + offset;
+          const entry = usageMap.get(targetIndex) || { top: false, bottom: false };
+
+          entry.top = true;
+          entry.bottom = true;
+
+          usageMap.set(targetIndex, entry);
+          highestIndex = Math.max(highestIndex, targetIndex);
+          lowestIndex = Math.min(lowestIndex, targetIndex);
+        }
       });
     }
 
