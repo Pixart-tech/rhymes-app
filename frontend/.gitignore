@@ -14,7 +14,8 @@ dist/
 
 
 # Virtual environments
-virtual_env/
+backend/virtual_env/
+
 # misc
 .DS_Store
 .env.local
