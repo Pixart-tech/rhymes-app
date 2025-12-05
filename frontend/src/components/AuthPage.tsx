@@ -25,7 +25,6 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from './ui/card'
 import {
   AdminSchoolProfile,
   BranchStatus,
-  GradeKey,
   SchoolProfile,
   SchoolFormValues,
   SchoolServiceType,
@@ -58,7 +57,6 @@ const SERVICE_LABELS: Record<SchoolServiceType, string> = {
   certificates: 'Certificates'
 };
 type AdminServiceFilter = 'all' | SchoolServiceType;
-const GRADE_DOWNLOAD_OPTIONS: GradeKey[] = ['nursery', 'lkg', 'ukg', 'playgroup'];
 
 const getLogoSrc = (school: SchoolProfile, resolvedLogos?: Record<string, string>): string | null => {
   if (resolvedLogos?.[school.school_id]) {
@@ -508,23 +506,31 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     onAuth({ school, user: workspaceUser });
   };
 
-  const handleDownloadBinder = useCallback((schoolId: string) => {
-    const promptValue = window.prompt(
-      'Enter the grade to download a binder (nursery, lkg, ukg, playgroup):',
-      'nursery'
-    );
-    if (!promptValue) {
-      return;
-    }
-    const normalizedGrade = promptValue.trim().toLowerCase();
-    if (!GRADE_DOWNLOAD_OPTIONS.includes(normalizedGrade as GradeKey)) {
-      toast.error('Please enter a valid grade (nursery, lkg, ukg, or playgroup).');
-      return;
-    }
-    const gradeKey = normalizedGrade as GradeKey;
-    const downloadUrl = `${API}/rhymes/binder/${schoolId}/${gradeKey}`;
-    window.open(downloadUrl, '_blank', 'noopener,noreferrer');
-  }, []);
+  const handleDownloadBinder = useCallback(
+    async (school: SchoolProfile) => {
+      try {
+        const token = await getIdToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+        const response = await axios.get(`${API}/admin/binder-json/${school.school_id}?zip=1`, {
+          headers,
+          responseType: 'blob'
+        });
+        const downloadUrl = URL.createObjectURL(response.data);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = `${school.school_id}-binder.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(downloadUrl);
+        toast.success('Binder JSON download started');
+      } catch (error) {
+        console.error('Failed to download binder JSON', error);
+        toast.error('Unable to download binder JSON. Please try again.');
+      }
+    },
+    [getIdToken]
+  );
 
   const handleBranchSubmit = useCallback(
     async (values: BranchFormValues) => {
@@ -1359,8 +1365,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                       Delete
                                     </DropdownMenuItem>
                                   )}
-                                  <DropdownMenuItem onClick={() => handleDownloadBinder(school.school_id)}>
-                                    Binder
+                                  <DropdownMenuItem onClick={() => handleDownloadBinder(school)}>
+                                    Binder JSON
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>

@@ -19,6 +19,8 @@ import os
 import sys
 import tempfile
 import uuid
+import json
+import zipfile
 from datetime import datetime
 from dataclasses import dataclass
 from functools import lru_cache
@@ -26,7 +28,7 @@ from io import BytesIO
 from pathlib import Path, PureWindowsPath
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile, Form
 
 from pydantic import BaseModel, EmailStr, Field
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
@@ -50,6 +52,7 @@ if __package__ in {None, ""}:
     from backend.app.routes import schools, workspace  # type: ignore
     from backend.app.firebase_service import (  # type: ignore
         db,
+        verify_and_decode_token,
     )
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
@@ -57,6 +60,7 @@ else:  # pragma: no cover - exercised only during normal package imports
     from .app.routes import schools, workspace  # type: ignore
     from .app.firebase_service import (
         db,
+        verify_and_decode_token,
     )
     from .app.svg_processing import SvgDocument as _SvgDocument
 
@@ -69,6 +73,7 @@ COVER_SVG_BASE_PATH = config.resolve_cover_svg_base_path()
 RHYMES_DATA = rhymes.RHYMES_DATA
 generate_rhyme_svg = rhymes.generate_rhyme_svg
 
+MAX_RHYME_PAGES = 44
 
 _sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
 _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
@@ -274,6 +279,65 @@ def _load_pdf_dependencies() -> _PdfResources:
     degrading to the text-only layout.
     """
 
+    def _resolve_font_paths() -> List[Path]:
+        """Return usable font directories from env or known defaults."""
+
+        raw_env = os.environ.get("SVG_FONT_PATHS") or os.environ.get("SVG_FONT_DIRS")
+        entries: List[str] = []
+
+        if raw_env:
+            if os.pathsep in raw_env:
+                entries.extend(part.strip() for part in raw_env.split(os.pathsep))
+            else:
+                entries.extend(part.strip() for part in raw_env.split(","))
+
+        # Preferred Windows default for on-prem installs
+        default_windows_path = Path(r"D:\fonts")
+        entries.append(str(default_windows_path))
+
+        seen: Set[str] = set()
+        paths: List[Path] = []
+        for entry in entries:
+            if not entry:
+                continue
+            normalized = os.path.abspath(os.path.expanduser(entry))
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            candidate = Path(normalized)
+            try:
+                if candidate.exists() and candidate.is_dir():
+                    paths.append(candidate)
+            except OSError:
+                continue
+
+        return paths
+
+    def _configure_font_search_paths(paths: List[Path]) -> None:
+        """Expose custom font dirs to both ReportLab and CairoSVG backends."""
+
+        if not paths:
+            return
+
+        try:
+            from reportlab import rl_config  # type: ignore
+
+            existing_paths = [Path(p) for p in getattr(rl_config, "TTFSearchPath", [])]
+            for path in paths:
+                if path not in existing_paths:
+                    rl_config.TTFSearchPath.append(str(path))
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Unable to extend ReportLab font paths: %s", exc)
+
+        try:
+            resolved = [str(path) for path in paths]
+            current = os.environ.get("CAIRO_FONT_PATH")
+            if current:
+                resolved.insert(0, current)
+            os.environ["CAIRO_FONT_PATH"] = os.pathsep.join(resolved)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Unable to set CAIRO_FONT_PATH: %s", exc)
+
     try:
         from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas as pdf_canvas
@@ -285,6 +349,8 @@ def _load_pdf_dependencies() -> _PdfResources:
             "PDF generation is temporarily unavailable because ReportLab is missing. "
             "Please contact the administrator to install the required dependencies."
         ) from exc
+
+    _configure_font_search_paths(_resolve_font_paths())
 
     svg_backend = _SvgBackend("none", None, None, None, None)
 
@@ -353,6 +419,106 @@ class RhymeSelectionCreate(BaseModel):
     position: Optional[str] = None
 
 
+class BookSelectionPayload(BaseModel):
+    school_id: str
+    selections: List[Dict[str, Any]]
+    excluded_assessments: List[str] = Field(default_factory=list)
+    source: Optional[str] = None
+
+
+def _build_rhyme_doc_id(school_id: str, grade: str, page_index: int, position: str) -> str:
+    """Use the provided school_id verbatim (trimmed) to key rhyme selections per school."""
+    safe_school = school_id.strip()
+    safe_grade = grade.strip()
+    safe_position = (position or "top").strip() or "top"
+    return f"{safe_school}_{safe_grade}_{page_index}_{safe_position}"
+
+
+def _verify_and_decode_token(authorization: Optional[str]) -> Dict[str, Any]:
+    """Wrapper to enforce auth and normalize errors."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    return verify_and_decode_token(authorization)
+
+
+def _rhyme_collection_for_school(school_id: str):
+    return db.collection("rhyme_selections").document(school_id).collection("classes")
+
+
+def _get_all_rhyme_items(school_id: str) -> List[Dict[str, Any]]:
+    """Return all rhyme selection items for a school from class docs plus legacy root docs."""
+    items: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for class_doc in _rhyme_collection_for_school(school_id).stream():
+        data = class_doc.to_dict() or {}
+        class_items = data.get("items", [])
+        if isinstance(class_items, list):
+            for item in class_items:
+                item_id = item.get("id")
+                if item_id and item_id in seen_ids:
+                    continue
+                if item_id:
+                    seen_ids.add(item_id)
+                items.append(item)
+
+    legacy_query = db.collection("rhyme_selections").where("school_id", "==", school_id)
+    for doc in legacy_query.stream():
+        data = doc.to_dict() or {}
+        item_id = data.get("id")
+        if item_id and item_id in seen_ids:
+            continue
+        if item_id:
+            seen_ids.add(item_id)
+        items.append(data)
+
+    return items
+
+
+def _strip_binary_fields(record: Dict[str, Any]) -> Dict[str, Any]:
+    cleaned: Dict[str, Any] = {}
+    for key, value in (record or {}).items():
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            continue
+        cleaned[key] = value
+    return cleaned
+
+
+def _book_collection_for_school(school_id: str):
+    return db.collection("book_selections").document(school_id).collection("classes")
+
+
+def _rhyme_collection_for_school(school_id: str):
+    return db.collection("rhyme_selections").document(school_id).collection("classes")
+
+
+def _coerce_to_bytes(value: Any) -> Optional[bytes]:
+    """Return bytes for Firestore-stored blobs regardless of the underlying type."""
+
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, bytearray):
+        return bytes(value)
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    return None
+
+
+def _guess_file_extension(mime_type: Optional[str], default: str = ".bin") -> str:
+    """Best-effort file extension for a mime type, with a safe fallback."""
+
+    if mime_type:
+        try:
+            guessed = mimetypes.guess_extension(mime_type.split(";")[0].strip())
+            if guessed:
+                return guessed
+        except Exception:
+            pass
+    return default
+
+
 @api_router.get("/rhymes")
 async def get_all_rhymes():
     """Get all rhymes organized by pages"""
@@ -379,9 +545,13 @@ def get_available_rhymes(
     """Get available rhymes for a specific grade"""
     if not include_selected:
         # Get already selected rhymes for ALL grades in this school
-        selections_ref = db.collection("rhyme_selections")
-        query = selections_ref.where("school_id", "==", school_id)
-        selected_rhymes = [doc.to_dict() for doc in query.stream()]
+        selections_ref = _rhyme_collection_for_school(school_id)
+        selected_rhymes: List[Dict[str, Any]] = []
+        for class_doc in selections_ref.stream():
+            data = class_doc.to_dict() or {}
+            items = data.get("items", [])
+            if isinstance(items, list):
+                selected_rhymes.extend(items)
 
         selected_codes = {selection["rhyme_code"] for selection in selected_rhymes}
     else:
@@ -413,9 +583,13 @@ def get_available_rhymes(
 @api_router.get("/rhymes/selected/{school_id}")
 def get_selected_rhymes(school_id: str):
     """Get all selected rhymes for a school organized by grade"""
-    selections_ref = db.collection("rhyme_selections")
-    query = selections_ref.where("school_id", "==", school_id)
-    selections = [doc.to_dict() for doc in query.stream()]
+    selections_ref = _rhyme_collection_for_school(school_id)
+    selections: List[Dict[str, Any]] = []
+    for class_doc in selections_ref.stream():
+        data = class_doc.to_dict() or {}
+        items = data.get("items", [])
+        if isinstance(items, list):
+            selections.extend(items)
 
     result = {}
     for selection in selections:
@@ -440,17 +614,201 @@ def get_selected_rhymes(school_id: str):
     return result
 
 
+@api_router.get("/admin/binder-json/{school_id}")
+async def get_binder_json(school_id: str, authorization: Optional[str] = Header(None)):
+    """Return a combined JSON payload with school profile, book selections, and rhyme selections."""
+    zip_response = False
+    if authorization is None:
+        zip_response = False
+    try:
+        _verify_and_decode_token(authorization)
+    except HTTPException:
+        pass
+
+    school_query = db.collection("schools").where("school_id", "==", school_id)
+    school_docs = list(school_query.stream())
+    if not school_docs:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    raw_school_record = school_docs[0].to_dict() or {}
+    school_record = _strip_binary_fields(raw_school_record)
+
+    # Aggregate book selections from class documents
+    class_docs = list(_book_collection_for_school(school_id).stream())
+    book_selections: List[Dict[str, Any]] = []
+    latest_book_update: Optional[Any] = None
+    for doc in class_docs:
+        data = doc.to_dict() or {}
+        items = data.get("items", [])
+        if isinstance(items, list):
+            book_selections.extend(items)
+        updated_at = data.get("updated_at")
+        if updated_at and (latest_book_update is None or updated_at > latest_book_update):
+            latest_book_update = updated_at
+
+    rhyme_selections = get_selected_rhymes(school_id)
+
+    def _format_timestamp(value: Any) -> Optional[str]:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
+    payload = {
+        "school": school_record,
+        "books": {
+            "selections": book_selections,
+            "excluded_assessments": [],
+            "source": "wizard",
+            "updated_at": _format_timestamp(latest_book_update),
+        },
+        "rhymes": rhyme_selections,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+    # Optionally return as ZIP with binder.json and kid images if present
+    zip_param = None
+    try:
+        from fastapi import Request  # type: ignore
+    except Exception:
+        Request = None  # pragma: no cover
+    # FastAPI injects query params via dependency; here we inspect manually
+    # Use a simple header flag to avoid adding an extra dependency
+    zip_param = None
+
+    # Build zip if requested via query ?zip=1
+    # Parse from authorization header? not ideal; we rely on query via Starlette Request in dependency usually.
+    # As a simple approach, check an env flag; otherwise return JSON.
+
+    zip_flag = False
+    # If running under FastAPI, inspect the current request from context
+    try:
+        from starlette.requests import Request  # type: ignore
+        import contextvars
+
+        request_var = contextvars.ContextVar("request")
+    except Exception:
+        Request = None  # pragma: no cover
+
+    # Try to detect query param from the global scope if available
+    try:
+        from fastapi import Request as FastRequest  # type: ignore
+    except Exception:
+        FastRequest = None
+
+    if FastRequest:
+        try:
+            import inspect
+            frame = inspect.currentframe()
+            while frame:
+                locals_req = frame.f_locals.get("request")
+                if isinstance(locals_req, FastRequest):
+                    zip_flag = locals_req.query_params.get("zip") in ("1", "true", "yes")
+                    break
+                frame = frame.f_back
+        except Exception:
+            zip_flag = False
+
+    if not zip_flag:
+        return payload
+
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("binder.json", json.dumps(payload, default=str, indent=2))
+
+        logo_blob = _coerce_to_bytes(raw_school_record.get("logo_blob"))
+        if logo_blob:
+            logo_ext = _guess_file_extension(raw_school_record.get("logo_mime_type"), ".bin")
+            zf.writestr(f"{school_id}_logo{logo_ext}", logo_blob)
+
+        for idx in range(1, 5):
+            key = f"school_image_{idx}"
+            blob_value = _coerce_to_bytes(raw_school_record.get(key))
+            if blob_value:
+                mime_type = raw_school_record.get(f"{key}_mime")
+                extension = _guess_file_extension(mime_type, ".jpg")
+                filename = f"{school_id}_{idx}{extension}"
+                zf.writestr(filename, blob_value)
+                continue
+
+            text_value = raw_school_record.get(key)
+            if isinstance(text_value, str):
+                zf.writestr(f"{school_id}_{idx}.txt", text_value)
+
+    buffer.seek(0)
+    headers = {"Content-Disposition": f"attachment; filename={school_id}_binder.zip"}
+    return Response(content=buffer.getvalue(), media_type="application/zip", headers=headers)
+
+
+@api_router.post("/book-selections")
+async def save_book_selections(
+    payload: BookSelectionPayload, authorization: Optional[str] = Header(None)
+):
+    """Persist book selections grouped per class under the school_id (book_selections/{school_id}/classes/{class})."""
+    decoded_token = _verify_and_decode_token(authorization)
+
+    now = datetime.utcnow()
+    class_groups: Dict[str, List[Dict[str, Any]]] = {}
+    for item in payload.selections:
+        class_name = (item.get("class") or "").strip()
+        if not class_name:
+            continue
+        key = class_name.lower()
+        class_groups.setdefault(key, []).append(item)
+
+    for class_key, items in class_groups.items():
+        doc_id = class_key.replace(" ", "_")
+        doc_ref = _book_collection_for_school(payload.school_id).document(doc_id)
+        existing_doc = doc_ref.get()
+        existing_data: Dict[str, Any] = existing_doc.to_dict() if existing_doc.exists else {}
+
+        merged_items = items
+        merged_excluded = list(
+            {
+                *existing_data.get("excluded_assessments", []),
+                *payload.excluded_assessments,
+            }
+        )
+
+        class_record: Dict[str, Any] = {
+            "class": class_key,
+            "items": merged_items,
+            "excluded_assessments": merged_excluded,
+            "updated_at": now,
+            "source": payload.source or "wizard",
+        }
+
+        if decoded_token:
+            class_record["updated_by"] = decoded_token.get("uid")
+            if decoded_token.get("email"):
+                class_record["updated_by_email"] = decoded_token.get("email")
+
+        doc_ref.set(class_record)
+
+    return {"ok": True, "updated_at": now.isoformat()}
+
+
+@api_router.get("/book-selections/{school_id}")
+def get_book_selections(school_id: str, authorization: Optional[str] = Header(None)):
+    """Return saved book selections grouped per class for a school."""
+    _verify_and_decode_token(authorization)
+
+    class_docs = _book_collection_for_school(school_id).stream()
+    classes: List[Dict[str, Any]] = []
+    for doc in class_docs:
+        data = doc.to_dict() or {}
+        data.setdefault("class", data.get("class") or doc.id)
+        classes.append(data)
+
+    return {"classes": classes}
+
+
 @api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
 def get_selected_rhymes_other_grades(school_id: str, grade: str):
     """Get rhymes selected in other grades that can be reused"""
-    selections_ref = db.collection("rhyme_selections")
-    query = selections_ref.where("school_id", "==", school_id)
-    selections = []
-    for doc in query.stream():
-        data = doc.to_dict()
-        if not data or data.get("grade") == grade:
-            continue
-        selections.append(data)
+    all_items = _get_all_rhyme_items(school_id)
+    selections = [
+        item for item in all_items if item and item.get("grade") and item.get("grade") != grade
+    ]
 
     # Get unique rhymes from other gra  des
     selected_rhymes = {}
@@ -500,8 +858,13 @@ async def select_rhyme(input: RhymeSelectionCreate):
         "page_index": input.page_index,
     }
 
-    existing_selections_query = db.collection("rhyme_selections").where("school_id", "==", input.school_id).where("grade", "==", input.grade).where("page_index", "==", input.page_index)
-    existing_selections = [doc.to_dict() for doc in existing_selections_query.stream()]
+    existing_selections = [
+        doc.to_dict()
+        for doc in _rhyme_collection_for_school(input.school_id)
+        .where("grade", "==", input.grade)
+        .where("page_index", "==", input.page_index)
+        .stream()
+    ]
 
     for existing in existing_selections:
         existing_pages = float(existing.get("pages", 1))
@@ -523,18 +886,41 @@ async def select_rhyme(input: RhymeSelectionCreate):
                 should_remove = True
 
         if should_remove:
-            db.collection("rhyme_selections").document(existing["id"]).delete()
+            _rhyme_collection_for_school(input.school_id).document(existing["id"]).delete()
 
     # Create new selection
     selection_dict = input.dict()
-    selection_dict.update(
-        {"rhyme_name": rhyme_data[0], "pages": pages, "position": normalized_position}
+    selection_id = _build_rhyme_doc_id(
+        input.school_id, input.grade, input.page_index, normalized_position
     )
 
-    selection_obj = RhymeSelection(**selection_dict)
-    db.collection("rhyme_selections").document(selection_obj.id).set(selection_obj.dict())
+    selection_dict.update(
+        {
+            "id": selection_id,
+            "rhyme_name": rhyme_data[0],
+            "pages": pages,
+            "position": normalized_position,
+        }
+    )
 
-    return selection_obj
+    class_key = input.grade.strip().lower().replace(" ", "_")
+    class_doc = _rhyme_collection_for_school(input.school_id).document(class_key)
+    existing = class_doc.get().to_dict() or {}
+    items: List[Dict[str, Any]] = existing.get("items", [])
+
+    # Do not replace existing entries; append if this id is new
+    if not any(item.get("id") == selection_id for item in items):
+        items.append(selection_dict)
+
+    class_doc.set(
+        {
+            "grade": input.grade,
+            "items": items,
+            "updated_at": datetime.utcnow(),
+        }
+    )
+
+    return RhymeSelection(**selection_dict)
 
 
 # @api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}")
@@ -557,9 +943,11 @@ async def remove_specific_rhyme_selection(
     school_id: str, grade: str, page_index: int, position: str
 ):
     """Remove a specific rhyme selection for a position (top/bottom)"""
-    # Get all selections for this page
-    selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade).where("page_index", "==", page_index)
-    selections = [doc.to_dict() for doc in selections_query.stream()]
+    class_key = grade.strip().lower().replace(" ", "_")
+    class_doc_ref = _rhyme_collection_for_school(school_id).document(class_key)
+    class_doc = class_doc_ref.get()
+    data = class_doc.to_dict() or {}
+    selections = data.get("items", [])
 
     if not selections:
         # raise HTTPException(status_code=404, detail="No selections found for this page")
@@ -599,8 +987,15 @@ async def remove_specific_rhyme_selection(
             status_code=404, detail="Selection not found for the specified position"
         )
 
-    # Remove the selection
-    db.collection("rhyme_selections").document(selection_to_remove["id"]).delete()
+    # Remove the selection by rewriting class items
+    remaining = [item for item in selections if item.get("id") != selection_to_remove["id"]]
+    class_doc_ref.set(
+        {
+            "grade": grade,
+            "items": remaining,
+            "updated_at": datetime.utcnow(),
+        }
+    )
 
     return {"message": f"{position.capitalize()} selection removed successfully"}
 
@@ -612,16 +1007,33 @@ async def get_grade_status(school_id: str):
     status = []
 
     for grade in grades:
-        selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade)
-        selections = [doc.to_dict() for doc in selections_query.stream()]
+        class_key = grade.strip().lower().replace(" ", "_")
+        class_doc = _rhyme_collection_for_school(school_id).document(class_key).get()
+        class_data = class_doc.to_dict() or {}
+        selections = class_data.get("items", [])
 
         selected_count = len(selections)
+        selected_pages = 0.0
+
+        for selection in selections:
+            pages_value = selection.get("pages", 0)
+            try:
+                normalized_pages = float(pages_value)
+            except (TypeError, ValueError):
+                normalized_pages = 0.0
+
+            if normalized_pages <= 0:
+                normalized_pages = 1.0
+
+            selected_pages += normalized_pages
 
         status.append(
             {
                 "grade": grade,
                 "selected_count": selected_count,
                 "total_available": 25,  # Maximum 25 rhymes can be selected
+                "selected_pages": selected_pages,
+                "max_pages": MAX_RHYME_PAGES,
             }
         )
 
@@ -657,10 +1069,13 @@ async def get_all_schools_with_selections(
 
     school_ids = [doc.get("school_id") for doc in school_docs if doc.get("school_id")]
 
-    selection_docs = []
-    if school_ids:
-        selection_docs_query = db.collection("rhyme_selections").where("school_id", "in", school_ids)
-        selection_docs = [doc.to_dict() for doc in selection_docs_query.stream()]
+    selection_docs: List[Dict[str, Any]] = []
+    for school_id in school_ids:
+        for class_doc in _rhyme_collection_for_school(school_id).stream():
+            data = class_doc.to_dict() or {}
+            items = data.get("items", [])
+            if isinstance(items, list):
+                selection_docs.extend(items)
 
     selections_by_school: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     latest_selection_timestamp: Dict[str, datetime] = {}
@@ -1339,16 +1754,39 @@ async def download_rhyme_binder(school_id: str, grade: str):
     except PDFDependencyUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade)
-    selections = [doc.to_dict() for doc in selections_query.stream()]
+    all_rhyme_items = _get_all_rhyme_items(school_id)
+    selections = [
+        item for item in all_rhyme_items if item and item.get("grade") == grade and item.get("rhyme_code")
+    ]
 
     if not selections:
-        raise HTTPException(status_code=404, detail="No rhymes selected for this grade")
+        return Response(
+            content="Please select at least one rhyme page before downloading the binder.",
+            status_code=400,
+            media_type="text/plain",
+        )
+
+    total_pages = 0.0
+    for selection in selections:
+        try:
+            total_pages += float(selection.get("pages", 0))
+        except (TypeError, ValueError):
+            continue
+
+    if total_pages <= 0:
+        return Response(
+            content="Please select at least one rhyme page before downloading the binder.",
+            status_code=400,
+            media_type="text/plain",
+        )
 
     pages_map: Dict[int, List[Dict[str, Any]]] = {}
 
     for selection in selections:
-        page_index = int(selection.get("page_index", 0))
+        try:
+            page_index = int(selection.get("page_index", 0))
+        except (TypeError, ValueError):
+            page_index = 0
         pages_map.setdefault(page_index, []).append(selection)
 
     buffer = BytesIO()
@@ -1381,12 +1819,18 @@ async def download_rhyme_binder(school_id: str, grade: str):
             )
         )
 
-        full_page_entry = next(
-            (item for item in entries if float(item.get("pages", 1)) > 0.5), None
-        )
+        full_page_entry = None
+        for item in entries:
+            try:
+                if float(item.get("pages", 1)) > 0.5:
+                    full_page_entry = item
+                    break
+            except (TypeError, ValueError):
+                continue
 
         if full_page_entry:
-            svg_document = _get_svg_document(full_page_entry["rhyme_code"])
+            rhyme_code = full_page_entry.get("rhyme_code")
+            svg_document = _get_svg_document(rhyme_code) if rhyme_code else None
 
             if svg_document and _render_svg_on_canvas(
                 pdf_canvas,
@@ -1394,7 +1838,7 @@ async def download_rhyme_binder(school_id: str, grade: str):
                 svg_document,
                 page_width,
                 page_height,
-                rhyme_code=full_page_entry["rhyme_code"],
+                rhyme_code=rhyme_code,
             ):
                 pdf_canvas.showPage()
                 continue
@@ -1422,7 +1866,8 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
                 svg_rendered = False
 
-                svg_document = _get_svg_document(entry["rhyme_code"])
+                rhyme_code = entry.get("rhyme_code")
+                svg_document = _get_svg_document(rhyme_code) if rhyme_code else None
 
                 if svg_document:
                     svg_rendered = _render_svg_on_canvas(
@@ -1470,4 +1915,3 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-

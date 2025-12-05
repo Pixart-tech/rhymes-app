@@ -43,6 +43,7 @@ COVER_SVG_BASE_PATH = config.resolve_cover_svg_base_path()
 RHYMES_DATA = rhymes.RHYMES_DATA
 generate_rhyme_svg = rhymes.generate_rhyme_svg
 
+MAX_RHYME_PAGES = 44
 _sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
 _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
 _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
@@ -537,12 +538,27 @@ async def get_grade_status(school_id: str):
         ).to_list(None)
 
         selected_count = len(selections)
+        selected_pages = 0.0
+
+        for selection in selections:
+            pages_value = selection.get("pages", 0)
+            try:
+                normalized_pages = float(pages_value)
+            except (TypeError, ValueError):
+                normalized_pages = 0.0
+
+            if normalized_pages <= 0:
+                normalized_pages = 1.0
+
+            selected_pages += normalized_pages
 
         status.append(
             {
                 "grade": grade,
                 "selected_count": selected_count,
                 "total_available": 25,  # Maximum 25 rhymes can be selected
+                "selected_pages": selected_pages,
+                "max_pages": MAX_RHYME_PAGES,
             }
         )
 

@@ -1,4 +1,6 @@
 
+
+
 export type SchoolServiceType = 'id_cards' | 'report_cards' | 'certificates';
 
 export type ServiceStatus = 'yes' | 'no';
@@ -109,3 +111,94 @@ export interface QuestionnaireAnswers {
     selections: LanguageSelection[];
   };
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export interface BookOption {
+  typeId: string; // Unique internal ID for the option
+  label: string;
+  coreId?: string;
+  coreCover?: string;
+  coreSpine?: string;
+  defaultCoreCoverTitle?: string;
+  workId?: string;
+  workCover?: string;
+  workSpine?: string;
+  defaultWorkCoverTitle?: string;
+  addOnId?: string;
+  addOnCover?: string;
+  addOnSpine?: string;
+  defaultAddonCoverTitle?: string;
+  link?: string;
+  info?: string;
+  isRecommended: boolean;
+  jsonSubject?: string; // Override subject name for JSON output
+}
+
+export interface Subject {
+  name: string;
+  isMultiSelect?: boolean; // If true, allows multiple options to be selected
+  options: BookOption[];
+}
+
+export interface ClassData {
+  name: string;
+  subjects: Subject[];
+}
+
+export interface SelectionRecord {
+  className: string;
+  subjectName: string;
+  selectedOption: BookOption | null; // null implies skipped
+  skipCore?: boolean; // If true, the core book is not selected
+  skipWork?: boolean; // If true, the work book is not selected
+  skipAddon?: boolean; // If true, the add-on book is not selected
+  
+  // Custom Overrides
+  customCoreTitle?: string;
+  customCoreId?: string;
+  customCoreSpine?: string;
+
+  customWorkTitle?: string;
+  customWorkId?: string;
+  customWorkSpine?: string;
+
+  customAddonTitle?: string;
+  customAddonId?: string;
+  customAddonSpine?: string;
+}
+
+export interface FinalOutputItem {
+  class: string;
+  class_label?: string;
+  grade_subject?: string;
+  subject: string;
+  type: string;
+  core: string | undefined;
+  core_cover?: string | undefined;
+  core_cover_title?: string | undefined;
+  core_spine?: string | undefined;
+  work: string | undefined;
+  work_cover?: string | undefined;
+  work_cover_title?: string | undefined;
+  work_spine?: string | undefined;
+  addOn: string | undefined;
+  addon_cover?: string | undefined;
+  addon_cover_title?: string | undefined;
+  addon_spine?: string | undefined;
+}
+
+export type AssessmentVariant = 'WITH_MARKS' | 'WITHOUT_MARKS';

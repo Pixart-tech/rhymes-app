@@ -499,17 +499,27 @@ def load_rhyme_svg_markup(
 
     svg_path = resolve_rhyme_svg_path(base_path, rhyme_code)
 
-    if svg_path is not None:
+    candidate_path: Optional[Path] = None
+
+    if isinstance(svg_path, Path):
+        candidate_path = svg_path
+    elif isinstance(svg_path, Iterable):
+        for candidate in svg_path:
+            if isinstance(candidate, Path):
+                candidate_path = candidate
+                break
+
+    if candidate_path is not None:
         try:
-            svg_text = svg_path.read_text(encoding="utf-8")
+            svg_text = candidate_path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
+            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, candidate_path)
         except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
             logger.error(
-                "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc
+                "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, candidate_path, exc
             )
         else:
-            return SvgDocument(svg_text, svg_path)
+            return SvgDocument(svg_text, candidate_path)
 
     packaged = _read_packaged_rhyme(rhyme_code)
     if packaged is not None:
@@ -531,4 +541,3 @@ __all__ = [
     "sanitize_svg_for_svglib",
     "svg_requires_raster_backend",
 ]
-

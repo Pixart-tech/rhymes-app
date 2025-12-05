@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import HomePage from './pages/HomePage';
 import QuestionnairePage from './pages/QuestionnairePage';
@@ -8,6 +8,7 @@ import AdminUploadPage from './pages/AdminUploadPage';
 import PdfViewerPage from './pages/PdfViewerPage';
 import GridPage from './pages/GridPage';
 import { RhymesWorkflowApp } from './pages/Rhymepicker';
+import WizardApp, { ViewState as WizardViewState } from './pages/WizardApp';
 
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -25,6 +26,21 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
+const WIZARD_VIEW_STATES: readonly WizardViewState[] = ['LANDING', 'WIZARD', 'TITLES', 'SUMMARY', 'FINAL'];
+
+const resolveWizardViewState = (value?: string): WizardViewState => {
+  if (!value) {
+    return 'LANDING';
+  }
+  const normalized = value.toUpperCase();
+  return (WIZARD_VIEW_STATES as readonly string[]).includes(normalized) ? (normalized as WizardViewState) : 'LANDING';
+};
+
+const WizardRouteWithParam: React.FC = () => {
+  const { view } = useParams<{ view?: string }>();
+  return <WizardApp initialView={resolveWizardViewState(view)} />;
+};
+
 
 const App: React.FC = () => {
   return (
@@ -38,6 +54,22 @@ const App: React.FC = () => {
               <Route path="/sign-in" element={<Navigate to="/" replace />} />
               <Route path="/sign-up" element={<Navigate to="/" replace />} />
               <Route path='/Home' element={<HomePage/>}/>
+              <Route
+                path="/wizard"
+                element={
+                  <ProtectedRoute>
+                    <WizardApp />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/wizard/:view"
+                element={
+                  <ProtectedRoute>
+                    <WizardRouteWithParam />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/questionnaire"
                 element={

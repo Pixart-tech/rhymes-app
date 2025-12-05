@@ -1,26 +1,39 @@
 
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useMemo } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import type { SchoolProfile } from '../types/types';
+import { loadPersistedAppState } from '../lib/storage';
 
 interface HomePageProps {
   onBackToMode?: () => void;
   school?: SchoolProfile | null;
+  onStartBookSelection?: () => void;
 }
 
-const HomePage: React.FC<HomePageProps> = ({ onBackToMode, school }) => {
+const HomePage: React.FC<HomePageProps> = ({ onBackToMode, school, onStartBookSelection }) => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const persistedSchool = useMemo<SchoolProfile | null>(() => {
+    const persistedState = loadPersistedAppState() as { school?: SchoolProfile | null } | null;
+    return persistedState?.school ?? null;
+  }, []);
   const handleBackToMenu = () => {
     if (typeof onBackToMode === 'function') {
       onBackToMode();
     }
     navigate('/');
   };
-  const resolvedSchoolId = school?.school_id;
+  const handleStartBookSelection = () => {
+    if (typeof onStartBookSelection === 'function') {
+      console.log('Starting book selection via callback');
+      onStartBookSelection();
+    } else {
+      navigate('/wizard');
+    }
+  };
+  const resolvedSchoolId = school?.school_id ?? persistedSchool?.school_id ?? user?.schoolId ?? null;
 
   if (loading) {
     return <div className="text-center p-12">Loading...</div>;
@@ -37,21 +50,14 @@ const HomePage: React.FC<HomePageProps> = ({ onBackToMode, school }) => {
       {user ? (
         <div className="bg-white p-8 rounded-lg shadow-md border border-primary-200">
           <h2 className="text-2xl font-bold text-gray-800">Hello, {user.name}!</h2>
-          <p className="mt-2 text-gray-600">Your registered school ID is:</p>
-          {resolvedSchoolId ? (
-            <p className="text-4xl font-mono font-bold text-primary-600 my-4 tracking-widest bg-primary-50 p-3 rounded-md inline-block">
-              {resolvedSchoolId}
-            </p>
-          ) : (
-            <p className="text-gray-500 italic my-4">School ID will appear once the profile is completed.</p>
-          )}
-          <div className="mt-6">
-            <Link 
-              to="/questionnaire" 
-              className="bg-primary-600 text-white px-8 py-3 rounded-md font-semibold hover:bg-primary-700 transition-transform transform hover:scale-105"
+          <div className="mt-6 flex flex-col items-center gap-4">
+            <Button
+              type="button"
+              onClick={handleStartBookSelection}
+              className="w-full sm:w-auto bg-primary-600 text-white px-8 py-3 font-semibold hover:bg-primary-700 transition-transform hover:scale-105"
             >
-              Start Your Selection
-            </Link>
+              Start Book Selection
+            </Button>
           </div>
           
         </div>

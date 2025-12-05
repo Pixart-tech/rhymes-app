@@ -90,9 +90,14 @@ const GRADE_OPTIONS = [
   { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' }
 ];
 
+const MAX_RHYME_PAGES = 44;
+
 const createDefaultGradeNames = () =>
   GRADE_OPTIONS.reduce((acc, grade) => {
     acc[grade.id] = grade.name;
+    if (grade.id === 'playgroup') {
+      acc.pg = grade.name;
+    }
     return acc;
   }, {});
 
@@ -134,7 +139,46 @@ const buildCoverGradeNames = (source) =>
       acc[grade.id] = resolveDefaultGradeLabel(grade.id);
     }
     return acc;
-  }, {});
+  }, (source?.gradeNames?.pg ? { pg: source.gradeNames.pg } : {}));
+
+const buildGradeNamesFromSchool = (school?: SchoolProfile | null) => {
+  const base = createDefaultGradeNames();
+  const mapKey: Record<string, string> = {
+    toddler: 'playgroup',
+    playgroup: 'playgroup',
+    nursery: 'nursery',
+    lkg: 'lkg',
+    ukg: 'ukg'
+  };
+  const grades = school?.grades;
+  if (!grades) {
+    return base;
+  }
+  Object.entries(grades).forEach(([rawKey, value]) => {
+    const mapped = mapKey[rawKey.toLowerCase()] || rawKey.toLowerCase();
+    const label = typeof value?.label === 'string' ? value.label.trim() : '';
+    if (mapped && label) {
+      base[mapped] = label;
+      if (mapped === 'playgroup') {
+        base.pg = label;
+      }
+    }
+  });
+  if (!base.pg && base.playgroup) {
+    base.pg = base.playgroup;
+  }
+  return base;
+};
+
+const areGradeNamesEqual = (a: Record<string, string> = {}, b: Record<string, string> = {}) => {
+  const allKeys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of allKeys) {
+    if ((a[key] || '') !== (b[key] || '')) {
+      return false;
+    }
+  }
+  return true;
+};
 
 const ModeSelectionPage = ({
   school,
@@ -169,7 +213,7 @@ const ModeSelectionPage = ({
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
+    <div className="min-h-screen bg-slate-50 p-6">
       <div className="mx-auto flex max-w-5xl flex-col gap-8">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -221,38 +265,40 @@ const ModeSelectionPage = ({
 
         <Card className="border-0 bg-white/80 backdrop-blur-md shadow-xl">
           <CardHeader>
-            <CardTitle className="text-2xl font-semibold text-gray-800">Choose what you would like to work on</CardTitle>
-            <p className="text-gray-600">
+            <CardTitle className="text-xl sm:text-2xl font-semibold text-gray-800">
+              Choose what you would like to work on
+            </CardTitle>
+            <p className="text-sm sm:text-base text-gray-600">
               Select one of the workflows below to continue. You can always return to this menu to switch tasks.
             </p>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
               {options.map((option) => {
                 const IconComponent = option.icon;
                 return (
                   <Card
                     key={option.id}
-                    className="group cursor-pointer border border-transparent bg-white/70 transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-2xl"
+                    className="group aspect-square flex flex-col cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg border border-slate-200 bg-white"
                     onClick={() => onModeSelect(option.id)}
                   >
-                    <CardContent className="flex h-full flex-col gap-4 p-6">
-                      <div className={`w-16 h-16 rounded-2xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-2xl shadow-lg transition-transform duration-300 group-hover:scale-110`}>
-                        <IconComponent className="h-8 w-8" />
+                    <CardContent className="flex-1 flex flex-col justify-between p-4 text-center">
+                    <div className="space-y-2">
+                        <div className={`w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-lg sm:text-xl shadow`}>
+                          <IconComponent className="h-6 w-6 sm:h-7 sm:w-7" />
+                        </div>
+                        <h3 className="text-base sm:text-lg font-semibold text-gray-800 truncate">{option.title}</h3>
+                        <p className="text-sm text-gray-600 leading-relaxed line-clamp-2 overflow-hidden text-ellipsis">
+                          {option.description}
+                        </p>
                       </div>
-                      <div className="space-y-2">
-                        <h3 className="text-xl font-semibold text-gray-800">{option.title}</h3>
-                        <p className="text-sm text-gray-600 leading-relaxed">{option.description}</p>
-                      </div>
-                      <div className="mt-auto">
-                        <Button
-                          type="button"
-                          onClick={() => onModeSelect(option.id)}
-                          className="w-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:from-orange-500 hover:to-red-500"
-                        >
-                          Explore {option.title}
-                        </Button>
-                      </div>
+                      <Button
+                        type="button"
+                        onClick={() => onModeSelect(option.id)}
+                        className="w-full text-sm sm:text-base bg-gradient-to-r from-orange-400 to-red-400 text-white shadow hover:from-orange-500 hover:to-red-500"
+                      >
+                        Explore {option.title}
+                      </Button>
                     </CardContent>
                   </Card>
                 );
@@ -510,7 +556,7 @@ const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
+    <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-4xl mx-auto space-y-8">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between text-center md:text-left">
           <div>
@@ -711,12 +757,12 @@ const GradeSelectionPage = ({
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const [downloadingGradeId, setDownloadingGradeId] = useState(null);
-  const [bookSelectionCounts, setBookSelectionCounts] = useState({});
+  const [bookSelectionCounts, setBookSelectionCounts] = useState<Record<string, number>>({});
   const navigate = useNavigate();
   const isCoverMode = mode === 'cover';
   const isRhymeMode = mode === 'rhymes';
   const isBookMode = mode === 'books';
-  const downloadResetTimerRef = useRef(null);
+  const downloadResetTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const modeConfig = {
     rhymes: {
@@ -776,7 +822,23 @@ const GradeSelectionPage = ({
 
   const getGradeStatusInfo = (gradeId) => {
     const status = gradeStatus.find((s) => s.grade === gradeId);
-    return status ? `${status.selected_count} of 25` : '0 of 25';
+    const rawSelectedPages =
+      status?.selected_pages ??
+      status?.selected_page_count ??
+      status?.selected_count ??
+      0;
+    const rawMaxPages = status?.max_pages ?? MAX_RHYME_PAGES;
+    const selectedPages = Number.isFinite(Number(rawSelectedPages))
+      ? Number(rawSelectedPages)
+      : 0;
+    const maxPages = Number.isFinite(Number(rawMaxPages))
+      ? Number(rawMaxPages)
+      : MAX_RHYME_PAGES;
+
+    return {
+      selectedPages: Math.max(0, Math.min(selectedPages, maxPages)),
+      maxPages: Math.max(1, maxPages)
+    };
   };
 
   useEffect(
@@ -790,7 +852,7 @@ const GradeSelectionPage = ({
   );
 
   const handleDownloadBinder = useCallback(
-    (gradeId, event) => {
+    async (gradeId, event) => {
       event?.stopPropagation();
       event?.preventDefault();
 
@@ -808,13 +870,36 @@ const GradeSelectionPage = ({
       try {
         setDownloadingGradeId(gradeId);
 
+        const response = await axios.get(downloadUrl, {
+          responseType: 'blob',
+          validateStatus: () => true
+        });
+
+        if (response.status >= 400) {
+          let message = 'Please select at least one rhyme page before downloading the binder.';
+          try {
+            if (response.data instanceof Blob) {
+              message = (await response.data.text()) || message;
+            } else if (typeof response.data === 'string') {
+              message = response.data || message;
+            }
+          } catch (error) {
+            // swallow parse error and keep default message
+          }
+          toast.error(message);
+          return;
+        }
+
+        const blob = response.data;
+        const href = URL.createObjectURL(blob);
         const anchor = document.createElement('a');
-        anchor.href = downloadUrl;
+        anchor.href = href;
         anchor.setAttribute('download', `${gradeId}-rhyme-binder.pdf`);
         anchor.style.display = 'none';
         document.body.appendChild(anchor);
         anchor.click();
         document.body.removeChild(anchor);
+        URL.revokeObjectURL(href);
 
         toast.success('Binder download started');
       } catch (error) {
@@ -879,7 +964,7 @@ const GradeSelectionPage = ({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-600">Loading grade information...</p>
@@ -890,7 +975,7 @@ const GradeSelectionPage = ({
 
   return (
     <>
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
+      <div className="min-h-screen bg-slate-50 p-6">
         <div className="max-w-4xl mx-auto">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8 text-center md:text-left">
             <div>
@@ -916,8 +1001,8 @@ const GradeSelectionPage = ({
           </div>
 
           <div className="mb-8 space-y-2 text-center md:text-left">
-            <h2 className="text-2xl font-semibold text-gray-800">{currentMode.title}</h2>
-            <p className="text-gray-600">{currentMode.subtitle}</p>
+            <h2 className="text-xl sm:text-2xl font-semibold text-gray-800">{currentMode.title}</h2>
+            <p className="text-sm sm:text-base text-gray-600">{currentMode.subtitle}</p>
           </div>
 
           {isCoverMode && (
@@ -1010,63 +1095,60 @@ const GradeSelectionPage = ({
             </Card>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
             {GRADE_OPTIONS.map((grade) => {
-              const resolvedGradeName = isCoverMode
-                ? gradeNameOverrides[grade.id] || grade.name
-                : grade.name;
+              const resolvedGradeName = gradeNameOverrides[grade.id] || grade.name;
+              const { selectedPages, maxPages } = getGradeStatusInfo(grade.id);
+              const formattedSelectedPages = Number.isInteger(selectedPages)
+                ? selectedPages
+                : selectedPages.toFixed(1);
+              const formattedMaxPages = Number.isInteger(maxPages)
+                ? maxPages
+                : maxPages.toFixed(1);
 
               return (
                 <Card
                   key={grade.id}
-                  className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl border-0 bg-white/80 backdrop-blur-sm"
+                  className="group aspect-square flex flex-col cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg border border-slate-200 bg-white"
                   onClick={() => handleGradeCardSelect(grade.id)}
                 >
-                  <CardContent className="p-6 text-center space-y-4">
-                    <div className={`w-16 h-16 bg-gradient-to-r ${grade.color} rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                      <span className="text-2xl">{grade.icon}</span>
-                    </div>
-                    <h3 className="text-xl font-bold text-gray-800 mb-2">{resolvedGradeName}</h3>
-                    {isCoverMode ? (
+                  <CardContent className="flex-1 flex flex-col justify-between p-4 text-center">
+                    <div className="space-y-1">
+                      <h3 className="text-base sm:text-lg font-bold text-gray-800">{resolvedGradeName}</h3>
+                      {!isBookMode ? (
+                        <span className="inline-block rounded-full bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1">
+                          {formattedSelectedPages} / {formattedMaxPages} pages
+                        </span>
+                      ) : (
+                        <span className="inline-block rounded-full bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1">
+                          {(bookSelectionCounts[grade.id] ?? 0)} book{(bookSelectionCounts[grade.id] ?? 0) === 1 ? '' : 's'}
+                        </span>
+                      )}
                       <p className="text-sm text-gray-600">
-                        Start crafting personalised cover pages for {resolvedGradeName}.
+                        {isCoverMode
+                          ? `Start cover setup for ${resolvedGradeName}.`
+                          : isBookMode
+                          ? `Curate books for ${resolvedGradeName}.`
+                          : `Manage rhymes for ${resolvedGradeName}.`}
                       </p>
-                    ) : isBookMode ? (
-                      <div className="space-y-3">
-                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm font-medium text-gray-800">
-                          {(bookSelectionCounts[grade.id] ?? 0)} book{(bookSelectionCounts[grade.id] ?? 0) === 1 ? '' : 's'} planned
-                        </div>
-                        <p className="text-sm text-gray-600">
-                          Curate engaging reading experiences for {resolvedGradeName}.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm font-medium text-gray-800">
-                          {getGradeStatusInfo(grade.id)} Rhymes Selected
-                        </div>
-                        <Button
-                          variant="outline"
-                          type="button"
-                          onClick={(event) => handleDownloadBinder(grade.id, event)}
-                          onMouseDown={(event) => event.stopPropagation()}
-                          onTouchStart={(event) => event.stopPropagation()}
-                          disabled={downloadingGradeId === grade.id}
-                          className="w-full flex items-center justify-center gap-2 border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white/90"
-                        >
-                          {downloadingGradeId === grade.id ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              Preparing...
-                            </>
-                          ) : (
-                            <>
-                              <Download className="w-4 h-4" />
-                              Download Binder
-                            </>
-                          )}
-                        </Button>
-                      </div>
+                    </div>
+                    {!isCoverMode && (
+                      <Button
+                        variant="outline"
+                        type="button"
+                        onClick={(event) => handleDownloadBinder(grade.id, event)}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onTouchStart={(event) => event.stopPropagation()}
+                        disabled={downloadingGradeId === grade.id}
+                        className="w-full flex items-center justify-center border-orange-300 text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-white text-sm mx-auto h-10"
+                        aria-label="Download binder"
+                      >
+                        {downloadingGradeId === grade.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
+                      </Button>
                     )}
                   </CardContent>
                 </Card>
@@ -1078,7 +1160,7 @@ const GradeSelectionPage = ({
     </>
   );
 };
-const FeaturePlaceholderPage = ({ school, mode, grade, onBackToGrades, onBackToMode, onLogout }) => {
+const FeaturePlaceholderPage = ({ school, mode, grade, onBackToGrades, onBackToMode, onLogout }: { school: SchoolProfile; mode: string; grade: string; onBackToGrades: () => void; onBackToMode: () => void; onLogout: () => void }) => {
   const navigate = useNavigate();
 
   const placeholderConfig = {
@@ -1119,7 +1201,7 @@ const FeaturePlaceholderPage = ({ school, mode, grade, onBackToGrades, onBackToM
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 p-6">
+    <div className="min-h-screen bg-slate-50 p-6">
       <div className="mx-auto flex max-w-3xl flex-col gap-8">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between text-center md:text-left">
           <div>
@@ -1141,7 +1223,7 @@ const FeaturePlaceholderPage = ({ school, mode, grade, onBackToGrades, onBackToM
 
         <Card className="border-0 bg-white/85 backdrop-blur shadow-xl">
           <CardHeader className="flex flex-col items-center text-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-red-400 text-white shadow-lg">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-lg">
               <Clock className="h-8 w-8" />
             </div>
             <div>
@@ -1191,32 +1273,88 @@ type TreeMenuProps = {
   onToggleReusable: () => void;
   onRhymeSelect: (rhyme: TreeMenuRhyme) => void;
   hideFullPageRhymes?: boolean;
+  selectedRhymeCodes?: Set<string> | string[];
 };
 
 // Display available or reusable rhymes grouped by number of pages
 const TreeMenu: React.FC<TreeMenuProps> = ({
-  rhymesData,
-  onRhymeSelect,
-  showReusable,
-  reusableRhymes,
-  onToggleReusable,
-  hideFullPageRhymes
-}) => {
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+    rhymesData,
+    onRhymeSelect,
+    showReusable,
+    reusableRhymes,
+    onToggleReusable,
+    hideFullPageRhymes,
+    selectedRhymeCodes
+  }) => {
+    const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  
+    const toggleGroup = (pageKey: string) => {
+      setExpandedGroups((prev) => ({
+        ...prev,
+        [pageKey]: !prev[pageKey]
+      }));
+    };
 
-  const toggleGroup = (pageKey: string) => {
-    setExpandedGroups((prev) => ({
-      ...prev,
-      [pageKey]: !prev[pageKey]
-    }));
-  };
+    const normalizedSelectedCodes = useMemo(() => {
+      if (!selectedRhymeCodes) {
+        return null;
+      }
 
-  const currentRhymes = showReusable ? reusableRhymes : rhymesData;
+      const mapCode = (code: unknown) => {
+        if (typeof code !== 'string') {
+          return '';
+        }
+        return code.trim().toLowerCase();
+      };
 
-  const filteredRhymes = hideFullPageRhymes
-    ? Object.fromEntries(
-        Object.entries(currentRhymes || {}).filter(([pageKey]) => parseFloat(pageKey) !== 1.0)
-      )
+      if (selectedRhymeCodes instanceof Set) {
+        const entries = Array.from(selectedRhymeCodes)
+          .map(mapCode)
+          .filter((code) => code.length > 0);
+        return new Set(entries);
+      }
+
+      if (Array.isArray(selectedRhymeCodes)) {
+        const entries = selectedRhymeCodes
+          .map(mapCode)
+          .filter((code) => code.length > 0);
+        return new Set(entries);
+      }
+
+      return null;
+    }, [selectedRhymeCodes]);
+
+    const currentRhymes = useMemo(() => {
+      const sourceGroups = showReusable ? reusableRhymes : rhymesData;
+      if (!sourceGroups) {
+        return {};
+      }
+
+      if (!normalizedSelectedCodes || normalizedSelectedCodes.size === 0) {
+        return sourceGroups;
+      }
+
+      return Object.entries(sourceGroups).reduce((acc, [pageKey, rhymes]) => {
+        const filteredList = rhymes.filter((rhyme) => {
+          const code = typeof rhyme?.code === 'string' ? rhyme.code.trim().toLowerCase() : '';
+          if (!code) {
+            return true;
+          }
+          return !normalizedSelectedCodes.has(code);
+        });
+
+        if (filteredList.length > 0) {
+          acc[pageKey] = filteredList;
+        }
+
+        return acc;
+      }, {} as TreeMenuGroups);
+    }, [showReusable, reusableRhymes, rhymesData, normalizedSelectedCodes]);
+  
+    const filteredRhymes = hideFullPageRhymes
+      ? Object.fromEntries(
+          Object.entries(currentRhymes || {}).filter(([pageKey]) => parseFloat(pageKey) !== 1.0)
+        )
     : currentRhymes || {};
 
   if (!filteredRhymes || Object.keys(filteredRhymes).length === 0) {
@@ -1320,7 +1458,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const selectedRhymesRef = useRef([]);
   const pageFetchPromisesRef = useRef(new Map());
 
-  const MAX_PAGES_PER_GRADE = 44;
+  const MAX_PAGES_PER_GRADE = MAX_RHYME_PAGES;
 
   useEffect(() => {
     selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
@@ -2114,6 +2252,20 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const pageUsage = useMemo(() => computePageUsage(selectedRhymes), [selectedRhymes]);
+  const selectedRhymeCodes = useMemo(() => {
+    const codes = new Set<string>();
+    if (Array.isArray(selectedRhymes)) {
+      selectedRhymes.forEach((selection) => {
+        if (selection?.code && typeof selection.code === 'string') {
+          const normalized = selection.code.trim().toLowerCase();
+          if (normalized) {
+            codes.add(normalized);
+          }
+        }
+      });
+    }
+    return codes;
+  }, [selectedRhymes]);
   const nextPageInfo = useMemo(() => computeNextAvailablePageInfoFromUsage(pageUsage), [pageUsage]);
   const nextAvailablePageIndex = nextPageInfo.index;
   const hasNextPageCapacity = nextPageInfo.hasCapacity;
@@ -2212,7 +2364,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-600">Loading rhyme data...</p>
@@ -2254,7 +2406,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const gradeDisplayName = (customGradeName && customGradeName.trim()) || grade;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50">
+    <div className="min-h-screen bg-slate-50">
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-6 sm:px-6">
         {/* Header */}
         <div className="mb-6 flex flex-shrink-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -2469,14 +2621,15 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                   </Button>
                 </div>
                 <div className="flex-1 min-h-0 overflow-hidden px-2 pb-4 sm:px-4">
-                  <TreeMenu
-                    rhymesData={availableRhymes}
-                    reusableRhymes={reusableRhymes}
-                    showReusable={showReusable}
-                    onRhymeSelect={handleRhymeSelect}
-                    onToggleReusable={handleToggleReusable}
-                    hideFullPageRhymes={currentPosition === 'bottom'}
-                  />
+                    <TreeMenu
+                      rhymesData={availableRhymes}
+                      reusableRhymes={reusableRhymes}
+                      showReusable={showReusable}
+                      onRhymeSelect={handleRhymeSelect}
+                      onToggleReusable={handleToggleReusable}
+                      hideFullPageRhymes={currentPosition === 'bottom'}
+                      selectedRhymeCodes={selectedRhymeCodes}
+                    />
                 </div>
               </div>
               <button
@@ -2521,6 +2674,7 @@ export function RhymesWorkflowApp() {
 
   const persistedState = persistedStateRef.current || {};
 
+  const navigate = useNavigate();
   const [workspaceUser, setWorkspaceUser] = useState<WorkspaceUserProfile | null>(
     () => persistedState.workspaceUser ?? null
   );
@@ -2528,7 +2682,10 @@ export function RhymesWorkflowApp() {
   const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
   const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
   const [coverDefaults, setCoverDefaults] = useState(() =>
-    mergeCoverDefaults(persistedState.coverDefaults || {})
+    mergeCoverDefaults({
+      ...(persistedState.coverDefaults || {}),
+      gradeNames: buildGradeNamesFromSchool(persistedState.school)
+    })
   );
   const [isCoverDetailsStepComplete, setIsCoverDetailsStepComplete] = useState(
     () => Boolean(persistedState.isCoverDetailsStepComplete)
@@ -2552,6 +2709,32 @@ export function RhymesWorkflowApp() {
       setIsCoverDetailsStepComplete(false);
     }
   }, [authLoading, user]);
+
+  useEffect(() => {
+    if (!school) {
+      return;
+    }
+
+    const updatedGradeNames = buildGradeNamesFromSchool(school);
+    setCoverDefaults((prev) => {
+      if (areGradeNamesEqual(prev?.gradeNames || {}, updatedGradeNames)) {
+        return prev;
+      }
+      return mergeCoverDefaults({
+        ...prev,
+        gradeNames: updatedGradeNames
+      });
+    });
+
+    if (typeof window !== 'undefined') {
+      if (school.school_id) {
+        window.localStorage.setItem('bookSelectionSchoolId', school.school_id);
+      }
+      if (school.school_name) {
+        window.localStorage.setItem('bookSelectionSchoolName', school.school_name);
+      }
+    }
+  }, [school]);
 
   useEffect(() => {
     if (!school) {
@@ -2629,6 +2812,9 @@ export function RhymesWorkflowApp() {
       acc[grade.id] = trimmed || resolveDefaultGradeLabel(grade.id);
       return acc;
     }, {});
+    if (sanitizedGradeNames.playgroup) {
+      sanitizedGradeNames.pg = sanitizedGradeNames.playgroup;
+    }
 
     setCoverDefaults(
       mergeCoverDefaults({
@@ -2660,7 +2846,7 @@ export function RhymesWorkflowApp() {
         return '';
       }
 
-      const stored = coverDefaults?.gradeNames?.[gradeId];
+      const stored = coverDefaults?.gradeNames?.[gradeId] || (gradeId === 'playgroup' ? coverDefaults?.gradeNames?.pg : undefined);
       if (typeof stored === 'string' && stored.trim().length > 0) {
         return stored.trim();
       }
@@ -2679,7 +2865,11 @@ export function RhymesWorkflowApp() {
     setSchool(nextSchool);
     setSelectedMode(null);
     setSelectedGrade(null);
-    setCoverDefaults(mergeCoverDefaults());
+    setCoverDefaults(
+      mergeCoverDefaults({
+        gradeNames: buildGradeNamesFromSchool(nextSchool)
+      })
+    );
     setIsCoverDetailsStepComplete(false);
     setIsEditingSchoolProfile(false);
   };
@@ -2820,22 +3010,21 @@ export function RhymesWorkflowApp() {
           coverDefaults={coverDefaults}
         />
       ) : selectedMode === 'books' ? (
-        // <BookWorkflow
-        //   school={school}
-        //   grade={selectedGrade}
-        //   customGradeName={resolveStoredGradeName(selectedGrade)}
-        //   onBackToGrades={handleBackToGrades}
-        //   onBackToMode={handleBackToModeSelection}
-        //   onLogout={handleLogout}
-        // />
         <HomePage
           school={school}
           onBackToMode={handleBackToModeSelection}
+          onStartBookSelection={() => {
+            if (typeof window !== 'undefined') {
+              if (school?.school_id) {
+                window.localStorage.setItem('bookSelectionSchoolId', school.school_id);
+              }
+              if (school?.school_name) {
+                window.localStorage.setItem('bookSelectionSchoolName', school.school_name);
+              }
+            }
+            navigate('/wizard');
+          }}
         />
-        // <Header
-        // onBackToMode={handleBackToModeSelection}
-        
-        // />
       ) : (
         <FeaturePlaceholderPage
           school={school}
@@ -2851,4 +3040,3 @@ export function RhymesWorkflowApp() {
 }
 
 export default RhymeSelectionPage;
-
