@@ -35,6 +35,8 @@ export interface SchoolProfile {
   grades?: GradeMap;
   service_type?: SchoolServiceType[];
   status?: BranchStatus;
+  selection_status?: 'pending' | 'approved' | 'rejected';
+  selections_approved?: boolean;
   id_card_fields?: string[];
   created_by_user_id?: string | null;
   created_by_email?: string | null;
