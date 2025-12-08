@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
@@ -128,6 +128,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [logoMap, setLogoMap] = useState<Record<string, string>>({});
   const [adminSearch, setAdminSearch] = useState('');
   const [serviceFilter, setServiceFilter] = useState<AdminServiceFilter>('all');
+  const workspaceFetchInFlight = useRef(false);
+  const lastFetchedWorkspaceUserId = useRef<string | null>(null);
   const allSchoolsForLogos = useMemo(() => {
     const deduped: Record<string, SchoolProfile> = {};
     [...schools, ...adminSchools].forEach((school) => {
@@ -178,10 +180,21 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     return null;
   }, []);
 
-  const fetchWorkspace = useCallback(async () => {
+  const fetchWorkspace = useCallback(async (options?: { force?: boolean }) => {
     if (!user) {
       return;
     }
+
+    if (workspaceFetchInFlight.current) {
+      return;
+    }
+
+    const currentUserId = user.uid;
+    if (!options?.force && lastFetchedWorkspaceUserId.current === currentUserId) {
+      return;
+    }
+
+    workspaceFetchInFlight.current = true;
     setWorkspaceLoading(true);
     setWorkspaceError(null);
 
@@ -199,12 +212,15 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       setSchools(response.data.schools);
       const shouldStartInCreate = nextUser.role !== 'super-admin' && response.data.schools.length === 0;
       setView(shouldStartInCreate ? 'create' : 'list');
+      lastFetchedWorkspaceUserId.current = currentUserId;
     } catch (error) {
       console.error('Failed to load workspace', error);
       setWorkspaceError('Unable to load your workspace. Please try again.');
       toast.error('Unable to load your workspace. Please try again.');
+      lastFetchedWorkspaceUserId.current = null;
     } finally {
       setWorkspaceLoading(false);
+      workspaceFetchInFlight.current = false;
     }
   }, [user, getIdToken]);
 
@@ -214,6 +230,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       setSchools([]);
       setView('list');
       setEditingSchool(null);
+      lastFetchedWorkspaceUserId.current = null;
       return;
     }
     void fetchWorkspace();
