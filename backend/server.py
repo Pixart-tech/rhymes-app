@@ -900,7 +900,23 @@ def get_book_selections(school_id: str, authorization: Optional[str] = Header(No
     """Return saved book selections grouped per class for a school."""
     _verify_and_decode_token(authorization)
 
-    class_docs = _book_collection_for_school(school_id).stream()
+    # Fetch only the fields we need to avoid transferring large documents and
+    # speed up the initial response for clients.
+    class_docs = list(
+        _book_collection_for_school(school_id)
+        .select(
+            [
+                "class",
+                "items",
+                "excluded_assessments",
+                "updated_at",
+                "source",
+                "updated_by",
+                "updated_by_email",
+            ]
+        )
+        .stream()
+    )
     classes: List[Dict[str, Any]] = []
     for doc in class_docs:
         data = doc.to_dict() or {}
