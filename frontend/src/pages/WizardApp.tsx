@@ -60,6 +60,16 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     return merged;
   };
   const persistedState = loadPersistedAppState() || {};
+  const resolveApprovalStatus = (school?: { selection_status?: string; selections_approved?: boolean } | null) => {
+    if (!school) {
+      return false;
+    }
+    if (school.selections_approved === true) {
+      return true;
+    }
+    const statusValue = (school.selection_status || '').toString().toLowerCase();
+    return statusValue === 'approved';
+  };
   const persistedWorkspaceRole = persistedState?.workspaceUser?.role;
   const isPersistedAdmin = persistedWorkspaceRole === 'super-admin';
   const initialGradeNames = deriveGradeLabelsFromSchool(persistedState?.school?.grades);
@@ -75,7 +85,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const [viewingInfoForOption, setViewingInfoForOption] = useState<string | null>(null);
   const [skipWorkMap, setSkipWorkMap] = useState<Record<string, boolean>>({});
   const [bookSelectionSchoolId, setBookSelectionSchoolId] = useState<string | null>(null);
-  const [isFinalized, setIsFinalized] = useState(false);
+  const [isFinalized, setIsFinalized] = useState(resolveApprovalStatus(persistedState?.school));
   const [completedClasses, setCompletedClasses] = useState<Set<string>>(() => {
     if (typeof window === 'undefined') {
       return new Set<string>();
@@ -372,7 +382,6 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     if (!saved) {
       return;
     }
-    setIsFinalized(true);
     const allClasses = new Set(completedClasses);
     selections.forEach((s) => allClasses.add(s.className));
     setCompletedClasses(allClasses);
@@ -566,10 +575,17 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       }
     });
 
+      const serverApproved = Array.isArray(classes)
+        ? classes.some((entry: any) => {
+            const statusValue = (entry?.selection_status || entry?.status || '').toString().toLowerCase();
+            return entry?.approved === true || statusValue === 'approved';
+          })
+        : false;
+
       setSelections(nextSelections);
       setExcludedAssessments(Array.from(nextExcluded));
       setCompletedClasses(nextCompleted);
-      setIsFinalized(true);
+      setIsFinalized(resolveApprovalStatus(persistedState?.school) || serverApproved);
       persistCompletedClasses(nextCompleted);
     } catch (error) {
       console.warn('Unable to fetch saved book selections', error);
@@ -831,6 +847,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       />
 
       <main className="flex-1 max-w-6xl mx-auto w-full p-4">
+        {!isAdmin && isFinalized && (
+          <div className="mb-6">
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg shadow-sm text-sm">
+              Book selections are approved and locked. Further changes are disabled. Please contact an admin for any updates.
+            </div>
+          </div>
+        )}
         <div className="text-center mt-6 mb-10">
             <h2 className="text-4xl font-extrabold">Customise your Curriculum</h2>
             <p className="text-slate-600 mt-2">Select book sets for each grade level.</p>
