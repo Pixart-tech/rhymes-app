@@ -34,6 +34,7 @@ import {
   loadPersistedAppState,
   savePersistedAppState,
   clearCoverWorkflowState,
+  loadCoverWorkflowState,
   clearBookWorkflowState,
   loadBookWorkflowState
 } from '../lib/storage';
@@ -752,12 +753,14 @@ const GradeSelectionPage = ({
   onLogout,
   onBackToMode,
   coverDefaults,
-  onEditCoverDetails
+  onEditCoverDetails,
+  onCoverIntentChange
 }) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const [downloadingGradeId, setDownloadingGradeId] = useState(null);
   const [bookSelectionCounts, setBookSelectionCounts] = useState<Record<string, number>>({});
+  const [coverSelections, setCoverSelections] = useState<Record<string, any>>({});
   const navigate = useNavigate();
   const isCoverMode = mode === 'cover';
   const isRhymeMode = mode === 'rhymes';
@@ -807,6 +810,22 @@ const GradeSelectionPage = ({
     });
     setBookSelectionCounts(counts);
   }, [isBookMode, school?.school_id]);
+
+  useEffect(() => {
+    if (!isCoverMode || !school?.school_id) {
+      setCoverSelections({});
+      return;
+    }
+
+    const nextSelections: Record<string, any> = {};
+    GRADE_OPTIONS.forEach((gradeOption) => {
+      const storedState = loadCoverWorkflowState(school.school_id, gradeOption.id);
+      if (storedState) {
+        nextSelections[gradeOption.id] = storedState;
+      }
+    });
+    setCoverSelections(nextSelections);
+  }, [isCoverMode, school?.school_id]);
 
   const fetchGradeStatus = async () => {
     try {
@@ -937,9 +956,12 @@ const GradeSelectionPage = ({
 
   const handleGradeCardSelect = useCallback(
     (gradeId) => {
+      if (isCoverMode && typeof onCoverIntentChange === 'function') {
+        onCoverIntentChange('edit');
+      }
       onGradeSelect(gradeId, mode);
     },
-    [mode, onGradeSelect]
+    [isCoverMode, mode, onCoverIntentChange, onGradeSelect]
   );
 
   const handleEditDetailsClick = useCallback(() => {
@@ -1105,6 +1127,10 @@ const GradeSelectionPage = ({
               const formattedMaxPages = Number.isInteger(maxPages)
                 ? maxPages
                 : maxPages.toFixed(1);
+              const coverState = coverSelections[grade.id];
+              const isCoverFinished = coverState?.status === 'finished';
+              const coverThemeLabel = coverState?.selectedThemeLabel || coverState?.selectedThemeId;
+              const coverColourLabel = coverState?.selectedColourLabel || coverState?.selectedColourId;
 
               return (
                 <Card
@@ -1115,22 +1141,41 @@ const GradeSelectionPage = ({
                   <CardContent className="flex-1 flex flex-col justify-between p-4 text-center">
                     <div className="space-y-1">
                       <h3 className="text-base sm:text-lg font-bold text-gray-800">{resolvedGradeName}</h3>
-                      {!isBookMode ? (
-                        <span className="inline-block rounded-full bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1">
-                          {formattedSelectedPages} / {formattedMaxPages} pages
-                        </span>
+                      {isCoverMode ? (
+                        <div className="space-y-1">
+                          <span
+                            className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
+                              isCoverFinished
+                                ? 'bg-green-50 text-green-700 border border-green-200'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {isCoverFinished ? 'Finished' : 'In progress'}
+                          </span>
+                          <p className="text-sm text-gray-600">
+                            {isCoverFinished
+                              ? `Theme: ${coverThemeLabel || 'Pending'} · Colour: ${coverColourLabel || 'Pending'}`
+                              : `Start cover setup for ${resolvedGradeName}.`}
+                          </p>
+                        </div>
                       ) : (
-                        <span className="inline-block rounded-full bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1">
-                          {(bookSelectionCounts[grade.id] ?? 0)} book{(bookSelectionCounts[grade.id] ?? 0) === 1 ? '' : 's'}
-                        </span>
+                        <>
+                          {!isBookMode ? (
+                            <span className="inline-block rounded-full bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1">
+                              {formattedSelectedPages} / {formattedMaxPages} pages
+                            </span>
+                          ) : (
+                            <span className="inline-block rounded-full bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1">
+                              {(bookSelectionCounts[grade.id] ?? 0)} book{(bookSelectionCounts[grade.id] ?? 0) === 1 ? '' : 's'}
+                            </span>
+                          )}
+                          <p className="text-sm text-gray-600">
+                            {isBookMode
+                              ? `Curate books for ${resolvedGradeName}.`
+                              : `Manage rhymes for ${resolvedGradeName}.`}
+                          </p>
+                        </>
                       )}
-                      <p className="text-sm text-gray-600">
-                        {isCoverMode
-                          ? `Start cover setup for ${resolvedGradeName}.`
-                          : isBookMode
-                          ? `Curate books for ${resolvedGradeName}.`
-                          : `Manage rhymes for ${resolvedGradeName}.`}
-                      </p>
                     </div>
                     {!isCoverMode && (
                       <Button
@@ -1149,6 +1194,34 @@ const GradeSelectionPage = ({
                           <Download className="w-4 h-4" />
                         )}
                       </Button>
+                    )}
+                    {isCoverMode && (
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleGradeCardSelect(grade.id);
+                          }}
+                        >
+                          {isCoverFinished ? 'Edit selection' : 'Start selection'}
+                        </Button>
+                        {isCoverFinished && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (typeof onCoverIntentChange === 'function') {
+                                onCoverIntentChange('view');
+                              }
+                              onGradeSelect(grade.id, mode);
+                            }}
+                          >
+                            View selection
+                          </Button>
+                        )}
+                      </div>
                     )}
                   </CardContent>
                 </Card>
@@ -2681,14 +2754,12 @@ export function RhymesWorkflowApp() {
   const [school, setSchool] = useState<SchoolProfile | null>(() => persistedState.school ?? null);
   const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
   const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
+  const [coverWorkflowIntent, setCoverWorkflowIntent] = useState<'edit' | 'view'>('edit');
   const [coverDefaults, setCoverDefaults] = useState(() =>
     mergeCoverDefaults({
       ...(persistedState.coverDefaults || {}),
       gradeNames: buildGradeNamesFromSchool(persistedState.school)
     })
-  );
-  const [isCoverDetailsStepComplete, setIsCoverDetailsStepComplete] = useState(
-    () => Boolean(persistedState.isCoverDetailsStepComplete)
   );
   const { user, loading: authLoading, signOut: authSignOut, getIdToken } = useAuth();
   const [isEditingSchoolProfile, setIsEditingSchoolProfile] = useState(false);
@@ -2706,7 +2777,6 @@ export function RhymesWorkflowApp() {
       setSelectedMode(null);
       setSelectedGrade(null);
       setCoverDefaults(mergeCoverDefaults());
-      setIsCoverDetailsStepComplete(false);
     }
   }, [authLoading, user]);
 
@@ -2748,9 +2818,8 @@ export function RhymesWorkflowApp() {
       selectedMode,
       selectedGrade,
       coverDefaults,
-      isCoverDetailsStepComplete
     });
-  }, [workspaceUser, school, selectedMode, selectedGrade, coverDefaults, isCoverDetailsStepComplete]);
+  }, [workspaceUser, school, selectedMode, selectedGrade, coverDefaults]);
 
   useEffect(() => {
     if (!school) {
@@ -2805,41 +2874,6 @@ export function RhymesWorkflowApp() {
   const isSuperAdminUser = workspaceUser?.role === 'super-admin';
   const schoolFormInitialValues = useMemo(() => buildSchoolFormValuesFromProfile(school), [school]);
 
-  const handleCoverDetailsSave = useCallback((details) => {
-    const sanitizedGradeNames = GRADE_OPTIONS.reduce((acc, grade) => {
-      const rawValue = details?.gradeNames?.[grade.id];
-      const trimmed = typeof rawValue === 'string' ? rawValue.trim() : '';
-      acc[grade.id] = trimmed || resolveDefaultGradeLabel(grade.id);
-      return acc;
-    }, {});
-    if (sanitizedGradeNames.playgroup) {
-      sanitizedGradeNames.pg = sanitizedGradeNames.playgroup;
-    }
-
-    setCoverDefaults(
-      mergeCoverDefaults({
-        schoolLogo: details?.schoolLogo || '',
-        schoolLogoFileName: details?.schoolLogoFileName || '',
-        contactNumber: details?.contactNumber || '',
-        website: details?.website || '',
-        email: details?.email || '',
-        addressLine1: details?.addressLine1 || '',
-        addressLine2: details?.addressLine2 || '',
-        addressLine3: details?.addressLine3 || '',
-        tagLine1: details?.tagLine1 || '',
-        tagLine2: details?.tagLine2 || '',
-        tagLine3: details?.tagLine3 || '',
-        gradeNames: sanitizedGradeNames
-      })
-    );
-    setIsCoverDetailsStepComplete(true);
-  }, []);
-
-  const handleEditCoverDetails = useCallback(() => {
-    setSelectedGrade(null);
-    setIsCoverDetailsStepComplete(false);
-  }, []);
-
   const resolveStoredGradeName = useCallback(
     (gradeId) => {
       if (!gradeId) {
@@ -2870,7 +2904,6 @@ export function RhymesWorkflowApp() {
         gradeNames: buildGradeNamesFromSchool(nextSchool)
       })
     );
-    setIsCoverDetailsStepComplete(false);
     setIsEditingSchoolProfile(false);
   };
 
@@ -2878,7 +2911,7 @@ export function RhymesWorkflowApp() {
     setSelectedMode(mode);
     setSelectedGrade(null);
     if (mode === 'cover') {
-      setIsCoverDetailsStepComplete(false);
+      setCoverWorkflowIntent('edit');
     }
   };
 
@@ -2891,12 +2924,13 @@ export function RhymesWorkflowApp() {
 
   const handleBackToGrades = () => {
     setSelectedGrade(null);
+    setCoverWorkflowIntent('edit');
   };
 
   const handleBackToModeSelection = () => {
     setSelectedGrade(null);
     setSelectedMode(null);
-    setIsCoverDetailsStepComplete(false);
+    setCoverWorkflowIntent('edit');
   };
 
   const handleLogout = () => {
@@ -2908,9 +2942,9 @@ export function RhymesWorkflowApp() {
     setWorkspaceUser(null);
     setSelectedGrade(null);
     setSelectedMode(null);
+    setCoverWorkflowIntent('edit');
     setSchool(null);
     setCoverDefaults(mergeCoverDefaults());
-    setIsCoverDetailsStepComplete(false);
     setIsEditingSchoolProfile(false);
     void authSignOut().catch((error) => {
       console.error('Failed to sign out from Google', error);
@@ -2929,7 +2963,6 @@ export function RhymesWorkflowApp() {
     setSelectedGrade(null);
     setSelectedMode(null);
     setCoverDefaults(mergeCoverDefaults());
-    setIsCoverDetailsStepComplete(false);
     setSchool(null);
     setIsEditingSchoolProfile(false);
   }, [isSuperAdminUser, school, clearCoverWorkflowForSchool]);
@@ -2943,7 +2976,6 @@ export function RhymesWorkflowApp() {
     setSelectedGrade(null);
     setSelectedMode(null);
     setCoverDefaults(mergeCoverDefaults());
-    setIsCoverDetailsStepComplete(false);
     setSchool(null);
     setIsEditingSchoolProfile(false);
   }, [school, clearCoverWorkflowForSchool]);
@@ -2972,23 +3004,14 @@ export function RhymesWorkflowApp() {
           onBackToDashboard={!isSuperAdminUser ? handleReturnToBranchList : undefined}
           onEditProfile={() => setIsEditingSchoolProfile(true)}
         />
-      ) : selectedMode === 'cover' && !isCoverDetailsStepComplete ? (
-        <CoverDetailsPage
-          school={school}
-          coverDetails={coverDefaults}
-          onSave={handleCoverDetailsSave}
-          onBackToMenu={handleBackToModeSelection}
-          onLogout={handleLogout}
-        />
-      ) : !selectedGrade && selectedMode !== 'books' ? (
+      ) : !selectedGrade && selectedMode !== 'books' && selectedMode !== 'cover' ? (
         <GradeSelectionPage
           school={school}
           mode={selectedMode}
           onGradeSelect={handleGradeSelect}
           onLogout={handleLogout}
           onBackToMode={handleBackToModeSelection}
-          coverDefaults={coverDefaults}
-          onEditCoverDetails={handleEditCoverDetails}
+          onCoverIntentChange={setCoverWorkflowIntent}
         />
       ) : selectedMode === 'rhymes' ? (
         <RhymeSelectionPage
@@ -3001,13 +3024,10 @@ export function RhymesWorkflowApp() {
       ) : selectedMode === 'cover' ? (
         <CoverPageWorkflow
           school={school}
-          grade={selectedGrade}
-          customGradeName={resolveStoredGradeName(selectedGrade)}
-          gradeDetails={coverDefaults}
-          onBackToGrades={handleBackToGrades}
           onBackToMode={handleBackToModeSelection}
           onLogout={handleLogout}
           coverDefaults={coverDefaults}
+          isReadOnly={coverWorkflowIntent === 'view'}
         />
       ) : selectedMode === 'books' ? (
         <HomePage
