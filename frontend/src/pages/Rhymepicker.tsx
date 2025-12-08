@@ -2911,6 +2911,7 @@ export function RhymesWorkflowApp() {
     setSelectedMode(mode);
     setSelectedGrade(null);
     if (mode === 'cover') {
+      setIsCoverDetailsStepComplete(false);
       setCoverWorkflowIntent('edit');
     }
   };
@@ -2930,6 +2931,7 @@ export function RhymesWorkflowApp() {
   const handleBackToModeSelection = () => {
     setSelectedGrade(null);
     setSelectedMode(null);
+    setIsCoverDetailsStepComplete(false);
     setCoverWorkflowIntent('edit');
   };
 
@@ -3011,6 +3013,8 @@ export function RhymesWorkflowApp() {
           onGradeSelect={handleGradeSelect}
           onLogout={handleLogout}
           onBackToMode={handleBackToModeSelection}
+          coverDefaults={coverDefaults}
+          onEditCoverDetails={handleEditCoverDetails}
           onCoverIntentChange={setCoverWorkflowIntent}
         />
       ) : selectedMode === 'rhymes' ? (

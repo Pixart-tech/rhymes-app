@@ -108,24 +108,23 @@ const CoverPageWorkflow = ({
     const gradeNameSource = coverDefaults?.gradeNames || {};
     const identifiers = new Set([...Object.keys(GRADE_LABELS), ...Object.keys(gradeNameSource || {})]);
 
+    if (grade) {
+      identifiers.add(grade);
+    }
+
     const result = {};
     identifiers.forEach((identifier) => {
       result[identifier] = resolveGradeLabel(identifier, gradeNameSource?.[identifier]);
     });
 
     return result;
-  }, [coverDefaults?.gradeNames]);
+  }, [coverDefaults?.gradeNames, grade]);
 
   const [themes, setThemes] = useState(buildFallbackThemes());
   const [isLoadingThemes, setIsLoadingThemes] = useState(false);
   const [themeError, setThemeError] = useState('');
   const [selectedThemeId, setSelectedThemeId] = useState('');
-  const [selectedColoursByGrade, setSelectedColoursByGrade] = useState(() => ({
-    playgroup: '',
-    nursery: '',
-    lkg: '',
-    ukg: '',
-  }));
+  const [selectedColourId, setSelectedColourId] = useState('');
   const [isFinished, setIsFinished] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
 
@@ -135,8 +134,10 @@ const CoverPageWorkflow = ({
   );
 
   const colourOptions = useMemo(() => selectedTheme?.colours || [], [selectedTheme]);
-
-  const coverStorageKey = '__all__';
+  const selectedColour = useMemo(
+    () => colourOptions.find((colour) => colour.id === selectedColourId) || null,
+    [colourOptions, selectedColourId]
+  );
 
   useEffect(() => {
     const schoolId = school?.school_id;
@@ -144,19 +145,14 @@ const CoverPageWorkflow = ({
       return;
     }
 
-    const stored = loadCoverWorkflowState(schoolId, coverStorageKey);
+    const stored = loadCoverWorkflowState(schoolId, grade);
     if (stored) {
       setSelectedThemeId(stored.selectedThemeId || '');
-      setSelectedColoursByGrade({
-        playgroup: stored.selectedColoursByGrade?.playgroup || '',
-        nursery: stored.selectedColoursByGrade?.nursery || '',
-        lkg: stored.selectedColoursByGrade?.lkg || '',
-        ukg: stored.selectedColoursByGrade?.ukg || '',
-      });
+      setSelectedColourId(stored.selectedColourId || '');
       setIsFinished(stored.status === 'finished');
       setLastSavedAt(stored.updatedAt || null);
     }
-  }, [school?.school_id]);
+  }, [grade, school?.school_id]);
 
   useEffect(() => {
     const fetchThemeImages = async () => {
@@ -180,42 +176,35 @@ const CoverPageWorkflow = ({
 
   useEffect(() => {
     const schoolId = school?.school_id;
-    if (!schoolId) {
+    if (!schoolId || !grade) {
       return;
     }
 
-    saveCoverWorkflowState(schoolId, coverStorageKey, {
+    saveCoverWorkflowState(schoolId, grade, {
       selectedThemeId,
-      selectedColoursByGrade,
+      selectedColourId,
       status: isFinished ? 'finished' : 'in-progress',
       updatedAt: Date.now(),
       selectedThemeLabel: selectedTheme?.label,
+      selectedColourLabel: selectedColour?.label,
     });
     setLastSavedAt(Date.now());
-  }, [coverStorageKey, isFinished, school?.school_id, selectedColoursByGrade, selectedTheme?.label, selectedThemeId]);
+  }, [grade, isFinished, school?.school_id, selectedColour?.label, selectedColourId, selectedTheme?.label, selectedThemeId]);
 
   const handleThemeSelect = (themeId) => {
     if (isReadOnly) {
       return;
     }
     setSelectedThemeId(themeId);
-    setSelectedColoursByGrade({
-      playgroup: '',
-      nursery: '',
-      lkg: '',
-      ukg: '',
-    });
+    setSelectedColourId('');
     setIsFinished(false);
   };
 
-  const handleColourSelect = (gradeId, colourId) => {
+  const handleColourSelect = (colourId) => {
     if (isReadOnly) {
       return;
     }
-    setSelectedColoursByGrade((current) => ({
-      ...current,
-      [gradeId]: colourId,
-    }));
+    setSelectedColourId(colourId);
     setIsFinished(false);
   };
 
@@ -223,8 +212,7 @@ const CoverPageWorkflow = ({
     setIsFinished(true);
   };
 
-  const allGradesHaveColours = GRADE_ORDER.every((gradeKey) => selectedColoursByGrade[gradeKey]);
-  const completionDisabled = !selectedThemeId || !allGradesHaveColours || isReadOnly;
+  const completionDisabled = !selectedThemeId || !selectedColourId || isReadOnly;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
@@ -256,7 +244,7 @@ const CoverPageWorkflow = ({
           <AlertTitle>Network SVG mapping removed</AlertTitle>
           <AlertDescription>
             The cover workflow now uses uploaded PNG thumbnails instead of network SVG mappings or live previews. Choose a
-            theme and colour combination to mark the selections as finished.
+            theme and colour combination to mark this grade as finished.
           </AlertDescription>
         </Alert>
 
@@ -270,12 +258,8 @@ const CoverPageWorkflow = ({
             </div>
             <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
               <div className="flex items-center gap-2">
-                <span className="font-medium text-slate-700">Colours chosen:</span>
-                <span>
-                  {allGradesHaveColours
-                    ? 'One colour per grade selected'
-                    : 'Pick a colour for every grade after choosing a theme'}
-                </span>
+                <span className="font-medium text-slate-700">Colour:</span>
+                <span>{selectedColour ? selectedColour.label : 'Not selected'}</span>
               </div>
               <Separator orientation="vertical" className="hidden h-4 sm:block" />
               <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -344,8 +328,10 @@ const CoverPageWorkflow = ({
             <CardHeader className="space-y-2">
               <CardTitle className="text-xl font-semibold text-slate-900">Select a colour family</CardTitle>
               <p className="text-sm text-slate-600">
-                Choose a colour for each grade. Each row shows the grade label followed by the four colour PNGs uploaded for this
+
+                Choose a colour for each grade. Each row shows the grade label followed by the four colour for this
                 theme.
+
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -366,12 +352,12 @@ const CoverPageWorkflow = ({
                       <tr key={gradeKey} className="even:bg-orange-50/30">
                         <td className="px-4 py-3 font-semibold text-slate-800">{resolvedGradeNames[gradeKey] || GRADE_LABELS[gradeKey]}</td>
                         {colourOptions.map((colour) => {
-                          const isChosen = selectedColoursByGrade[gradeKey] === colour.id;
+                          const isChosen = selectedColourId === colour.id;
                           return (
                             <td key={`${gradeKey}-${colour.id}`} className="px-2 py-3 text-center">
                               <button
                                 type="button"
-                                onClick={() => handleColourSelect(gradeKey, colour.id)}
+                                onClick={() => handleColourSelect(colour.id)}
                                 className={cn(
                                   'flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-transparent bg-white/80 p-3 shadow-sm transition focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-300',
                                   isChosen ? 'border-orange-500 ring-2 ring-orange-400' : 'hover:border-orange-200',
@@ -413,9 +399,9 @@ const CoverPageWorkflow = ({
                   <p className="font-semibold text-slate-800">
                     {isFinished
                       ? 'Finished – you can edit or view until an admin freezes the selections.'
-                      : 'Select a theme and colours for every grade, then click Finish to save.'}
+                      : 'Select a theme and colour, then click Finish to save this grade.'}
                   </p>
-                  {isReadOnly && <p className="text-xs text-slate-500">Viewing mode is enabled. Switch to edit from the main menu.</p>}
+                  {isReadOnly && <p className="text-xs text-slate-500">Viewing mode is enabled. Switch to edit from the grade list.</p>}
                 </div>
                 <div className="flex gap-2">
                   <Button type="button" onClick={handleFinish} disabled={completionDisabled}>
