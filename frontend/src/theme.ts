@@ -57,25 +57,23 @@ export interface CoverThemeDefinition {
   colours: CoverThemeColour[];
 }
 
-export const COVER_THEME_CATALOGUE: CoverThemeDefinition[] = [
-  {
-    id: 'theme1',
-    label: 'Theme 1',
-    number: 1,
-    colours: [
-      { id: 'colour1', label: 'Colour 1', number: 1 },
-      { id: 'colour2', label: 'Colour 2', number: 2 },
-    ],
-  },
-  {
-    id: 'theme2',
-    label: 'Theme 2',
-    number: 2,
-    colours: [
-      { id: 'colour1', label: 'Colour 1', number: 1 },
-    ],
-  },
-];
+export const COVER_THEME_SLOT_COUNT = 16;
+
+const buildThemeCatalogue = (count: number): CoverThemeDefinition[] =>
+  Array.from({ length: count }, (_, index) => {
+    const themeNumber = index + 1;
+    return {
+      id: `theme${themeNumber}`,
+      label: `Theme ${themeNumber}`,
+      number: themeNumber,
+      colours: Array.from({ length: 4 }, (_, colourIndex) => {
+        const colourNumber = colourIndex + 1;
+        return { id: `colour${colourNumber}`, label: `Colour ${colourNumber}`, number: colourNumber };
+      }),
+    };
+  });
+
+export const COVER_THEME_CATALOGUE: CoverThemeDefinition[] = buildThemeCatalogue(COVER_THEME_SLOT_COUNT);
 
 export interface CoverThemeOption {
   id: string;
@@ -83,18 +81,11 @@ export interface CoverThemeOption {
   description: string;
 }
 
-export const COVER_THEME_OPTIONS: CoverThemeOption[] = [
-  {
-    id: 'theme1',
-    label: 'Theme 1',
-    description: 'Soft introductory theme designed for playful, imaginative cover layouts.',
-  },
-  {
-    id: 'theme2',
-    label: 'Theme 2',
-    description: 'Bold shapes and accents ideal for energetic class storytelling covers.',
-  },
-];
+export const COVER_THEME_OPTIONS: CoverThemeOption[] = COVER_THEME_CATALOGUE.map((theme) => ({
+  id: theme.id,
+  label: theme.label,
+  description: 'Upload a PNG thumbnail to preview this theme in the cover workflow.',
+}));
 
 export interface CoverColourOption {
   id: string;

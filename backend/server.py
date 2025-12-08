@@ -13,6 +13,7 @@ else:
 print("Forced working directory:", os.getcwd())
 
 
+import base64
 import logging
 import mimetypes
 import os
@@ -75,10 +76,117 @@ generate_rhyme_svg = rhymes.generate_rhyme_svg
 
 MAX_RHYME_PAGES = 44
 
+COVER_GRADE_LABELS = ["Playgroup", "Nursery", "LKG", "UKG"]
+
 _sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
 _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
 _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
 _localize_svg_image_assets = svg_processing.localize_svg_image_assets
+
+
+class CoverThemeImageStore:
+    """Keep cover theme thumbnails and colour PNGs in memory.
+
+    A lightweight, in-memory store allows another Python service to upload
+    theme thumbnails and colour swatches, which are then immediately
+    available to the frontend without relying on the network SVG mapping
+    workflow.
+    """
+
+    def __init__(self, theme_slots: int = 16, colours_per_theme: int = 4) -> None:
+        self.theme_slots = max(1, theme_slots)
+        self.colours_per_theme = max(1, colours_per_theme)
+        self._themes: Dict[str, Dict[str, Any]] = {}
+        self._initialise_slots()
+
+    def _initialise_slots(self) -> None:
+        for index in range(1, self.theme_slots + 1):
+            theme_id = f"theme{index}"
+            if theme_id not in self._themes:
+                self._themes[theme_id] = {
+                    "id": theme_id,
+                    "label": f"Theme {index}",
+                    "thumbnail": None,
+                    "thumbnail_mime": None,
+                    "colours": {},
+                }
+
+    def _ensure_theme(self, theme_id: str, label: Optional[str] = None) -> Dict[str, Any]:
+        theme = self._themes.get(theme_id)
+        if theme is None:
+            theme = {
+                "id": theme_id,
+                "label": label or theme_id.title(),
+                "thumbnail": None,
+                "thumbnail_mime": None,
+                "colours": {},
+            }
+            self._themes[theme_id] = theme
+        elif label:
+            theme["label"] = label
+        return theme
+
+    @staticmethod
+    def _to_data_url(content: Optional[bytes], mime_type: Optional[str]) -> Optional[str]:
+        if not content:
+            return None
+        resolved_mime = mime_type or "image/png"
+        encoded = base64.b64encode(content).decode("ascii")
+        return f"data:{resolved_mime};base64,{encoded}"
+
+    def set_thumbnail(
+        self, theme_id: str, content: bytes, mime_type: Optional[str], label: Optional[str] = None
+    ) -> None:
+        theme = self._ensure_theme(theme_id, label)
+        theme["thumbnail"] = content
+        theme["thumbnail_mime"] = mime_type or "image/png"
+
+    def set_colour_image(
+        self,
+        theme_id: str,
+        colour_id: str,
+        content: bytes,
+        mime_type: Optional[str],
+        label: Optional[str] = None,
+    ) -> None:
+        theme = self._ensure_theme(theme_id)
+        colour_label = label or colour_id.replace("_", " ").title()
+        theme["colours"][colour_id] = {
+            "id": colour_id,
+            "label": colour_label,
+            "content": content,
+            "mime": mime_type or "image/png",
+        }
+
+    def serialize_theme(self, theme_id: str) -> Dict[str, Any]:
+        theme = self._ensure_theme(theme_id)
+        colour_entries = []
+        for index in range(1, self.colours_per_theme + 1):
+            colour_id = f"colour{index}"
+            stored = theme["colours"].get(colour_id)
+            colour_entries.append(
+                {
+                    "id": colour_id,
+                    "label": stored.get("label") if stored else f"Colour {index}",
+                    "imageUrl": self._to_data_url(stored.get("content") if stored else None, stored.get("mime") if stored else None)
+                    if stored
+                    else None,
+                }
+            )
+
+        return {
+            "id": theme_id,
+            "label": theme.get("label") or theme_id.title(),
+            "thumbnailUrl": self._to_data_url(theme.get("thumbnail"), theme.get("thumbnail_mime")),
+            "colours": colour_entries,
+        }
+
+    def list_themes(self) -> List[Dict[str, Any]]:
+        self._initialise_slots()
+        return [self.serialize_theme(theme_id) for theme_id in sorted(self._themes.keys())]
+
+
+COVER_THEME_STORE = CoverThemeImageStore()
 
 
 def _ensure_image_cache_dir() -> Path:
@@ -1322,6 +1430,49 @@ async def get_rhyme_image(rhyme_code: str, file_name: str):
 #     assets = _build_cover_asset_manifest(base_path, include_markup=True)
 
 #     return {"assets": assets}
+
+
+@api_router.get("/cover-assets/themes")
+async def list_cover_theme_images():
+    """Return all theme thumbnails and colour PNGs stored in memory."""
+
+    return {"themes": COVER_THEME_STORE.list_themes(), "gradeLabels": COVER_GRADE_LABELS}
+
+
+@api_router.get("/cover-assets/themes/{theme_id}")
+async def get_cover_theme_images(theme_id: str):
+    """Return a single theme and its colours."""
+
+    return {"theme": COVER_THEME_STORE.serialize_theme(theme_id)}
+
+
+@api_router.post("/cover-assets/themes/{theme_id}/thumbnail")
+async def upload_cover_theme_thumbnail(theme_id: str, file: UploadFile = File(...), label: Optional[str] = Form(None)):
+    """Upload a PNG thumbnail for a theme and store it in memory."""
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Thumbnail image is empty.")
+
+    COVER_THEME_STORE.set_thumbnail(theme_id, content, file.content_type, label)
+    return {"status": "ok", "theme": COVER_THEME_STORE.serialize_theme(theme_id)}
+
+
+@api_router.post("/cover-assets/themes/{theme_id}/colours/{colour_id}")
+async def upload_cover_theme_colour(
+    theme_id: str,
+    colour_id: str,
+    file: UploadFile = File(...),
+    label: Optional[str] = Form(None),
+):
+    """Upload a PNG for a specific colour slot within a theme."""
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Colour image is empty.")
+
+    COVER_THEME_STORE.set_colour_image(theme_id, colour_id, content, file.content_type, label)
+    return {"status": "ok", "theme": COVER_THEME_STORE.serialize_theme(theme_id)}
 
 
 @api_router.get("/cover-assets/network/{selection_key}")
