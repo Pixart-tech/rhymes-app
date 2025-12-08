@@ -99,15 +99,11 @@ const mergeThemePayload = (payload) => {
 
 const CoverPageWorkflow = ({
   school,
-  grade,
-  customGradeName,
-  onBackToGrades,
   onBackToMode,
   onLogout,
   coverDefaults,
   isReadOnly = false,
 }) => {
-  const gradeLabel = resolveGradeLabel(grade, customGradeName);
   const resolvedGradeNames = useMemo(() => {
     const gradeNameSource = coverDefaults?.gradeNames || {};
     const identifiers = new Set([...Object.keys(GRADE_LABELS), ...Object.keys(gradeNameSource || {})]);
@@ -145,7 +141,7 @@ const CoverPageWorkflow = ({
 
   useEffect(() => {
     const schoolId = school?.school_id;
-    if (!schoolId || !grade) {
+    if (!schoolId) {
       return;
     }
 
@@ -226,7 +222,6 @@ const CoverPageWorkflow = ({
             <p className="text-sm font-medium text-orange-500">Cover pages workflow</p>
             <h1 className="text-3xl font-semibold text-slate-900">{school.school_name}</h1>
             <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-              <Badge variant="secondary">Grade: {gradeLabel}</Badge>
               <span>School ID: {school.school_id}</span>
               {isFinished && (
                 <span className="inline-flex items-center gap-1 text-green-700">
@@ -236,9 +231,6 @@ const CoverPageWorkflow = ({
             </div>
           </div>
           <div className="flex flex-wrap justify-end gap-3">
-            <Button variant="outline" onClick={onBackToGrades} className="bg-white/80 hover:bg-white">
-              Back to grades
-            </Button>
             <Button variant="outline" onClick={onBackToMode} className="bg-white/80 hover:bg-white">
               Back to menu
             </Button>
@@ -336,8 +328,10 @@ const CoverPageWorkflow = ({
             <CardHeader className="space-y-2">
               <CardTitle className="text-xl font-semibold text-slate-900">Select a colour family</CardTitle>
               <p className="text-sm text-slate-600">
-                Choose one colour across all grades. Each row shows the grade label followed by the four colour PNGs uploaded for
-                this theme.
+
+                Choose a colour for each grade. Each row shows the grade label followed by the four colour for this
+                theme.
+
               </p>
             </CardHeader>
             <CardContent className="space-y-4">

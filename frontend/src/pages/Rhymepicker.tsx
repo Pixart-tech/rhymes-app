@@ -2761,9 +2761,6 @@ export function RhymesWorkflowApp() {
       gradeNames: buildGradeNamesFromSchool(persistedState.school)
     })
   );
-  const [isCoverDetailsStepComplete, setIsCoverDetailsStepComplete] = useState(
-    () => Boolean(persistedState.isCoverDetailsStepComplete)
-  );
   const { user, loading: authLoading, signOut: authSignOut, getIdToken } = useAuth();
   const [isEditingSchoolProfile, setIsEditingSchoolProfile] = useState(false);
   const [schoolFormSubmitting, setSchoolFormSubmitting] = useState(false);
@@ -2780,7 +2777,6 @@ export function RhymesWorkflowApp() {
       setSelectedMode(null);
       setSelectedGrade(null);
       setCoverDefaults(mergeCoverDefaults());
-      setIsCoverDetailsStepComplete(false);
     }
   }, [authLoading, user]);
 
@@ -2822,9 +2818,8 @@ export function RhymesWorkflowApp() {
       selectedMode,
       selectedGrade,
       coverDefaults,
-      isCoverDetailsStepComplete
     });
-  }, [workspaceUser, school, selectedMode, selectedGrade, coverDefaults, isCoverDetailsStepComplete]);
+  }, [workspaceUser, school, selectedMode, selectedGrade, coverDefaults]);
 
   useEffect(() => {
     if (!school) {
@@ -2879,41 +2874,6 @@ export function RhymesWorkflowApp() {
   const isSuperAdminUser = workspaceUser?.role === 'super-admin';
   const schoolFormInitialValues = useMemo(() => buildSchoolFormValuesFromProfile(school), [school]);
 
-  const handleCoverDetailsSave = useCallback((details) => {
-    const sanitizedGradeNames = GRADE_OPTIONS.reduce((acc, grade) => {
-      const rawValue = details?.gradeNames?.[grade.id];
-      const trimmed = typeof rawValue === 'string' ? rawValue.trim() : '';
-      acc[grade.id] = trimmed || resolveDefaultGradeLabel(grade.id);
-      return acc;
-    }, {});
-    if (sanitizedGradeNames.playgroup) {
-      sanitizedGradeNames.pg = sanitizedGradeNames.playgroup;
-    }
-
-    setCoverDefaults(
-      mergeCoverDefaults({
-        schoolLogo: details?.schoolLogo || '',
-        schoolLogoFileName: details?.schoolLogoFileName || '',
-        contactNumber: details?.contactNumber || '',
-        website: details?.website || '',
-        email: details?.email || '',
-        addressLine1: details?.addressLine1 || '',
-        addressLine2: details?.addressLine2 || '',
-        addressLine3: details?.addressLine3 || '',
-        tagLine1: details?.tagLine1 || '',
-        tagLine2: details?.tagLine2 || '',
-        tagLine3: details?.tagLine3 || '',
-        gradeNames: sanitizedGradeNames
-      })
-    );
-    setIsCoverDetailsStepComplete(true);
-  }, []);
-
-  const handleEditCoverDetails = useCallback(() => {
-    setSelectedGrade(null);
-    setIsCoverDetailsStepComplete(false);
-  }, []);
-
   const resolveStoredGradeName = useCallback(
     (gradeId) => {
       if (!gradeId) {
@@ -2944,7 +2904,6 @@ export function RhymesWorkflowApp() {
         gradeNames: buildGradeNamesFromSchool(nextSchool)
       })
     );
-    setIsCoverDetailsStepComplete(false);
     setIsEditingSchoolProfile(false);
   };
 
@@ -2988,7 +2947,6 @@ export function RhymesWorkflowApp() {
     setCoverWorkflowIntent('edit');
     setSchool(null);
     setCoverDefaults(mergeCoverDefaults());
-    setIsCoverDetailsStepComplete(false);
     setIsEditingSchoolProfile(false);
     void authSignOut().catch((error) => {
       console.error('Failed to sign out from Google', error);
@@ -3007,7 +2965,6 @@ export function RhymesWorkflowApp() {
     setSelectedGrade(null);
     setSelectedMode(null);
     setCoverDefaults(mergeCoverDefaults());
-    setIsCoverDetailsStepComplete(false);
     setSchool(null);
     setIsEditingSchoolProfile(false);
   }, [isSuperAdminUser, school, clearCoverWorkflowForSchool]);
@@ -3021,7 +2978,6 @@ export function RhymesWorkflowApp() {
     setSelectedGrade(null);
     setSelectedMode(null);
     setCoverDefaults(mergeCoverDefaults());
-    setIsCoverDetailsStepComplete(false);
     setSchool(null);
     setIsEditingSchoolProfile(false);
   }, [school, clearCoverWorkflowForSchool]);
@@ -3050,15 +3006,7 @@ export function RhymesWorkflowApp() {
           onBackToDashboard={!isSuperAdminUser ? handleReturnToBranchList : undefined}
           onEditProfile={() => setIsEditingSchoolProfile(true)}
         />
-      ) : selectedMode === 'cover' && !isCoverDetailsStepComplete ? (
-        <CoverDetailsPage
-          school={school}
-          coverDetails={coverDefaults}
-          onSave={handleCoverDetailsSave}
-          onBackToMenu={handleBackToModeSelection}
-          onLogout={handleLogout}
-        />
-      ) : !selectedGrade && selectedMode !== 'books' ? (
+      ) : !selectedGrade && selectedMode !== 'books' && selectedMode !== 'cover' ? (
         <GradeSelectionPage
           school={school}
           mode={selectedMode}
@@ -3080,10 +3028,6 @@ export function RhymesWorkflowApp() {
       ) : selectedMode === 'cover' ? (
         <CoverPageWorkflow
           school={school}
-          grade={selectedGrade}
-          customGradeName={resolveStoredGradeName(selectedGrade)}
-          gradeDetails={coverDefaults}
-          onBackToGrades={handleBackToGrades}
           onBackToMode={handleBackToModeSelection}
           onLogout={handleLogout}
           coverDefaults={coverDefaults}
