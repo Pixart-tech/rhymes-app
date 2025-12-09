@@ -2755,6 +2755,7 @@ export function RhymesWorkflowApp() {
   const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
   const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
   const [coverWorkflowIntent, setCoverWorkflowIntent] = useState<'edit' | 'view'>('edit');
+  const [, setIsCoverDetailsStepComplete] = useState(false);
   const [coverDefaults, setCoverDefaults] = useState(() =>
     mergeCoverDefaults({
       ...(persistedState.coverDefaults || {}),
@@ -2931,9 +2932,14 @@ export function RhymesWorkflowApp() {
   const handleBackToModeSelection = () => {
     setSelectedGrade(null);
     setSelectedMode(null);
-    setIsCoverDetailsStepComplete(false);
     setCoverWorkflowIntent('edit');
   };
+
+  const handleEditCoverDetails = useCallback(() => {
+    setSelectedMode('cover');
+    setSelectedGrade(null);
+    setCoverWorkflowIntent('edit');
+  }, []);
 
   const handleLogout = () => {
     const currentSchoolId = school?.school_id;
@@ -3006,7 +3012,7 @@ export function RhymesWorkflowApp() {
           onBackToDashboard={!isSuperAdminUser ? handleReturnToBranchList : undefined}
           onEditProfile={() => setIsEditingSchoolProfile(true)}
         />
-      ) : !selectedGrade && selectedMode !== 'books' && selectedMode !== 'cover' ? (
+      ) : !selectedGrade && (selectedMode === 'rhymes' || selectedMode === 'cover') ? (
         <GradeSelectionPage
           school={school}
           mode={selectedMode}
@@ -3025,9 +3031,10 @@ export function RhymesWorkflowApp() {
           onBack={handleBackToGrades}
           onLogout={handleLogout}
         />
-      ) : selectedMode === 'cover' ? (
+      ) : selectedMode === 'cover' && selectedGrade ? (
         <CoverPageWorkflow
           school={school}
+          grade={selectedGrade}
           onBackToMode={handleBackToModeSelection}
           onLogout={handleLogout}
           coverDefaults={coverDefaults}

@@ -99,6 +99,7 @@ const mergeThemePayload = (payload) => {
 
 const CoverPageWorkflow = ({
   school,
+  grade,
   onBackToMode,
   onLogout,
   coverDefaults,
@@ -141,7 +142,7 @@ const CoverPageWorkflow = ({
 
   useEffect(() => {
     const schoolId = school?.school_id;
-    if (!schoolId) {
+    if (!schoolId || !grade) {
       return;
     }
 

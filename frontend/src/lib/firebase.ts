@@ -4,12 +4,13 @@ import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAcu52UUBUwJYb_wNhFr14IrcsEKgEl8P4",
-  authDomain: "sales-catelogue.firebaseapp.com",
-  projectId: "sales-catelogue",
-  storageBucket: "sales-catelogue.firebasestorage.app",
-  messagingSenderId: "595821344222",
-  appId: "1:595821344222:web:91fac7c9ddcff9bc7cd94f",
+  apiKey: "AIzaSyB06z-Ds_irB8KgtpDpYSXpW3aRtNMZAKE",
+  authDomain: "rhymes-app-c9ec8.firebaseapp.com",
+  projectId: "rhymes-app-c9ec8",
+  storageBucket: "rhymes-app-c9ec8.firebasestorage.app",
+  messagingSenderId: "371169155300",
+  appId: "1:371169155300:web:cac5a305404f71db03f4f1",
+  measurementId: "G-0189X9Q78X"
 };
 
 const missingKeys = Object.entries(firebaseConfig)

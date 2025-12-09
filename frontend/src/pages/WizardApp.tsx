@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { SCHOOL_DATA, getAssessmentForClass, CLASS_THEMES, DEFAULT_THEME } from '../constants/constants';
@@ -229,14 +229,14 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     };
   }, [findOptionForSavedItem]);
 
-  const persistCompletedClasses = (next: Set<string>) => {
+  const persistCompletedClasses = useCallback((next: Set<string>) => {
     if (typeof window === 'undefined') return;
     try {
       window.localStorage.setItem('bookSelectionCompletedClasses', JSON.stringify(Array.from(next)));
     } catch (error) {
       console.warn('Unable to persist completed classes', error);
     }
-  };
+  }, []);
 
   const handleStartClass = (index: number) => {
     const className = SCHOOL_DATA[index]?.name;
@@ -584,19 +584,32 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
       setSelections(nextSelections);
       setExcludedAssessments(Array.from(nextExcluded));
-      setCompletedClasses(nextCompleted);
+      setCompletedClasses((prev) => {
+        const merged = new Set(prev);
+        nextCompleted.forEach((cls) => merged.add(cls));
+        persistCompletedClasses(merged);
+        return merged;
+      });
       setIsFinalized(resolveApprovalStatus(persistedState?.school) || serverApproved);
-      persistCompletedClasses(nextCompleted);
     } catch (error) {
       console.warn('Unable to fetch saved book selections', error);
     } finally {
       setIsLoadingSavedSelections(false);
     }
-  }, [API, bookSelectionSchoolId, buildSelectionFromSavedItem, completedClasses, getIdToken, persistCompletedClasses]);
+  }, [API, bookSelectionSchoolId, buildSelectionFromSavedItem, getIdToken, persistCompletedClasses, resolveApprovalStatus, persistedState?.school]);
+
+  const lastFetchedSchoolId = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!bookSelectionSchoolId) {
+      return;
+    }
+    if (lastFetchedSchoolId.current === bookSelectionSchoolId) {
+      return;
+    }
+    lastFetchedSchoolId.current = bookSelectionSchoolId;
     void fetchSavedSelections();
-  }, [fetchSavedSelections]);
+  }, [bookSelectionSchoolId, fetchSavedSelections]);
 
   if (viewState === 'TITLES' && currentClassData) {
     return (
