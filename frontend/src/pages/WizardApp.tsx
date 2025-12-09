@@ -127,9 +127,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     
     classSelections.forEach(s => {
       if (s.selectedOption) {
-        if (s.selectedOption.coreId && !s.skipCore) count++;
-        if (s.selectedOption.workId && !s.skipWork) count++;
-        if (s.selectedOption.addOnId && !s.skipAddon) count++;
+        // Count selected items even if the user marked them as skipped,
+        // so the total reflects all choices made rather than hiding dropped items.
+        if (s.selectedOption.coreId) count++;
+        if (s.selectedOption.workId) count++;
+        if (s.selectedOption.addOnId) count++;
       }
     });
 
@@ -291,35 +293,42 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
     if (currentSubject.isMultiSelect) {
         if (option === null) {
-            const newSelections = selections.filter(
-                s => !(s.className === currentClassData.name && s.subjectName === currentSubject.name)
-            );
-            setSelections(newSelections);
             advanceStep();
             return;
         }
 
-        const existingIndex = selections.findIndex(s => 
-            s.className === currentClassData.name && 
-            s.subjectName === currentSubject.name && 
+        const alreadySelected = selections.some(
+          s =>
+            s.className === currentClassData.name &&
+            s.subjectName === currentSubject.name &&
             s.selectedOption?.typeId === option.typeId
         );
 
-        let newSelections = [...selections];
-        if (existingIndex >= 0) {
-            newSelections.splice(existingIndex, 1);
-        } else {
-            newSelections.push({
-                className: currentClassData.name,
-                subjectName: currentSubject.name,
-                selectedOption: option,
-                skipWork: shouldSkipWork,
-                skipAddon: false,
-                skipCore: false
-            });
+        // Do not remove an existing selection when clicked again; keep it in the list.
+        if (alreadySelected) {
+          return;
         }
+
+        const newSelections = [
+          ...selections,
+          {
+            className: currentClassData.name,
+            subjectName: currentSubject.name,
+            selectedOption: option,
+            skipWork: shouldSkipWork,
+            skipAddon: false,
+            skipCore: false
+          }
+        ];
+
         setSelections(newSelections);
     } else {
+        if (option === null) {
+          // Skip subject in edit mode without removing existing selections
+          advanceStep();
+          return;
+        }
+
         const newSelections = selections.filter(
           s => !(s.className === currentClassData.name && s.subjectName === currentSubject.name)
         );

@@ -1027,96 +1027,6 @@ const GradeSelectionPage = ({
             <p className="text-sm sm:text-base text-gray-600">{currentMode.subtitle}</p>
           </div>
 
-          {isCoverMode && (
-            <Card className="mb-8 border-0 bg-white/85 backdrop-blur">
-              <CardHeader>
-                <CardTitle className="text-xl font-semibold text-gray-800">
-                  Cover personalisation details
-                </CardTitle>
-                <p className="text-sm text-gray-600">
-                  These details apply to every grade. Update them before creating cover pages.
-                </p>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Contact number</p>
-                      <p className="text-sm font-semibold text-gray-800">
-                        {coverDefaults?.contactNumber || 'Not provided'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Website</p>
-                      <p className="text-sm font-semibold text-gray-800">
-                        {coverDefaults?.website || 'Not provided'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Email</p>
-                      <p className="text-sm font-semibold text-gray-800">
-                        {coverDefaults?.email || 'Not provided'}
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">School logo</p>
-                      {coverDefaults?.schoolLogo ? (
-                        <img
-                          src={coverDefaults.schoolLogo}
-                          alt="School logo"
-                          className="h-16 w-16 rounded-md border border-gray-200 bg-white object-contain"
-                        />
-                      ) : (
-                        <div className="rounded-md border border-dashed border-orange-200 bg-orange-50/40 p-4 text-sm text-gray-500">
-                          No logo uploaded yet.
-                        </div>
-                      )}
-                      {coverDefaults?.schoolLogoFileName && (
-                        <p className="text-xs text-gray-500">{coverDefaults.schoolLogoFileName}</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Grade names</p>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {GRADE_OPTIONS.map((grade) => (
-                        <div key={`grade-name-display-${grade.id}`}>
-                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{grade.name}</p>
-                          <p className="text-sm font-semibold text-gray-800">{gradeNameOverrides[grade.id]}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  {(addressLines.length > 0 || tagLines.length > 0) && (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {addressLines.map((line, index) => (
-                        <div key={`address-${index}`}>
-                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                            Address line {index + 1}
-                          </p>
-                          <p className="text-sm font-semibold text-gray-800">{line}</p>
-                        </div>
-                      ))}
-                      {tagLines.map((line, index) => (
-                        <div key={`tagline-${index}`}>
-                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                            Tag line {index + 1}
-                          </p>
-                          <p className="text-sm font-semibold text-gray-800">{line}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex flex-wrap gap-3">
-                    <Button type="button" onClick={handleEditDetailsClick}>
-                      Edit details
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
             {GRADE_OPTIONS.map((grade) => {
               const resolvedGradeName = gradeNameOverrides[grade.id] || grade.name;
@@ -2910,7 +2820,12 @@ export function RhymesWorkflowApp() {
 
   const handleModeSelect = (mode) => {
     setSelectedMode(mode);
-    setSelectedGrade(null);
+    if (mode === 'cover') {
+      // Jump directly into cover workflow with the first grade instead of showing grade selection.
+      setSelectedGrade(GRADE_OPTIONS[0]?.id || null);
+    } else {
+      setSelectedGrade(null);
+    }
     if (mode === 'cover') {
       setIsCoverDetailsStepComplete(false);
       setCoverWorkflowIntent('edit');
