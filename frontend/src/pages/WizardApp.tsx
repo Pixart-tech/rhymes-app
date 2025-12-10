@@ -662,6 +662,16 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       return;
     }
     setIsLoadingSavedSelections(true);
+    const resolveClassName = (raw: string): string => {
+      const trimmed = (raw || '').trim();
+      if (!trimmed) return '';
+      const lower = trimmed.toLowerCase();
+      if (lower === 'playgroup') return 'PG';
+      return (
+        SCHOOL_DATA.find((c) => c.name.toLowerCase() === lower)?.name ||
+        trimmed
+      );
+    };
     try {
       const token = await getIdToken();
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
@@ -680,16 +690,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         if (!rawClass) {
           return;
         }
-        const normalizedClass =
-          SCHOOL_DATA.find((c) => c.name.toLowerCase() === rawClass.toLowerCase())?.name ||
-          rawClass;
+        const normalizedClass = resolveClassName(rawClass);
       const items = Array.isArray(entry.items) ? entry.items : [];
       const excludedList = Array.isArray(entry.excluded_assessments) ? entry.excluded_assessments : [];
       excludedList.forEach((c) => {
         if (typeof c === 'string') {
-          nextExcluded.add(
-            SCHOOL_DATA.find((cls) => cls.name.toLowerCase() === c.toLowerCase())?.name || c
-          );
+          const mapped = resolveClassName(c);
+          nextExcluded.add(mapped || c);
         }
       });
       nextSignatures[normalizedClass] = computeClassSignature(items);

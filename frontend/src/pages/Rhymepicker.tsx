@@ -290,8 +290,8 @@ const ModeSelectionPage = ({
                     className="group aspect-square flex flex-col cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg border border-slate-200 bg-white"
                     onClick={() => onModeSelect(option.id)}
                   >
-                    <CardContent className="flex-1 flex flex-col justify-between p-3 sm:p-4 text-center gap-2">
-                    <div className="space-y-2">
+                    <CardContent className="flex-1 flex flex-col justify-between p-3 sm:p-4 text-center gap-1.5">
+                    <div className="space-y-1.5">
                         <div className={`w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-lg sm:text-xl shadow`}>
                           <IconComponent className="h-6 w-6 sm:h-7 sm:w-7" />
                         </div>

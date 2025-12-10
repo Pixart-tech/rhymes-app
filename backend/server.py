@@ -794,6 +794,28 @@ def _rhyme_collection_for_school(school_id: str):
 def _cover_collection_for_school(school_id: str):
     return db.collection("cover_selections").document(school_id).collection("grades")
 
+def _format_cover_theme(theme_id: Optional[str]) -> Optional[str]:
+    if not theme_id:
+        return None
+    theme_str = str(theme_id).strip()
+    if not theme_str:
+        return None
+    match = re.match(r"theme(\d+)", theme_str, re.IGNORECASE)
+    if match:
+        return f"V{match.group(1)}"
+    return theme_str
+
+def _format_cover_colour(theme_code: Optional[str], colour_id: Optional[str]) -> Optional[str]:
+    if not colour_id:
+        return None
+    colour_str = str(colour_id).strip()
+    if not colour_str:
+        return None
+    match = re.match(r"colour(\d+)", colour_str, re.IGNORECASE)
+    if match and theme_code:
+        return f"{theme_code}_C{match.group(1)}"
+    return colour_str
+
 
 def _coerce_to_bytes(value: Any) -> Optional[bytes]:
     """Return bytes for Firestore-stored blobs regardless of the underlying type."""
@@ -963,9 +985,10 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
         grade_key = (data.get("grade") or doc.id or "").strip()
         if not grade_key:
             continue
+        theme_code = _format_cover_theme(data.get("theme_id"))
         cover_grades[grade_key] = {
-            "theme": data.get("theme_id"),
-            "theme_colour": data.get("colour_id"),
+            "theme": theme_code,
+            "theme_colour": _format_cover_colour(theme_code, data.get("colour_id")),
         }
         updated_at = data.get("updated_at")
         if updated_at and (latest_cover_update is None or updated_at > latest_cover_update):
@@ -978,15 +1001,15 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
 
     payload = {
         "school": school_record,
+        "Coverpage": {
+            "grades": cover_grades,
+            "updated_at": _format_timestamp(latest_cover_update),
+        },
         "books": {
             "selections": book_selections,
             "excluded_assessments": [],
             "source": "wizard",
             "updated_at": _format_timestamp(latest_book_update),
-        },
-        "Coverpage": {
-            "grades": cover_grades,
-            "updated_at": _format_timestamp(latest_cover_update),
         },
         "rhymes": rhyme_selections,
         "generated_at": datetime.utcnow().isoformat(),
