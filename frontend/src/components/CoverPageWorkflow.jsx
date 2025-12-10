@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -10,6 +11,7 @@ import { CheckCircle2, ImageOff } from 'lucide-react';
 import { API_BASE_URL, cn } from '../lib/utils';
 import { COVER_COLOUR_OPTIONS, COVER_THEME_CATALOGUE, COVER_THEME_SLOT_COUNT } from '../theme';
 import { loadCoverWorkflowState, saveCoverWorkflowState } from '../lib/storage';
+import { useAuth } from '../hooks/useAuth';
 
 const GRADE_LABELS = {
   nursery: 'Nursery',
@@ -105,6 +107,7 @@ const CoverPageWorkflow = ({
   coverDefaults,
   isReadOnly = false,
 }) => {
+  const { getIdToken } = useAuth();
   const resolvedGradeNames = useMemo(() => {
     const gradeNameSource = coverDefaults?.gradeNames || {};
     const identifiers = new Set([...Object.keys(GRADE_LABELS), ...Object.keys(gradeNameSource || {})]);
@@ -126,8 +129,10 @@ const CoverPageWorkflow = ({
   const [themeError, setThemeError] = useState('');
   const [selectedThemeId, setSelectedThemeId] = useState('');
   const [selectedColourId, setSelectedColourId] = useState('');
+  const [selectedColoursByGrade, setSelectedColoursByGrade] = useState({});
   const [isFinished, setIsFinished] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [hasHydratedFromServer, setHasHydratedFromServer] = useState(false);
 
   const selectedTheme = useMemo(
     () => themes.find((theme) => theme.id === selectedThemeId) || null,
@@ -135,9 +140,13 @@ const CoverPageWorkflow = ({
   );
 
   const colourOptions = useMemo(() => selectedTheme?.colours || [], [selectedTheme]);
+  const activeColourId = useMemo(
+    () => selectedColoursByGrade[grade] || selectedColourId,
+    [grade, selectedColourId, selectedColoursByGrade]
+  );
   const selectedColour = useMemo(
-    () => colourOptions.find((colour) => colour.id === selectedColourId) || null,
-    [colourOptions, selectedColourId]
+    () => colourOptions.find((colour) => colour.id === activeColourId) || null,
+    [colourOptions, activeColourId]
   );
 
   useEffect(() => {
@@ -146,14 +155,99 @@ const CoverPageWorkflow = ({
       return;
     }
 
-    const stored = loadCoverWorkflowState(schoolId, grade);
-    if (stored) {
-      setSelectedThemeId(stored.selectedThemeId || '');
-      setSelectedColourId(stored.selectedColourId || '');
-      setIsFinished(stored.status === 'finished');
-      setLastSavedAt(stored.updatedAt || null);
-    }
+    const loadedColours = {};
+    let activeThemeId = '';
+    let activeColour = '';
+    let activeFinished = false;
+    let activeUpdatedAt = null;
+
+    GRADE_ORDER.forEach((gradeKey) => {
+      const stored = loadCoverWorkflowState(schoolId, gradeKey);
+      if (stored?.selectedColourId) {
+        loadedColours[gradeKey] = stored.selectedColourId;
+      }
+      if (gradeKey === grade && stored) {
+        activeThemeId = stored.selectedThemeId || '';
+        activeColour = stored.selectedColourId || '';
+        activeFinished = stored.status === 'finished';
+        activeUpdatedAt = stored.updatedAt || null;
+      }
+    });
+
+    setSelectedColoursByGrade(loadedColours);
+    setSelectedThemeId(activeThemeId || '');
+    setSelectedColourId(activeColour || '');
+    setIsFinished(activeFinished);
+    setLastSavedAt(activeUpdatedAt);
   }, [grade, school?.school_id]);
+
+  useEffect(() => {
+    const schoolId = school?.school_id;
+    if (!schoolId || !grade || hasHydratedFromServer) {
+      return;
+    }
+
+    const fetchSavedSelections = async () => {
+      try {
+        const token = await getIdToken?.();
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+        const response = await axios.get(`${API_BASE_URL}/cover-selections/${schoolId}`, {
+          headers,
+          validateStatus: () => true,
+        });
+        if (response.status >= 400) {
+          return;
+        }
+        const grades = response.data?.grades || {};
+
+        const loadedColours = {};
+        let loadedThemeId = selectedThemeId;
+        let loadedColourId = selectedColourId;
+        let loadedFinished = isFinished;
+        let loadedUpdatedAt = lastSavedAt;
+
+        Object.entries(grades).forEach(([gradeKey, entry]) => {
+          const normalizedGrade = gradeKey.toString().toLowerCase();
+          if (entry?.theme) {
+            loadedThemeId = entry.theme;
+          }
+          if (entry?.theme_colour) {
+            loadedColours[normalizedGrade] = entry.theme_colour;
+            if (normalizedGrade === grade) {
+              loadedColourId = entry.theme_colour;
+            }
+          }
+          if (normalizedGrade === grade && entry?.status) {
+            loadedFinished = entry.status === 'finished';
+          }
+          if (entry?.updated_at) {
+            loadedUpdatedAt = entry.updated_at;
+          }
+        });
+
+        setSelectedColoursByGrade((prev) => ({ ...loadedColours, ...prev }));
+        setSelectedThemeId((prev) => loadedThemeId || prev);
+        setSelectedColourId((prev) => loadedColourId || prev);
+        setIsFinished(loadedFinished);
+        setLastSavedAt(loadedUpdatedAt);
+        setHasHydratedFromServer(true);
+      } catch (error) {
+        console.warn('Unable to load saved cover selections', error);
+      }
+    };
+
+    void fetchSavedSelections();
+  }, [
+    API_BASE_URL,
+    grade,
+    hasHydratedFromServer,
+    isFinished,
+    lastSavedAt,
+    school?.school_id,
+    selectedColourId,
+    selectedThemeId,
+    getIdToken,
+  ]);
 
   useEffect(() => {
     const fetchThemeImages = async () => {
@@ -177,20 +271,97 @@ const CoverPageWorkflow = ({
 
   useEffect(() => {
     const schoolId = school?.school_id;
-    if (!schoolId || !grade) {
+    if (!schoolId) {
       return;
     }
 
-    saveCoverWorkflowState(schoolId, grade, {
-      selectedThemeId,
-      selectedColourId,
-      status: isFinished ? 'finished' : 'in-progress',
-      updatedAt: Date.now(),
-      selectedThemeLabel: selectedTheme?.label,
-      selectedColourLabel: selectedColour?.label,
+    const timestamp = Date.now();
+    const colourForActiveGrade = selectedColoursByGrade[grade] || selectedColourId || '';
+    const activeColourLabel = colourOptions.find((colour) => colour.id === colourForActiveGrade)?.label;
+
+    if (grade) {
+      saveCoverWorkflowState(schoolId, grade, {
+        selectedThemeId,
+        selectedColourId: colourForActiveGrade,
+        status: isFinished ? 'finished' : 'in-progress',
+        updatedAt: timestamp,
+        selectedThemeLabel: selectedTheme?.label,
+        selectedColourLabel: activeColourLabel,
+      });
+    }
+
+    Object.entries(selectedColoursByGrade).forEach(([gradeKey, colourId]) => {
+      if (!colourId || gradeKey === grade) {
+        return;
+      }
+      const colourLabel = colourOptions.find((colour) => colour.id === colourId)?.label;
+      saveCoverWorkflowState(schoolId, gradeKey, {
+        selectedThemeId,
+        selectedColourId: colourId,
+        status: 'in-progress',
+        updatedAt: timestamp,
+        selectedThemeLabel: selectedTheme?.label,
+        selectedColourLabel: colourLabel,
+      });
     });
-    setLastSavedAt(Date.now());
-  }, [grade, isFinished, school?.school_id, selectedColour?.label, selectedColourId, selectedTheme?.label, selectedThemeId]);
+
+    setLastSavedAt(timestamp);
+  }, [
+    colourOptions,
+    grade,
+    isFinished,
+    school?.school_id,
+    selectedColourId,
+    selectedColoursByGrade,
+    selectedTheme?.label,
+    selectedThemeId,
+  ]);
+
+  const handleFinishSave = async () => {
+    if (isReadOnly) return;
+    const schoolId = school?.school_id;
+    const activeColour = selectedColoursByGrade[grade] || selectedColourId;
+    if (!schoolId || !selectedThemeId || !activeColour) {
+      toast.error('Pick a theme and colour before saving.');
+      return;
+    }
+
+    try {
+      const token = await getIdToken?.();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const themeLabel = selectedTheme?.label;
+      const colourLabel = colourOptions.find((c) => c.id === activeColour)?.label || null;
+
+      // Save the current grade plus any other grade rows already picked.
+      const tasks = Object.entries({ ...selectedColoursByGrade, [grade]: activeColour }).map(
+        ([gradeKey, colourId]) => {
+          if (!colourId) return Promise.resolve();
+          return axios.post(
+            `${API_BASE_URL}/cover-selections`,
+            {
+              school_id: schoolId,
+              grade: gradeKey,
+              theme_id: selectedThemeId,
+              theme_label: themeLabel,
+              colour_id: colourId,
+              colour_label: gradeKey === grade ? colourLabel : colourOptions.find((c) => c.id === colourId)?.label || null,
+              status: gradeKey === grade ? 'finished' : 'in-progress',
+            },
+            { headers }
+          );
+        }
+      );
+
+      await Promise.all(tasks);
+      setIsFinished(true);
+      const timestamp = Date.now();
+      setLastSavedAt(timestamp);
+      toast.success('Cover selection saved');
+    } catch (error) {
+      console.warn('Unable to persist cover selections', error);
+      toast.error('Could not save cover selection');
+    }
+  };
 
   const handleThemeSelect = (themeId) => {
     if (isReadOnly) {
@@ -198,22 +369,33 @@ const CoverPageWorkflow = ({
     }
     setSelectedThemeId(themeId);
     setSelectedColourId('');
+    setSelectedColoursByGrade({});
     setIsFinished(false);
   };
 
-  const handleColourSelect = (colourId) => {
-    if (isReadOnly) {
+  const handleColourSelect = (targetGrade, colourId) => {
+    if (isReadOnly || !targetGrade) {
       return;
     }
-    setSelectedColourId(colourId);
+
+    setSelectedColoursByGrade((current) => ({
+      ...current,
+      [targetGrade]: colourId,
+    }));
+
+    if (targetGrade === grade) {
+      setSelectedColourId(colourId);
+    }
+
     setIsFinished(false);
   };
 
   const handleFinish = () => {
-    setIsFinished(true);
+    void handleFinishSave();
   };
 
-  const completionDisabled = !selectedThemeId || !selectedColourId || isReadOnly;
+  const completionDisabled =
+    !selectedThemeId || !activeColourId || isReadOnly;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
@@ -242,10 +424,9 @@ const CoverPageWorkflow = ({
         </div>
 
         <Alert className="border-orange-200 bg-orange-50/70 text-orange-800">
-          <AlertTitle>Network SVG mapping removed</AlertTitle>
+          <AlertTitle>Cover previews use uploaded PNG thumbnails</AlertTitle>
           <AlertDescription>
-            The cover workflow now uses uploaded PNG thumbnails instead of network SVG mappings or live previews. Choose a
-            theme and colour combination to mark this grade as finished.
+            Pick a theme and colour to mark this grade as finished. Thumbnails come from admin uploads; no live SVG previews are used.
           </AlertDescription>
         </Alert>
 
@@ -353,12 +534,12 @@ const CoverPageWorkflow = ({
                       <tr key={gradeKey} className="even:bg-orange-50/30">
                         <td className="px-4 py-3 font-semibold text-slate-800">{resolvedGradeNames[gradeKey] || GRADE_LABELS[gradeKey]}</td>
                         {colourOptions.map((colour) => {
-                          const isChosen = selectedColourId === colour.id;
+                          const isChosen = selectedColoursByGrade[gradeKey] === colour.id;
                           return (
                             <td key={`${gradeKey}-${colour.id}`} className="px-2 py-3 text-center">
                               <button
                                 type="button"
-                                onClick={() => handleColourSelect(colour.id)}
+                                onClick={() => handleColourSelect(gradeKey, colour.id)}
                                 className={cn(
                                   'flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-transparent bg-white/80 p-3 shadow-sm transition focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-300',
                                   isChosen ? 'border-orange-500 ring-2 ring-orange-400' : 'hover:border-orange-200',
@@ -399,15 +580,22 @@ const CoverPageWorkflow = ({
                 <div className="space-y-1">
                   <p className="font-semibold text-slate-800">
                     {isFinished
-                      ? 'Finished – you can edit or view until an admin freezes the selections.'
+                      ? 'Finished – selections saved. You can edit until an admin freezes them.'
                       : 'Select a theme and colour, then click Finish to save this grade.'}
                   </p>
-                  {isReadOnly && <p className="text-xs text-slate-500">Viewing mode is enabled. Switch to edit from the grade list.</p>}
+                  {isReadOnly && <p className="text-xs text-slate-500">Viewing mode is enabled because selections are frozen.</p>}
                 </div>
                 <div className="flex gap-2">
-                  <Button type="button" onClick={handleFinish} disabled={completionDisabled}>
-                    Finish
-                  </Button>
+                  {!isFinished && (
+                    <Button type="button" onClick={handleFinish} disabled={completionDisabled}>
+                      Finish
+                    </Button>
+                  )}
+                  {isFinished && (
+                    <Badge variant="secondary" className="self-center bg-green-50 text-green-700 border border-green-200">
+                      Saved
+                    </Badge>
+                  )}
                   {isReadOnly && (
                     <Badge variant="secondary" className="self-center bg-slate-100 text-slate-600">
                       View only

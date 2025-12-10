@@ -17,6 +17,7 @@ import base64
 import logging
 import mimetypes
 import os
+import re
 import sys
 import tempfile
 import uuid
@@ -29,7 +30,8 @@ from io import BytesIO
 from pathlib import Path, PureWindowsPath
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile, Form
+from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile, Form, Request
+from fastapi.staticfiles import StaticFiles
 
 from pydantic import BaseModel, EmailStr, Field
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
@@ -82,6 +84,15 @@ _sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
 _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
 _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
 _localize_svg_image_assets = svg_processing.localize_svg_image_assets
+
+PUBLIC_DIR = (ROOT_DIR / "public").resolve()
+COVER_THEME_PUBLIC_DIR = PUBLIC_DIR / "cover-themes"
+PUBLIC_URL_PREFIX = "/public"
+
+try:
+    COVER_THEME_PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+except OSError as exc:
+    logger.warning("Unable to create public cover directory %s: %s", COVER_THEME_PUBLIC_DIR, exc)
 
 
 class CoverThemeImageStore:
@@ -187,6 +198,173 @@ class CoverThemeImageStore:
 
 
 COVER_THEME_STORE = CoverThemeImageStore()
+
+_SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_IMAGE_EXTENSIONS = (".png", ".apng", ".jpg", ".jpeg", ".webp")
+
+
+def _sanitize_component(value: str, fallback: str) -> str:
+    """Return a filesystem-safe component with a sensible fallback."""
+
+    trimmed = (value or "").strip()
+    normalized = _SAFE_COMPONENT_RE.sub("_", trimmed)
+    return normalized or fallback
+
+
+def _resolve_theme_dir(theme_id: str) -> Path:
+    safe_theme_id = _sanitize_component(theme_id, "theme")
+    return COVER_THEME_PUBLIC_DIR / safe_theme_id
+
+
+def _public_url_for(path: Optional[Path], request: Optional[Request] = None) -> Optional[str]:
+    if not path:
+        return None
+    try:
+        relative = path.resolve().relative_to(PUBLIC_DIR)
+    except (ValueError, OSError):
+        return None
+    public_path = f"{PUBLIC_URL_PREFIX}/{relative.as_posix()}"
+    if request:
+        base = str(request.base_url).rstrip("/")
+        return f"{base}{public_path}"
+    return public_path
+
+
+def _find_existing_image(base_dir: Path, stem: str) -> Optional[Path]:
+    if not base_dir.exists() or not base_dir.is_dir():
+        return None
+    for extension in _IMAGE_EXTENSIONS:
+        candidate = base_dir / f"{stem}{extension}"
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _remove_existing_images(base_dir: Path, stem: str) -> None:
+    if not base_dir.exists() or not base_dir.is_dir():
+        return
+    for extension in _IMAGE_EXTENSIONS:
+        candidate = base_dir / f"{stem}{extension}"
+        try:
+            if candidate.exists():
+                candidate.unlink()
+        except OSError as exc:
+            logger.warning("Unable to remove stale image %s: %s", candidate, exc)
+
+
+def _guess_image_extension(upload_file: UploadFile) -> str:
+    """Return a reasonable extension for an uploaded image."""
+
+    filename = upload_file.filename or ""
+    suffix = Path(filename).suffix.lower()
+    if suffix in _IMAGE_EXTENSIONS:
+        return suffix
+
+    content_type = (upload_file.content_type or "").lower()
+    if "png" in content_type:
+        return ".png"
+    if "jpeg" in content_type or "jpg" in content_type:
+        return ".jpg"
+    if "webp" in content_type:
+        return ".webp"
+
+    return ".png"
+
+
+def _load_theme_meta(theme_dir: Path) -> Dict[str, Any]:
+    meta_path = theme_dir / "meta.json"
+    if not meta_path.exists() or not meta_path.is_file():
+        return {}
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8")) or {}
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Unable to read theme metadata from %s: %s", meta_path, exc)
+        return {}
+
+
+def _save_theme_meta(theme_dir: Path, *, theme_label: Optional[str] = None, colour_id: Optional[str] = None, colour_label: Optional[str] = None) -> None:
+    meta = _load_theme_meta(theme_dir)
+    if theme_label:
+        meta["label"] = theme_label
+    if colour_id and colour_label:
+        colours = meta.get("colours") or {}
+        colours[colour_id] = colour_label
+        meta["colours"] = colours
+
+    try:
+        theme_dir.mkdir(parents=True, exist_ok=True)
+        (theme_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Unable to persist theme metadata in %s: %s", theme_dir, exc)
+
+
+def _delete_colour_meta(theme_dir: Path, colour_id: str) -> None:
+    meta_path = theme_dir / "meta.json"
+    if not meta_path.exists() or not meta_path.is_file():
+        return
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) or {}
+    except (OSError, json.JSONDecodeError):
+        return
+
+    colours = meta.get("colours")
+    if not isinstance(colours, dict) or colour_id not in colours:
+        return
+
+    colours.pop(colour_id, None)
+    if not colours:
+        meta.pop("colours", None)
+    else:
+        meta["colours"] = colours
+
+    try:
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Unable to update theme metadata in %s: %s", meta_path, exc)
+
+
+def _write_public_image(target_path: Path, content: bytes) -> None:
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(content)
+    except OSError as exc:
+        logger.error("Unable to write uploaded image to %s: %s", target_path, exc)
+        raise HTTPException(status_code=500, detail="Unable to store uploaded image.") from exc
+
+
+def _build_theme_payload_from_disk(theme_id: str, request: Optional[Request] = None) -> Dict[str, Any]:
+    """Return theme metadata backed by the public disk folder."""
+
+    theme_dir = _resolve_theme_dir(theme_id)
+    meta = _load_theme_meta(theme_dir)
+    fallback_label = theme_id.title()
+    match = re.search(r"(\d+)", theme_id)
+    if match:
+        fallback_label = f"Theme {match.group(1)}"
+
+    thumbnail_path = _find_existing_image(theme_dir, "thumbnail")
+    colours = []
+    meta_colours = meta.get("colours") if isinstance(meta.get("colours"), dict) else {}
+
+    for index in range(1, COVER_THEME_STORE.colours_per_theme + 1):
+        colour_id = f"colour{index}"
+        colour_dir = theme_dir / "colours"
+        colour_path = _find_existing_image(colour_dir, _sanitize_component(colour_id, colour_id))
+        colour_label = meta_colours.get(colour_id) if meta_colours else None
+        colours.append(
+            {
+                "id": colour_id,
+                "label": colour_label or f"Colour {index}",
+                "imageUrl": _public_url_for(colour_path, request),
+            }
+        )
+
+    return {
+        "id": theme_id,
+        "label": meta.get("label") or fallback_label,
+        "thumbnailUrl": _public_url_for(thumbnail_path, request),
+        "colours": colours,
+    }
 
 
 def _ensure_image_cache_dir() -> Path:
@@ -338,6 +516,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount(PUBLIC_URL_PREFIX, StaticFiles(directory=PUBLIC_DIR, check_dir=False), name="public")
 
 
 
@@ -532,6 +712,17 @@ class BookSelectionPayload(BaseModel):
     selections: List[Dict[str, Any]]
     excluded_assessments: List[str] = Field(default_factory=list)
     source: Optional[str] = None
+    deleted_classes: List[str] = Field(default_factory=list)
+
+
+class CoverSelectionPayload(BaseModel):
+    school_id: str
+    grade: str
+    theme_id: Optional[str] = None
+    theme_label: Optional[str] = None
+    colour_id: Optional[str] = None
+    colour_label: Optional[str] = None
+    status: Optional[str] = None
 
 
 def _build_rhyme_doc_id(school_id: str, grade: str, page_index: int, position: str) -> str:
@@ -598,6 +789,10 @@ def _book_collection_for_school(school_id: str):
 
 def _rhyme_collection_for_school(school_id: str):
     return db.collection("rhyme_selections").document(school_id).collection("classes")
+
+
+def _cover_collection_for_school(school_id: str):
+    return db.collection("cover_selections").document(school_id).collection("grades")
 
 
 def _coerce_to_bytes(value: Any) -> Optional[bytes]:
@@ -756,6 +951,26 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
 
     rhyme_selections = get_selected_rhymes(school_id)
 
+    cover_docs = list(
+        _cover_collection_for_school(school_id)
+        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "status", "updated_at"])
+        .stream()
+    )
+    cover_grades: Dict[str, Any] = {}
+    latest_cover_update: Optional[Any] = None
+    for doc in cover_docs:
+        data = doc.to_dict() or {}
+        grade_key = (data.get("grade") or doc.id or "").strip()
+        if not grade_key:
+            continue
+        cover_grades[grade_key] = {
+            "theme": data.get("theme_id"),
+            "theme_colour": data.get("colour_id"),
+        }
+        updated_at = data.get("updated_at")
+        if updated_at and (latest_cover_update is None or updated_at > latest_cover_update):
+            latest_cover_update = updated_at
+
     def _format_timestamp(value: Any) -> Optional[str]:
         if isinstance(value, datetime):
             return value.isoformat()
@@ -768,6 +983,10 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
             "excluded_assessments": [],
             "source": "wizard",
             "updated_at": _format_timestamp(latest_book_update),
+        },
+        "Coverpage": {
+            "grades": cover_grades,
+            "updated_at": _format_timestamp(latest_cover_update),
         },
         "rhymes": rhyme_selections,
         "generated_at": datetime.utcnow().isoformat(),
@@ -892,6 +1111,15 @@ async def save_book_selections(
 
         doc_ref.set(class_record)
 
+    # Handle explicit deletions
+    for class_name in payload.deleted_classes:
+        if not class_name:
+            continue
+        doc_id = class_name.strip().lower().replace(" ", "_")
+        if not doc_id:
+            continue
+        _book_collection_for_school(payload.school_id).document(doc_id).delete()
+
     return {"ok": True, "updated_at": now.isoformat()}
 
 
@@ -924,6 +1152,70 @@ def get_book_selections(school_id: str, authorization: Optional[str] = Header(No
         classes.append(data)
 
     return {"classes": classes}
+
+
+@api_router.post("/cover-selections")
+async def save_cover_selection(
+    payload: CoverSelectionPayload, authorization: Optional[str] = Header(None)
+):
+    """Persist cover theme/colour selection per grade for a school."""
+    decoded_token = _verify_and_decode_token(authorization)
+
+    school_id = payload.school_id.strip()
+    grade = payload.grade.strip().lower()
+    if not school_id or not grade:
+        raise HTTPException(status_code=400, detail="school_id and grade are required")
+
+    now = datetime.utcnow()
+    record: Dict[str, Any] = {
+        "school_id": school_id,
+        "grade": grade,
+        "theme_id": (payload.theme_id or "").strip() or None,
+        "theme_label": (payload.theme_label or "").strip() or None,
+        "colour_id": (payload.colour_id or "").strip() or None,
+        "colour_label": (payload.colour_label or "").strip() or None,
+        "status": (payload.status or "").strip() or None,
+        "updated_at": now,
+    }
+
+    if decoded_token:
+        record["updated_by"] = decoded_token.get("uid")
+        if decoded_token.get("email"):
+            record["updated_by_email"] = decoded_token.get("email")
+
+    doc_ref = _cover_collection_for_school(school_id).document(grade.replace(" ", "_"))
+    doc_ref.set(record)
+
+    return {"ok": True, "updated_at": now.isoformat()}
+
+
+@api_router.get("/cover-selections/{school_id}")
+def get_cover_selections(school_id: str, authorization: Optional[str] = Header(None)):
+    """Return saved cover selections for all grades of a school."""
+    _verify_and_decode_token(authorization)
+
+    docs = list(
+        _cover_collection_for_school(school_id)
+        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "status", "updated_at"])
+        .stream()
+    )
+
+    grades: Dict[str, Any] = {}
+    for doc in docs:
+        data = doc.to_dict() or {}
+        grade_key = (data.get("grade") or doc.id or "").strip()
+        if not grade_key:
+            continue
+        grades[grade_key] = {
+            "theme": data.get("theme_id"),
+            "theme_label": data.get("theme_label"),
+            "theme_colour": data.get("colour_id"),
+            "theme_colour_label": data.get("colour_label"),
+            "status": data.get("status"),
+            "updated_at": data.get("updated_at"),
+        }
+
+    return {"grades": grades}
 
 
 @api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
@@ -1449,35 +1741,60 @@ async def get_rhyme_image(rhyme_code: str, file_name: str):
 
 
 @api_router.get("/cover-assets/themes")
-async def list_cover_theme_images():
-    """Return all theme thumbnails and colour PNGs stored in memory."""
+async def list_cover_theme_images(request: Request):
+    """Return all theme thumbnails and colour PNGs stored on disk."""
 
-    return {"themes": COVER_THEME_STORE.list_themes(), "gradeLabels": COVER_GRADE_LABELS}
+    themes = [
+        _build_theme_payload_from_disk(f"theme{index}", request) for index in range(1, COVER_THEME_STORE.theme_slots + 1)
+    ]
+    return {"themes": themes, "gradeLabels": COVER_GRADE_LABELS}
 
 
 @api_router.get("/cover-assets/themes/{theme_id}")
-async def get_cover_theme_images(theme_id: str):
+async def get_cover_theme_images(theme_id: str, request: Request):
     """Return a single theme and its colours."""
 
-    return {"theme": COVER_THEME_STORE.serialize_theme(theme_id)}
+    return {"theme": _build_theme_payload_from_disk(theme_id, request)}
 
 
 @api_router.post("/cover-assets/themes/{theme_id}/thumbnail")
-async def upload_cover_theme_thumbnail(theme_id: str, file: UploadFile = File(...), label: Optional[str] = Form(None)):
-    """Upload a PNG thumbnail for a theme and store it in memory."""
+async def upload_cover_theme_thumbnail(
+    theme_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    label: Optional[str] = Form(None),
+):
+    """Upload a PNG thumbnail for a theme and store it in the public directory."""
 
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Thumbnail image is empty.")
 
-    COVER_THEME_STORE.set_thumbnail(theme_id, content, file.content_type, label)
-    return {"status": "ok", "theme": COVER_THEME_STORE.serialize_theme(theme_id)}
+    theme_dir = _resolve_theme_dir(theme_id)
+    extension = _guess_image_extension(file)
+    _remove_existing_images(theme_dir, "thumbnail")
+    target_path = theme_dir / f"thumbnail{extension}"
+    _write_public_image(target_path, content)
+    if label:
+        _save_theme_meta(theme_dir, theme_label=label)
+
+    return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
+
+
+@api_router.delete("/cover-assets/themes/{theme_id}/thumbnail")
+async def delete_cover_theme_thumbnail(theme_id: str, request: Request):
+    """Delete a theme thumbnail from the public directory."""
+
+    theme_dir = _resolve_theme_dir(theme_id)
+    _remove_existing_images(theme_dir, "thumbnail")
+    return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
 
 
 @api_router.post("/cover-assets/themes/{theme_id}/colours/{colour_id}")
 async def upload_cover_theme_colour(
     theme_id: str,
     colour_id: str,
+    request: Request,
     file: UploadFile = File(...),
     label: Optional[str] = Form(None),
 ):
@@ -1487,8 +1804,30 @@ async def upload_cover_theme_colour(
     if not content:
         raise HTTPException(status_code=400, detail="Colour image is empty.")
 
-    COVER_THEME_STORE.set_colour_image(theme_id, colour_id, content, file.content_type, label)
-    return {"status": "ok", "theme": COVER_THEME_STORE.serialize_theme(theme_id)}
+    theme_dir = _resolve_theme_dir(theme_id)
+    colour_dir = theme_dir / "colours"
+    safe_colour_id = _sanitize_component(colour_id, "colour")
+    extension = _guess_image_extension(file)
+    _remove_existing_images(colour_dir, safe_colour_id)
+    target_path = colour_dir / f"{safe_colour_id}{extension}"
+    _write_public_image(target_path, content)
+    if label:
+        _save_theme_meta(theme_dir, colour_id=colour_id, colour_label=label)
+
+    return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
+
+
+@api_router.delete("/cover-assets/themes/{theme_id}/colours/{colour_id}")
+async def delete_cover_theme_colour(theme_id: str, colour_id: str, request: Request):
+    """Delete a colour PNG for a theme from the public directory."""
+
+    theme_dir = _resolve_theme_dir(theme_id)
+    colour_dir = theme_dir / "colours"
+    safe_colour_id = _sanitize_component(colour_id, "colour")
+    _remove_existing_images(colour_dir, safe_colour_id)
+    _delete_colour_meta(theme_dir, colour_id)
+
+    return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
 
 
 @api_router.get("/cover-assets/network/{selection_key}")

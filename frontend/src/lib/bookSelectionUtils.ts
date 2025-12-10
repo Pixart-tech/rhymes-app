@@ -1,5 +1,5 @@
 import { getAssessmentForClass } from '../constants/constants';
-import { AssessmentVariant, FinalOutputItem, SelectionRecord } from '../types/types';
+import { AssessmentVariant, CoverSelectionMeta, FinalOutputItem, SelectionRecord } from '../types/types';
 
 /**
  * Build the flattened book selection payload used for JSON downloads and persistence.
@@ -10,7 +10,8 @@ export const buildFinalBookSelections = (
   excludedAssessments: string[],
   assessmentVariants: Record<string, AssessmentVariant> = {},
   customAssessmentTitles: Record<string, string> = {},
-  gradeNames: Record<string, string> = {}
+  gradeNames: Record<string, string> = {},
+  coverSelections: Record<string, CoverSelectionMeta> = {}
 ): FinalOutputItem[] => {
   const selectionsByClass: Record<string, SelectionRecord[]> = {};
 
@@ -28,6 +29,7 @@ export const buildFinalBookSelections = (
     const gradeKey = className.toLowerCase();
     const normalizedKey = gradeKey === 'playgroup' ? 'pg' : gradeKey;
     const gradeLabel = gradeNames[normalizedKey] || className;
+    const coverMeta = coverSelections[className] || null;
 
     classSelections.forEach((selection) => {
       if (!selection.selectedOption) return;
@@ -98,7 +100,12 @@ export const buildFinalBookSelections = (
         addon_spine:
           !selection.skipAddon && selection.selectedOption.addOnId
             ? selection.selectedOption.addOnSpine
-            : undefined
+            : undefined,
+        cover_theme_id: coverMeta?.themeId ?? null,
+        cover_theme_label: coverMeta?.themeLabel ?? null,
+        cover_colour_id: coverMeta?.colourId ?? null,
+        cover_colour_label: coverMeta?.colourLabel ?? null,
+        cover_status: coverMeta?.status ?? null
       });
     });
 
@@ -124,10 +131,15 @@ export const buildFinalBookSelections = (
             type: assessment.label,
             core: assessment.coreId,
             core_cover: assessment.coreCover,
-          core_cover_title: customAssessmentTitles[className] || assessment.defaultCoreCoverTitle,
-          core_spine: assessment.coreSpine,
-          work: undefined,
-          addOn: undefined
+            core_cover_title: customAssessmentTitles[className] || assessment.defaultCoreCoverTitle,
+            core_spine: assessment.coreSpine,
+            work: undefined,
+            addOn: undefined,
+            cover_theme_id: coverMeta?.themeId ?? null,
+            cover_theme_label: coverMeta?.themeLabel ?? null,
+            cover_colour_id: coverMeta?.colourId ?? null,
+            cover_colour_label: coverMeta?.colourLabel ?? null,
+            cover_status: coverMeta?.status ?? null
         });
       }
     }

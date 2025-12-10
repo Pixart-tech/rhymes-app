@@ -14,7 +14,8 @@ import {
   UserRoundPen,
   Search,
   MoreVertical,
-  TrendingUp
+  TrendingUp,
+  LogOut
 } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth';
@@ -128,6 +129,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [logoMap, setLogoMap] = useState<Record<string, string>>({});
   const [adminSearch, setAdminSearch] = useState('');
   const [serviceFilter, setServiceFilter] = useState<AdminServiceFilter>('all');
+  const [approvingSchoolId, setApprovingSchoolId] = useState<string | null>(null);
   const workspaceFetchInFlight = useRef(false);
   const lastFetchedWorkspaceUserId = useRef<string | null>(null);
   const allSchoolsForLogos = useMemo(() => {
@@ -160,6 +162,19 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     });
     return { rootSchools, branchMap, orphanBranches };
   }, [schools]);
+  const isSchoolApproved = useCallback(
+    (school?: { selection_status?: string; selections_approved?: boolean } | null) => {
+      if (!school) {
+        return false;
+      }
+      if (school.selections_approved === true) {
+        return true;
+      }
+      const statusValue = (school.selection_status || '').toString().toLowerCase();
+      return statusValue === 'approved';
+    },
+    []
+  );
   const resolveDirectLogoUrl = useCallback((value?: string | null) => {
     if (!value) {
       return null;
@@ -547,6 +562,40 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       }
     },
     [getIdToken]
+  );
+
+  const handleApproveSelections = useCallback(
+    async (school: SchoolProfile) => {
+      if (!workspaceUser || workspaceUser.role !== 'super-admin') {
+        return;
+      }
+      setApprovingSchoolId(school.school_id);
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+        const response = await axios.patch<SchoolProfile>(
+          `${API}/admin/schools/${school.school_id}/approve-selections`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const updatedSchool = response.data;
+        setAdminSchools((prev) =>
+          prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))
+        );
+        setSchools((prev) =>
+          prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))
+        );
+        toast.success('Selections approved and frozen for this school.');
+      } catch (error) {
+        console.error('Failed to approve selections', error);
+        toast.error('Unable to approve selections. Please try again.');
+      } finally {
+        setApprovingSchoolId(null);
+      }
+    },
+    [workspaceUser, getIdToken]
   );
 
   const handleBranchSubmit = useCallback(
@@ -1107,6 +1156,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                   <UserRoundPen className="h-4 w-4" />
                   Edit profile
                 </Button>
+                <Button
+                  variant="outline"
+                  className="border-rose-200 text-rose-700 hover:border-rose-300"
+                  onClick={onLogout}
+                >
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </Button>
                 <Button asChild variant="outline" className="border-slate-200 text-slate-700 hover:border-slate-300">
                   <Link to="/admin/upload">Admin tools</Link>
                 </Button>
@@ -1258,6 +1315,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                         const branchStatus = school.status ?? 'active';
                         const isBranch = Boolean(school.branch_parent_id);
                         const isBranchUpdating = branchStatusUpdatingId === school.school_id;
+                        const isApproved = isSchoolApproved(school);
+                        const isApproving = approvingSchoolId === school.school_id;
                         const services = school.service_type ?? [];
 
                         return (
@@ -1326,7 +1385,16 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                 {branchStatus === 'active' ? 'Active' : 'Inactive'}
                               </span>
                             </td>
-                            <td className="px-4 py-4 text-slate-700">{school.total_selections ?? 0}</td>
+                            <td className="px-4 py-4 text-slate-700">
+                              <div className="flex items-center gap-2">
+                                <span>{school.total_selections ?? 0}</span>
+                                {isApproved && (
+                                  <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                                    Frozen
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="px-4 py-4 text-slate-700">{gradeCount}</td>
                             <td className="px-4 py-4 text-slate-700">
                               {formatDate(school.last_updated ?? school.timestamp ?? null)}
@@ -1353,6 +1421,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                     }}
                                   >
                                     Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      void handleApproveSelections(school);
+                                    }}
+                                    disabled={isApproved || isApproving}
+                                  >
+                                    {isApproved ? 'Selections approved' : isApproving ? 'Approving...' : 'Approve selections'}
                                   </DropdownMenuItem>
                                   {school.branch_parent_id ? (
                                     branchStatus === 'inactive' ? (
@@ -1511,6 +1587,18 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   return (
     <div className="min-h-screen bg-slate-50 flex items-start justify-center px-4 py-10">
       <div className="w-full max-w-6xl space-y-6">
+        {isSuperAdmin && view !== 'list' && (
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              className="border-rose-200 text-rose-700 hover:border-rose-300"
+              onClick={onLogout}
+            >
+              <LogOut className="h-4 w-4" />
+              Logout
+            </Button>
+          </div>
+        )}
         {isCreateView ? (
           <div className="w-full max-w-4xl">
             <SchoolForm

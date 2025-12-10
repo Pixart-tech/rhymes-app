@@ -37,6 +37,8 @@ export interface SchoolProfile {
   status?: BranchStatus;
   selection_status?: 'pending' | 'approved' | 'rejected';
   selections_approved?: boolean;
+  selection_locked_at?: string | null;
+  selection_locked_by?: string | null;
   id_card_fields?: string[];
   created_by_user_id?: string | null;
   created_by_email?: string | null;
@@ -161,6 +163,14 @@ export interface ClassData {
   subjects: Subject[];
 }
 
+export interface CoverSelectionMeta {
+  themeId?: string | null;
+  themeLabel?: string | null;
+  colourId?: string | null;
+  colourLabel?: string | null;
+  status?: 'in-progress' | 'finished' | string | null;
+}
+
 export interface SelectionRecord {
   className: string;
   subjectName: string;
@@ -201,6 +211,11 @@ export interface FinalOutputItem {
   addon_cover?: string | undefined;
   addon_cover_title?: string | undefined;
   addon_spine?: string | undefined;
+  cover_theme_id?: string | null;
+  cover_theme_label?: string | null;
+  cover_colour_id?: string | null;
+  cover_colour_label?: string | null;
+  cover_status?: string | null;
 }
 
 export type AssessmentVariant = 'WITH_MARKS' | 'WITHOUT_MARKS';

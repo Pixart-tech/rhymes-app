@@ -334,11 +334,11 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                      <div className="col-span-5 text-right">Actions</div>
                  </div>
 
-                 {books.map((book) => {
+                 {books.map((book, idx) => {
                      if (book.isExcluded) {
                          // Render Dropped/Excluded State
                          return (
-                            <div key={book.id} className="bg-white border border-slate-200 border-dashed rounded-lg p-3 md:p-4 flex items-center justify-between opacity-75">
+                            <div key={`${book.id}-${idx}`} className="bg-white border border-slate-200 border-dashed rounded-lg p-3 md:p-4 flex items-center justify-between opacity-75">
                                 <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                                     <div className="flex items-center gap-2">
                                          <span className="text-sm md:text-base font-medium text-slate-500 line-through decoration-slate-400">{book.title}</span>
@@ -361,7 +361,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
 
                      // Render Normal State
                      return (
-                     <div key={book.id} className="bg-white border border-slate-200 rounded-lg overflow-hidden hover:shadow-sm transition-shadow">
+                     <div key={`${book.id}-${idx}`} className="bg-white border border-slate-200 rounded-lg overflow-hidden hover:shadow-sm transition-shadow">
                         <div className="p-3 md:p-4 flex flex-row items-start md:items-center md:grid md:grid-cols-12 gap-3 md:gap-4">
                             
                             {/* Info Section (Left on mobile, Col 1 on desktop) */}

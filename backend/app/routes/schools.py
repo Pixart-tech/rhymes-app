@@ -247,6 +247,41 @@ def update_branch_status(
     return school_profiles.build_school_from_record(record)
 
 
+@router.patch("/admin/schools/{school_id}/approve-selections", response_model=school_profiles.School)
+def approve_school_selections(
+    school_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = verify_and_decode_token(authorization)
+    user_record = ensure_user_document(decoded_token)
+    role = user_record.get("role", DEFAULT_USER_ROLE)
+    if role != "super-admin":
+        raise HTTPException(status_code=403, detail="Only super admins can approve selections")
+
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    now = datetime.utcnow()
+    approver = user_record.get("email") or user_record.get("uid") or "super-admin"
+    updates = {
+        "selection_status": "approved",
+        "selections_approved": True,
+        "selection_locked_at": now,
+        "selection_locked_by": approver,
+        "updated_at": now,
+        "timestamp": now,
+    }
+    doc_ref.update(updates)
+    record = snapshot.to_dict() or {}
+    record.update(updates)
+    record.setdefault("id", snapshot.id)
+    record.setdefault("school_id", snapshot.id)
+
+    return school_profiles.build_school_from_record(record)
+
+
 @router.get("/schools/{school_id}/logo")
 def get_school_logo(school_id: str):
     doc_ref = db.collection("schools").document(school_id)

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { SCHOOL_DATA, getAssessmentForClass, CLASS_THEMES, DEFAULT_THEME } from '../constants/constants';
-import { BookOption, SelectionRecord, AssessmentVariant } from '../types/types';
+import { BookOption, SelectionRecord, AssessmentVariant, FinalOutputItem } from '../types/types';
 import ClassSummary from '../components/ClassSummary';
 import TitleCustomization from '../components/TitleCustomization';
 import { Check, Book, Home, ChevronLeft, Info, Square, CheckSquare } from 'lucide-react';
@@ -86,6 +86,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const [skipWorkMap, setSkipWorkMap] = useState<Record<string, boolean>>({});
   const [bookSelectionSchoolId, setBookSelectionSchoolId] = useState<string | null>(null);
   const [isFinalized, setIsFinalized] = useState(resolveApprovalStatus(persistedState?.school));
+  const [finishStatus, setFinishStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [completedClasses, setCompletedClasses] = useState<Set<string>>(() => {
     if (typeof window === 'undefined') {
       return new Set<string>();
@@ -106,6 +107,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   });
   const API = API_BASE_URL || '/api';
   const isAdmin = (user?.role === 'super-admin') || isPersistedAdmin;
+  const [savedClassSignatures, setSavedClassSignatures] = useState<Record<string, string>>({});
   const configuredClasses = useMemo(() => new Set(selections.map((s) => s.className)), [selections]);
   const configuredOrCompletedClasses = useMemo(() => {
     const combined = new Set<string>();
@@ -114,9 +116,30 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     return combined;
   }, [selections, completedClasses]);
   const isClassReadOnly = useCallback(
-    (_className: string) => !isAdmin && isFinalized,
-    [isAdmin, isFinalized]
+    (_className: string) => isFinalized,
+    [isFinalized]
   );
+  const selectionSignature = useMemo(
+    () =>
+      JSON.stringify({
+        selections,
+        excludedAssessments,
+        assessmentVariants,
+        customAssessmentTitles,
+      }),
+    [assessmentVariants, customAssessmentTitles, excludedAssessments, selections]
+  );
+  const lastSavedSelectionSignature = useRef<string | null>(null);
+  const canFinish = !isFinalized && selections.length > 0 && finishStatus !== 'success';
+
+  useEffect(() => {
+    if (finishStatus === 'success' && selectionSignature !== lastSavedSelectionSignature.current) {
+      setFinishStatus('idle');
+    }
+    if (finishStatus === 'error' && selectionSignature === lastSavedSelectionSignature.current) {
+      setFinishStatus('idle');
+    }
+  }, [finishStatus, selectionSignature]);
 
   const currentClassData = currentClassIndex >= 0 ? SCHOOL_DATA[currentClassIndex] : null;
   const currentSubject = currentClassData ? currentClassData.subjects[currentSubjectIndex] : null;
@@ -157,6 +180,53 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const getAssessmentVariantForClass = (className: string): AssessmentVariant => {
     return assessmentVariants[className] || 'WITH_MARKS';
   };
+
+  const buildStableObject = (value: any): any => {
+    if (value === null || typeof value !== 'object') {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry) => buildStableObject(entry));
+    }
+    const sortedKeys = Object.keys(value).sort();
+    const result: Record<string, any> = {};
+    sortedKeys.forEach((key) => {
+      result[key] = buildStableObject(value[key]);
+    });
+    return result;
+  };
+
+  const computeClassSignature = useCallback((items: any[]) => {
+    const normalized = items.map((item) => buildStableObject(item));
+    const sorted = normalized
+      .map((entry) => JSON.stringify(entry))
+      .sort((a, b) => a.localeCompare(b));
+    return JSON.stringify(sorted);
+  }, []);
+
+  const buildPayloadClassSignatures = useCallback(
+    (finalItems: FinalOutputItem[]) => {
+      const grouped: Record<string, FinalOutputItem[]> = {};
+      finalItems.forEach((item) => {
+        const classKey = item.class_label || item.class || '';
+        if (!classKey) {
+          return;
+        }
+        if (!grouped[classKey]) {
+          grouped[classKey] = [];
+        }
+        grouped[classKey].push(item);
+      });
+
+      const signatures: Record<string, string> = {};
+      Object.entries(grouped).forEach(([className, items]) => {
+        signatures[className] = computeClassSignature(items);
+      });
+
+      return signatures;
+    },
+    [computeClassSignature]
+  );
 
   const getGradeLabelForClass = (className: string): string => {
     const key = className.toLowerCase();
@@ -293,35 +363,44 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
     if (currentSubject.isMultiSelect) {
         if (option === null) {
+            // Clear all selections for this subject when skipping in edit mode
+            const clearedSelections = selections.filter(
+              s => !(s.className === currentClassData.name && s.subjectName === currentSubject.name)
+            );
+            setSelections(clearedSelections);
+            setSkipWorkMap({});
             advanceStep();
             return;
         }
 
-        const alreadySelected = selections.some(
+        const existingIndex = selections.findIndex(
           s =>
             s.className === currentClassData.name &&
             s.subjectName === currentSubject.name &&
             s.selectedOption?.typeId === option.typeId
         );
 
-        // Do not remove an existing selection when clicked again; keep it in the list.
-        if (alreadySelected) {
-          return;
-        }
+        const nextSelections = [...selections];
 
-        const newSelections = [
-          ...selections,
-          {
+        if (existingIndex >= 0) {
+          nextSelections.splice(existingIndex, 1);
+          setSelections(nextSelections);
+          setSkipWorkMap((prev) => {
+            const next = { ...prev };
+            delete next[option.typeId];
+            return next;
+          });
+        } else {
+          nextSelections.push({
             className: currentClassData.name,
             subjectName: currentSubject.name,
             selectedOption: option,
             skipWork: shouldSkipWork,
             skipAddon: false,
             skipCore: false
-          }
-        ];
-
-        setSelections(newSelections);
+          });
+          setSelections(nextSelections);
+        }
     } else {
         if (option === null) {
           // Skip subject in edit mode without removing existing selections
@@ -387,10 +466,14 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   };
 
   const handleFinishAll = async () => {
+    setFinishStatus('saving');
     const saved = await persistFinalSelections();
     if (!saved) {
+      setFinishStatus('error');
       return;
     }
+    lastSavedSelectionSignature.current = selectionSignature;
+    setFinishStatus('success');
     const allClasses = new Set(completedClasses);
     selections.forEach((s) => allClasses.add(s.className));
     setCompletedClasses(allClasses);
@@ -408,6 +491,8 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     setAssessmentVariants({});
     setCustomAssessmentTitles({});
     setCompletedClasses(new Set());
+    setFinishStatus('idle');
+    lastSavedSelectionSignature.current = null;
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem('bookSelectionCompletedClasses');
     }
@@ -470,27 +555,52 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
     if (!resolvedSchoolId) {
       console.warn('Missing school id for book selections; not saving');
-      return;
+      toast.error('Unable to save book selections. Missing school information.');
+      return false;
     }
     if (selections.length === 0) {
-      return;
+      toast.error('Select at least one book before finishing.');
+      return false;
     }
 
     const latestGradeNames = resolveLatestGradeNames();
     setGradeNames(latestGradeNames);
 
+    const finalSelections = buildFinalBookSelections(
+      selections,
+      excludedAssessments,
+      assessmentVariants,
+      customAssessmentTitles,
+      latestGradeNames
+    );
+
+    const currentSignatures = buildPayloadClassSignatures(finalSelections);
+    const savedClasses = Object.keys(savedClassSignatures);
+    const removedClasses = savedClasses.filter((className) => !(className in currentSignatures));
+    const changedClasses = [
+      ...Object.keys(currentSignatures).filter(
+        (className) => currentSignatures[className] !== savedClassSignatures[className]
+      ),
+      ...removedClasses,
+    ];
+
+    if (changedClasses.length === 0) {
+      toast.success('No changes to save.');
+      lastSavedSelectionSignature.current = selectionSignature;
+      return true;
+    }
+
+    const filteredSelections = finalSelections.filter(
+      (item) => changedClasses.includes(item.class_label || item.class || '')
+    );
+
     const payload = {
       school_id: resolvedSchoolId,
-      selections: buildFinalBookSelections(
-        selections,
-        excludedAssessments,
-        assessmentVariants,
-        customAssessmentTitles,
-        latestGradeNames
-      ),
-      excluded_assessments: excludedAssessments,
+      selections: filteredSelections,
+      excluded_assessments: excludedAssessments.filter((className) => changedClasses.includes(className)),
       grade_names: latestGradeNames,
-      source: 'wizard'
+      source: 'wizard',
+      deleted_classes: removedClasses,
     };
 
     try {
@@ -498,13 +608,21 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       await axios.post(`${API}/book-selections`, payload, { headers });
       toast.success('Book selections saved successfully');
+      setSavedClassSignatures((prev) => {
+        const next = { ...prev, ...currentSignatures };
+        removedClasses.forEach((cls) => {
+          delete next[cls];
+        });
+        return next;
+      });
+      lastSavedSelectionSignature.current = selectionSignature;
       return true;
     } catch (error) {
       console.warn('Unable to persist book selections', error);
       toast.error('Unable to save book selections. Please try again.');
       return false;
     }
-  }, [API, assessmentVariants, bookSelectionSchoolId, customAssessmentTitles, excludedAssessments, getIdToken, resolveLatestGradeNames, selections, user?.schoolId]);
+  }, [API, assessmentVariants, bookSelectionSchoolId, buildPayloadClassSignatures, customAssessmentTitles, excludedAssessments, getIdToken, resolveLatestGradeNames, savedClassSignatures, selectionSignature, selections, user?.schoolId]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -555,6 +673,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       const nextSelections: SelectionRecord[] = [];
       const nextExcluded: Set<string> = new Set();
       const nextCompleted: Set<string> = new Set(completedClasses);
+      const nextSignatures: Record<string, string> = {};
 
       classes.forEach((entry: any) => {
         const rawClass = entry.class || entry.class_name || '';
@@ -564,7 +683,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         const normalizedClass =
           SCHOOL_DATA.find((c) => c.name.toLowerCase() === rawClass.toLowerCase())?.name ||
           rawClass;
-        const items = Array.isArray(entry.items) ? entry.items : [];
+      const items = Array.isArray(entry.items) ? entry.items : [];
       const excludedList = Array.isArray(entry.excluded_assessments) ? entry.excluded_assessments : [];
       excludedList.forEach((c) => {
         if (typeof c === 'string') {
@@ -573,6 +692,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           );
         }
       });
+      nextSignatures[normalizedClass] = computeClassSignature(items);
       items.forEach((item: any) => {
         const selection = buildSelectionFromSavedItem(normalizedClass, item);
         if (selection) {
@@ -593,6 +713,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
       setSelections(nextSelections);
       setExcludedAssessments(Array.from(nextExcluded));
+      setSavedClassSignatures(nextSignatures);
       setCompletedClasses((prev) => {
         const merged = new Set(prev);
         nextCompleted.forEach((cls) => merged.add(cls));
@@ -600,12 +721,22 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         return merged;
       });
       setIsFinalized(resolveApprovalStatus(persistedState?.school) || serverApproved);
+      const loadedSignature = JSON.stringify({
+        selections: nextSelections,
+        excludedAssessments: Array.from(nextExcluded),
+        assessmentVariants,
+        customAssessmentTitles,
+      });
+      lastSavedSelectionSignature.current = loadedSignature;
+      if (nextSelections.length > 0) {
+        setFinishStatus('success');
+      }
     } catch (error) {
       console.warn('Unable to fetch saved book selections', error);
     } finally {
       setIsLoadingSavedSelections(false);
     }
-  }, [API, bookSelectionSchoolId, buildSelectionFromSavedItem, getIdToken, persistCompletedClasses, resolveApprovalStatus, persistedState?.school]);
+  }, [API, assessmentVariants, bookSelectionSchoolId, buildSelectionFromSavedItem, customAssessmentTitles, getIdToken, persistCompletedClasses, resolveApprovalStatus, persistedState?.school]);
 
   const lastFetchedSchoolId = useRef<string | null>(null);
 
@@ -625,8 +756,9 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       <div className="min-h-screen bg-slate-50 flex flex-col">
         <Header
           onHome={handleGoHome}
-          hasFinish={selections.length > 0}
+          hasFinish={canFinish}
           onFinish={handleFinishAll}
+          finishStatus={finishStatus}
           showReturnToMenu={viewState === 'LANDING'}
           onReturnToMenu={handleReturnToMainMenu}
         />
@@ -653,8 +785,9 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       <div className="min-h-screen bg-slate-50 flex flex-col">
           <Header
             onHome={handleGoHome}
-            hasFinish={selections.length > 0}
+            hasFinish={canFinish}
             onFinish={handleFinishAll}
+            finishStatus={finishStatus}
             showReturnToMenu={viewState === 'LANDING'}
             onReturnToMenu={handleReturnToMainMenu}
           />
@@ -862,17 +995,20 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <Header
         onHome={handleGoHome}
-        hasFinish={selections.length > 0}
+        hasFinish={canFinish}
         onFinish={handleFinishAll}
+        finishStatus={finishStatus}
         showReturnToMenu={viewState === 'LANDING'}
         onReturnToMenu={handleReturnToMainMenu}
       />
 
       <main className="flex-1 max-w-6xl mx-auto w-full p-4">
-        {!isAdmin && isFinalized && (
+        {isFinalized && (
           <div className="mb-6">
             <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg shadow-sm text-sm">
-              Book selections are approved and locked. Further changes are disabled. Please contact an admin for any updates.
+              {isAdmin
+                ? 'Book selections are approved and currently view-only.'
+                : 'Book selections are approved and locked. Further changes are disabled. Please contact an admin for any updates.'}
             </div>
           </div>
         )}
@@ -966,47 +1102,63 @@ type HeaderProps = {
     onFinish: () => void;
     showReturnToMenu?: boolean;
     onReturnToMenu?: () => void;
+    finishStatus?: 'idle' | 'saving' | 'success' | 'error';
 };
 
 // HEADER Component
-const Header = ({ onHome, hasFinish, onFinish, showReturnToMenu = false, onReturnToMenu }: HeaderProps) => (
-    <header className="bg-white border-b py-3 px-6 shadow-sm sticky top-0">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-2 cursor-pointer" onClick={onHome}>
-                <img src=".../Edplore-book-selector-logo.png" alt="Logo" className="w-8 h-8" />
+const Header = ({ onHome, hasFinish, onFinish, showReturnToMenu = false, onReturnToMenu, finishStatus = 'idle' }: HeaderProps) => {
+    const isSaving = finishStatus === 'saving';
+    const isSaved = finishStatus === 'success';
+    const showFinish = hasFinish && finishStatus !== 'success';
+    const finishLabel = isSaving ? 'Saving…' : 'Finish';
 
-                <h1 className="text-xl font-bold">Edplore Book Selector</h1>
+    return (
+        <header className="bg-white border-b py-3 px-6 shadow-sm sticky top-0">
+            <div className="max-w-6xl mx-auto flex items-center justify-between">
+                <div className="flex items-center gap-2 cursor-pointer" onClick={onHome}>
+                    <img src=".../Edplore-book-selector-logo.png" alt="Logo" className="w-8 h-8" />
+
+                    <h1 className="text-xl font-bold">Edplore Book Selector</h1>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    {showReturnToMenu ? (
+                        <button 
+                            onClick={onReturnToMenu ?? onHome}
+                            className="flex items-center gap-2 text-slate-600 hover:text-indigo-600"
+                        >
+                            <ChevronLeft size={16} />
+                            <span className="hidden sm:inline">Return to main menu</span>
+                        </button>
+                    ) : (
+                        <button 
+                            onClick={onHome}
+                            className="flex items-center gap-2 text-slate-600 hover:text-indigo-600"
+                        >
+                            <Home size={16} />
+                            <span className="hidden sm:inline">Dashboard</span>
+                        </button>
+                    )}
+
+                    {isSaved && (
+                        <span className="inline-flex items-center gap-2 rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700 border border-green-200">
+                            <Check size={14} />
+                            Saved
+                        </span>
+                    )}
+
+                    {showFinish && (
+                        <button 
+                        onClick={onFinish}
+                        disabled={isSaving}
+                        className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg"
+                        >
+                            <Check size={16} />
+                            <span className="hidden sm:inline">{finishLabel}</span>
+                        </button>
+                    )}
+                </div>
             </div>
-
-            <div className="flex items-center gap-3">
-                {showReturnToMenu ? (
-                    <button 
-                        onClick={onReturnToMenu ?? onHome}
-                        className="flex items-center gap-2 text-slate-600 hover:text-indigo-600"
-                    >
-                        <ChevronLeft size={16} />
-                        <span className="hidden sm:inline">Return to main menu</span>
-                    </button>
-                ) : (
-                    <button 
-                        onClick={onHome}
-                        className="flex items-center gap-2 text-slate-600 hover:text-indigo-600"
-                    >
-                        <Home size={16} />
-                        <span className="hidden sm:inline">Dashboard</span>
-                    </button>
-                )}
-
-                {hasFinish && (
-                    <button 
-                    onClick={onFinish}
-                    className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"
-                    >
-                        <Check size={16} />
-                        <span className="hidden sm:inline">Finish</span>
-                    </button>
-                )}
-            </div>
-        </div>
-    </header>
-);
+        </header>
+    );
+};

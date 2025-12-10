@@ -185,24 +185,25 @@ const ModeSelectionPage = ({
   school,
   onModeSelect,
   isSuperAdmin = false,
+  isFrozen = false,
   onBackToAdmin,
   onBackToDashboard,
   onEditProfile
 }) => {
   const options = [
     {
-      id: 'books',
-      title: 'Books',
-      description: 'Plan and curate the book list appropriate for every class.',
-      gradient: 'from-blue-400 to-indigo-500',
-      icon: BookMarked
-    },
-    {
       id: 'cover',
       title: 'Cover Pages',
       description: 'Design and manage engaging cover pages tailored to each grade.',
       gradient: 'from-rose-400 to-pink-500',
       icon: LayoutTemplate
+    },
+    {
+      id: 'books',
+      title: 'Books',
+      description: 'Plan and curate the book list appropriate for every class.',
+      gradient: 'from-blue-400 to-indigo-500',
+      icon: BookMarked
     },
     {
       id: 'rhymes',
@@ -225,44 +226,50 @@ const ModeSelectionPage = ({
             {onEditProfile && (
               <Button
                 variant="outline"
-                className="bg-white/80 hover:bg-white border-gray-200"
+                className="bg-white/80 hover:bg-white border-gray-200 whitespace-normal text-xs sm:text-sm px-3 sm:px-4 py-2 sm:py-2.5"
                 onClick={onEditProfile}
               >
-                <UserRoundPen className="mr-2 h-4 w-4" />
-                Edit profile
+                <UserRoundPen className="mr-2 h-4 w-4 shrink-0" />
+                <span className="min-w-0 text-left">Edit profile</span>
               </Button>
             )}
             {isSuperAdmin && (
               <>
                 <Button
                   variant="outline"
-                  className="bg-white/80 hover:bg-white border-gray-200"
+                  className="bg-white/80 hover:bg-white border-gray-200 whitespace-normal text-xs sm:text-sm px-3 sm:px-4 py-2 sm:py-2.5"
                   onClick={onBackToAdmin}
                 >
-                  <ChevronLeft className="mr-2 h-4 w-4" />
-                  Back to admin dashboard
+                  <ChevronLeft className="mr-2 h-4 w-4 shrink-0" />
+                  <span className="min-w-0 text-left">Back to admin dashboard</span>
                 </Button>
                 <Button
                   asChild
                   variant="outline"
-                  className="bg-white/80 hover:bg-white border-gray-200"
+                  className="bg-white/80 hover:bg-white border-gray-200 whitespace-normal text-xs sm:text-sm px-3 sm:px-4 py-2 sm:py-2.5"
                 >
-                  <a href="#/admin/upload">Admin tools</a>
+                  <a href="#/admin/upload" className="min-w-0 text-left">Admin tools</a>
                 </Button>
               </>
             )}
             {onBackToDashboard && (
               <Button
                 variant="outline"
-                className="bg-white/80 hover:bg-white border-gray-200"
+                className="bg-white/80 hover:bg-white border-gray-200 whitespace-normal text-xs sm:text-sm px-3 sm:px-4 py-2 sm:py-2.5"
                 onClick={onBackToDashboard}
               >
-                <ChevronLeft className="mr-2 h-4 w-4" />
-                Back to dashboard
+                <ChevronLeft className="mr-2 h-4 w-4 shrink-0" />
+                <span className="min-w-0 text-left">Back to dashboard</span>
               </Button>
             )}
           </div>
         </div>
+
+        {isFrozen && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-sm">
+            Selections are approved and frozen. You can only view existing books, covers, and rhymes.
+          </div>
+        )}
 
         <Card className="border-0 bg-white/80 backdrop-blur-md shadow-xl">
           <CardHeader>
@@ -283,16 +290,16 @@ const ModeSelectionPage = ({
                     className="group aspect-square flex flex-col cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg border border-slate-200 bg-white"
                     onClick={() => onModeSelect(option.id)}
                   >
-                    <CardContent className="flex-1 flex flex-col justify-between p-4 text-center">
+                    <CardContent className="flex-1 flex flex-col justify-between p-3 sm:p-4 text-center gap-2">
                     <div className="space-y-2">
                         <div className={`w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-lg sm:text-xl shadow`}>
                           <IconComponent className="h-6 w-6 sm:h-7 sm:w-7" />
                         </div>
-                        <h3 className="text-base sm:text-lg font-semibold text-gray-800 truncate">{option.title}</h3>
-                        <p className="text-sm text-gray-600 leading-relaxed line-clamp-2 overflow-hidden text-ellipsis">
+                        <h3 className="text-sm sm:text-lg font-semibold text-gray-800 truncate">{option.title}</h3>
+                        <p className="text-xs sm:text-sm text-gray-600 leading-relaxed line-clamp-2 overflow-hidden text-ellipsis">
                           {option.description}
                         </p>
-                      </div>
+                    </div>
                       <Button
                         type="button"
                         onClick={() => onModeSelect(option.id)}
@@ -1423,7 +1430,7 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
   );
 };
 // Main Rhyme Selection Interface
-const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }) => {
+const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, isReadOnly = false }) => {
   const [availableRhymes, setAvailableRhymes] = useState({});
   const [reusableRhymes, setReusableRhymes] = useState({});
   const [selectedRhymes, setSelectedRhymes] = useState([]);
@@ -1446,6 +1453,14 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   useEffect(() => {
     selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
   }, [selectedRhymes]);
+
+  const ensureEditable = useCallback(() => {
+    if (isReadOnly) {
+      toast.info('Selections are approved and frozen. Viewing only.');
+      return false;
+    }
+    return true;
+  }, [isReadOnly]);
 
   const normalizeSvgPages = useCallback((svgContent) => {
     if (Array.isArray(svgContent)) {
@@ -1939,6 +1954,9 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   }, [school?.school_id, grade]);
 
   const handleAddRhyme = (position) => {
+    if (!ensureEditable()) {
+      return;
+    }
     setCurrentPosition(position);
     setShowTreeMenu(true);
     setShowReusable(false);
@@ -1976,6 +1994,10 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const handleRhymeSelect = async (rhyme) => {
+    if (!ensureEditable()) {
+      setShowTreeMenu(false);
+      return;
+    }
     try {
       const pageIndex = currentPageIndex;
       const prevArray = Array.isArray(selectedRhymes) ? selectedRhymes : [];
@@ -2172,6 +2194,9 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   };
 
   const handleRemoveRhyme = async (rhyme, explicitPosition) => {
+    if (!ensureEditable()) {
+      return;
+    }
     if (!rhyme || !rhyme.code) {
       console.error("handleRemoveRhyme: missing rhyme or code", rhyme);
       return;
@@ -2232,6 +2257,78 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
 
   const handleToggleReusable = () => {
     setShowReusable(!showReusable);
+  };
+
+  const swapCurrentPageOrder = async () => {
+    if (!ensureEditable()) {
+      return;
+    }
+    const pageIndex = Number(currentPageIndex);
+    const halfRhymes =
+      (Array.isArray(selectedRhymes) ? selectedRhymes : []).filter(
+        (r) => Number(r?.page_index) === pageIndex && parsePagesValue(r?.pages) === 0.5
+      ) || [];
+
+    if (halfRhymes.length !== 2) {
+      toast.info('Add two half-page rhymes on this page to change their order.');
+      return;
+    }
+
+    const [first, second] = halfRhymes;
+    const firstPos = resolveRhymePosition(first, { rhymesForContext: selectedRhymes });
+    const secondPos = resolveRhymePosition(second, { rhymesForContext: selectedRhymes });
+
+    if (!firstPos || !secondPos || firstPos === secondPos) {
+      toast.info('Nothing to swap on this page yet.');
+      return;
+    }
+
+    const updated = (Array.isArray(selectedRhymes) ? selectedRhymes : []).map((r) => {
+      const matchesFirst =
+        r &&
+        r.code === first.code &&
+        Number(r.page_index) === pageIndex &&
+        parsePagesValue(r.pages) === 0.5;
+      const matchesSecond =
+        r &&
+        r.code === second.code &&
+        Number(r.page_index) === pageIndex &&
+        parsePagesValue(r.pages) === 0.5;
+
+      if (matchesFirst) {
+        return { ...r, position: secondPos };
+      }
+      if (matchesSecond) {
+        return { ...r, position: firstPos };
+      }
+      return r;
+    });
+
+    const sorted = sortSelections(updated);
+    setSelectedRhymes(sorted);
+    selectedRhymesRef.current = sorted;
+
+    try {
+      await Promise.all([
+        axios.post(`${API}/rhymes/select`, {
+          school_id: school.school_id,
+          grade,
+          page_index: pageIndex,
+          rhyme_code: first.code,
+          position: secondPos,
+        }),
+        axios.post(`${API}/rhymes/select`, {
+          school_id: school.school_id,
+          grade,
+          page_index: pageIndex,
+          rhyme_code: second.code,
+          position: firstPos,
+        }),
+      ]);
+    } catch (error) {
+      console.error('Error swapping rhyme order:', error);
+      toast.error('Unable to update rhyme order.');
+    }
   };
 
   const pageUsage = useMemo(() => computePageUsage(selectedRhymes), [selectedRhymes]);
@@ -2378,6 +2475,10 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
   const canShowNextButton = topReady && bottomReady;
   const canReplaceTop = hasTopRhyme && (!isMultiPageRhyme || currentPageRhymes.multiPageOffset === 0);
   const showMultiPageNote = isMultiPageRhyme && currentPageRhymes.multiPageOffset > 0;
+  const canSwapHalfPage =
+    (Array.isArray(selectedRhymes) ? selectedRhymes : []).filter(
+      (r) => Number(r?.page_index) === Number(currentPageIndex) && parsePagesValue(r?.pages) === 0.5
+    ).length === 2;
 
   const renderLoadingIndicator = (label) => (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-white/80 p-6">
@@ -2461,6 +2562,17 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                       </div>
                     )}
                   </div>
+                  <div className="flex justify-end">
+                    <Button
+                      onClick={swapCurrentPageOrder}
+                      disabled={!canSwapHalfPage || isReadOnly}
+                      variant="outline"
+                      size="sm"
+                      className="bg-white/80"
+                    >
+                      Change order
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="flex-1 min-h-0 flex flex-col">
@@ -2485,7 +2597,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                         <Button
                                           onClick={() => handleAddRhyme('top')}
                                           variant="outline"
-                                          className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
+                                          disabled={isReadOnly}
+                                          className={`absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white${isReadOnly ? ' cursor-not-allowed opacity-60' : ''}`}
                                         >
                                           <Replace className="w-4 h-4 mr-2" />
                                           Replace
@@ -2519,7 +2632,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                       <div className="flex flex-1 items-center justify-center">
                                         <Button
                                           onClick={() => handleAddRhyme('top')}
-                                          className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                          disabled={isReadOnly}
+                                          className={`h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl${isReadOnly ? ' cursor-not-allowed opacity-60' : ''}`}
                                         >
                                           <Plus className="h-8 w-8" />
                                         </Button>
@@ -2538,7 +2652,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                         <Button
                                           onClick={() => handleAddRhyme('bottom')}
                                           variant="outline"
-                                          className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white"
+                                          disabled={isReadOnly}
+                                          className={`absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white${isReadOnly ? ' cursor-not-allowed opacity-60' : ''}`}
                                         >
                                           <Replace className="w-4 h-4 mr-2" />
                                           Replace
@@ -2566,7 +2681,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout }
                                         <div className="flex flex-1 items-center justify-center">
                                           <Button
                                             onClick={() => handleAddRhyme('bottom')}
-                                            className="h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl"
+                                            disabled={isReadOnly}
+                                            className={`h-24 w-24 transform rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-lg transition-all duration-300 hover:scale-105 hover:from-orange-500 hover:to-red-500 hover:shadow-xl${isReadOnly ? ' cursor-not-allowed opacity-60' : ''}`}
                                           >
                                             <Plus className="h-8 w-8" />
                                           </Button>
@@ -2675,6 +2791,12 @@ export function RhymesWorkflowApp() {
   const { user, loading: authLoading, signOut: authSignOut, getIdToken } = useAuth();
   const [isEditingSchoolProfile, setIsEditingSchoolProfile] = useState(false);
   const [schoolFormSubmitting, setSchoolFormSubmitting] = useState(false);
+  const isSuperAdminUser = workspaceUser?.role === 'super-admin';
+  const selectionsFrozen = useMemo(() => {
+    const status = (school?.selection_status || '').toString().toLowerCase();
+    return school?.selections_approved === true || status === 'approved';
+  }, [school]);
+  const freezeNoticeShown = useRef(false);
 
   useEffect(() => {
     if (authLoading) {
@@ -2716,6 +2838,25 @@ export function RhymesWorkflowApp() {
       }
     }
   }, [school]);
+
+  useEffect(() => {
+    if (selectionsFrozen) {
+      setCoverWorkflowIntent('view');
+    } else {
+      freezeNoticeShown.current = false;
+      setCoverWorkflowIntent('edit');
+    }
+  }, [selectionsFrozen]);
+
+  useEffect(() => {
+    if (isSuperAdminUser || !selectionsFrozen) {
+      return;
+    }
+    if (!freezeNoticeShown.current) {
+      toast.info('Selections are approved and frozen. You can only view them.');
+      freezeNoticeShown.current = true;
+    }
+  }, [isSuperAdminUser, selectionsFrozen]);
 
   useEffect(() => {
     if (!school) {
@@ -2782,7 +2923,6 @@ export function RhymesWorkflowApp() {
     [school, getIdToken]
   );
 
-  const isSuperAdminUser = workspaceUser?.role === 'super-admin';
   const schoolFormInitialValues = useMemo(() => buildSchoolFormValuesFromProfile(school), [school]);
 
   const resolveStoredGradeName = useCallback(
@@ -2828,7 +2968,7 @@ export function RhymesWorkflowApp() {
     }
     if (mode === 'cover') {
       setIsCoverDetailsStepComplete(false);
-      setCoverWorkflowIntent('edit');
+      setCoverWorkflowIntent(selectionsFrozen ? 'view' : 'edit');
     }
   };
 
@@ -2837,6 +2977,9 @@ export function RhymesWorkflowApp() {
       setSelectedMode(mode);
     }
     setSelectedGrade(grade);
+    if (mode === 'cover' && selectionsFrozen) {
+      setCoverWorkflowIntent('view');
+    }
   };
 
   const handleBackToGrades = () => {
@@ -2847,14 +2990,14 @@ export function RhymesWorkflowApp() {
   const handleBackToModeSelection = () => {
     setSelectedGrade(null);
     setSelectedMode(null);
-    setCoverWorkflowIntent('edit');
+    setCoverWorkflowIntent(selectionsFrozen ? 'view' : 'edit');
   };
 
   const handleEditCoverDetails = useCallback(() => {
     setSelectedMode('cover');
     setSelectedGrade(null);
-    setCoverWorkflowIntent('edit');
-  }, []);
+    setCoverWorkflowIntent(selectionsFrozen ? 'view' : 'edit');
+  }, [selectionsFrozen]);
 
   const handleLogout = () => {
     const currentSchoolId = school?.school_id;
@@ -2923,6 +3066,7 @@ export function RhymesWorkflowApp() {
           school={school}
           onModeSelect={handleModeSelect}
           isSuperAdmin={isSuperAdminUser}
+          isFrozen={selectionsFrozen}
           onBackToAdmin={handleReturnToAdminDashboard}
           onBackToDashboard={!isSuperAdminUser ? handleReturnToBranchList : undefined}
           onEditProfile={() => setIsEditingSchoolProfile(true)}
@@ -2945,6 +3089,7 @@ export function RhymesWorkflowApp() {
           customGradeName={resolveStoredGradeName(selectedGrade)}
           onBack={handleBackToGrades}
           onLogout={handleLogout}
+          isReadOnly={selectionsFrozen}
         />
       ) : selectedMode === 'cover' && selectedGrade ? (
         <CoverPageWorkflow
@@ -2953,7 +3098,7 @@ export function RhymesWorkflowApp() {
           onBackToMode={handleBackToModeSelection}
           onLogout={handleLogout}
           coverDefaults={coverDefaults}
-          isReadOnly={coverWorkflowIntent === 'view'}
+          isReadOnly={selectionsFrozen || coverWorkflowIntent === 'view'}
         />
       ) : selectedMode === 'books' ? (
         <HomePage
