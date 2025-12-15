@@ -43,6 +43,17 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [manualForm, setManualForm] = useState({ subject: '', coreCode: '', coreCover: '', coreSpine: '' });
 
+  const pruneEmptySelections = (list: SelectionRecord[]) => {
+    return list.filter((s) => {
+      if (!s.selectedOption) return false;
+      const opt = s.selectedOption;
+      const hasCore = !!opt.coreId && !s.skipCore;
+      const hasWork = !!opt.workId && !s.skipWork;
+      const hasAddon = !!opt.addOnId && !s.skipAddon;
+      return hasCore || hasWork || hasAddon;
+    });
+  };
+
   const togglePdf = (id: string) => {
     setExpandedPdf(prev => prev === id ? null : id);
   };
@@ -62,7 +73,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
         return s;
     });
-    onUpdateSelections(newSelections);
+    onUpdateSelections(pruneEmptySelections(newSelections));
   };
 
   const handleRestoreCore = (e: React.MouseEvent, subjectName: string, optionTypeId: string) => {
@@ -74,7 +85,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
         return s;
     });
-    onUpdateSelections(newSelections);
+    onUpdateSelections(pruneEmptySelections(newSelections));
   };
 
   const handleSkipWorkbook = (e: React.MouseEvent, subjectName: string, optionTypeId: string) => {
@@ -86,7 +97,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
         return s;
     });
-    onUpdateSelections(newSelections);
+    onUpdateSelections(pruneEmptySelections(newSelections));
   };
 
   const handleRestoreWorkbook = (e: React.MouseEvent, subjectName: string, optionTypeId: string) => {
@@ -98,7 +109,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
         return s;
     });
-    onUpdateSelections(newSelections);
+    onUpdateSelections(pruneEmptySelections(newSelections));
   };
   
   const handleSkipAddon = (e: React.MouseEvent, subjectName: string, optionTypeId: string) => {
@@ -110,7 +121,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
         return s;
     });
-    onUpdateSelections(newSelections);
+    onUpdateSelections(pruneEmptySelections(newSelections));
   };
 
   const handleRestoreAddon = (e: React.MouseEvent, subjectName: string, optionTypeId: string) => {
@@ -122,7 +133,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
         return s;
     });
-    onUpdateSelections(newSelections);
+    onUpdateSelections(pruneEmptySelections(newSelections));
   };
   
   const handleDropAssessment = (e: React.MouseEvent) => {

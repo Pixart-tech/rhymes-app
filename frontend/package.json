@@ -73,7 +73,7 @@
     "vite": "^7.2.7"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
     "optimize:svgs": "svgo -f ../backend/sample_cover_assets --recursive --multipass"

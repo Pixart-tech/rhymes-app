@@ -37,10 +37,11 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
 from urllib.parse import quote
 from shutil import copy2
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
+from PIL import Image, ImageFilter
 
 load_dotenv()
 
@@ -87,10 +88,18 @@ _localize_svg_image_assets = svg_processing.localize_svg_image_assets
 
 PUBLIC_DIR = (ROOT_DIR / "public").resolve()
 COVER_THEME_PUBLIC_DIR = PUBLIC_DIR / "cover-themes"
+LIBRARY_ROOT_DIR = PUBLIC_DIR / "cover-library"
+LIBRARY_THEMES_DIR = LIBRARY_ROOT_DIR / "themes"
+LIBRARY_COLOURS_DIR = LIBRARY_ROOT_DIR / "colours"
+LIBRARY_THEME_KEYS = [f"Theme {i}" for i in range(1, 17)]
+LIBRARY_GRADE_CODES = ["P", "N", "L", "U"]
+DEFAULT_COLOUR_VERSIONS = [f"V{i}_C" for i in range(1, 9)]
 PUBLIC_URL_PREFIX = "/public"
 
 try:
     COVER_THEME_PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+    LIBRARY_THEMES_DIR.mkdir(parents=True, exist_ok=True)
+    LIBRARY_COLOURS_DIR.mkdir(parents=True, exist_ok=True)
 except OSError as exc:
     logger.warning("Unable to create public cover directory %s: %s", COVER_THEME_PUBLIC_DIR, exc)
 
@@ -201,6 +210,11 @@ COVER_THEME_STORE = CoverThemeImageStore()
 
 _SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 _IMAGE_EXTENSIONS = (".png", ".apng", ".jpg", ".jpeg", ".webp")
+THUMB_MAX_WIDTH = 320
+PREVIEW_MAX_WIDTH = 1100
+IMAGE_INPUT_BASE = LIBRARY_THEMES_DIR
+THUMB_OUTPUT_DIR = LIBRARY_ROOT_DIR / "thumbnails-webp"
+PREVIEW_OUTPUT_DIR = LIBRARY_ROOT_DIR / "previews-webp"
 
 
 def _sanitize_component(value: str, fallback: str) -> str:
@@ -216,7 +230,23 @@ def _resolve_theme_dir(theme_id: str) -> Path:
     return COVER_THEME_PUBLIC_DIR / safe_theme_id
 
 
-def _public_url_for(path: Optional[Path], request: Optional[Request] = None) -> Optional[str]:
+def _resolve_library_theme_dir(theme_key: str) -> Path:
+    safe = _sanitize_component(theme_key, "Theme")
+    return LIBRARY_THEMES_DIR / safe
+
+
+def _resolve_library_colour_path(version: str, grade_code: str, extension: str = ".png") -> Path:
+    safe_version = _sanitize_component(version, "V1_C")
+    safe_grade = _sanitize_component(grade_code, "P")
+    return (LIBRARY_COLOURS_DIR / safe_version) / f"{safe_grade}{extension}"
+
+
+def _public_url_for(
+    path: Optional[Path],
+    request: Optional[Request] = None,
+    *,
+    absolute: bool = False,
+) -> Optional[str]:
     if not path:
         return None
     try:
@@ -224,7 +254,7 @@ def _public_url_for(path: Optional[Path], request: Optional[Request] = None) -> 
     except (ValueError, OSError):
         return None
     public_path = f"{PUBLIC_URL_PREFIX}/{relative.as_posix()}"
-    if request:
+    if absolute and request:
         base = str(request.base_url).rstrip("/")
         return f"{base}{public_path}"
     return public_path
@@ -238,6 +268,164 @@ def _find_existing_image(base_dir: Path, stem: str) -> Optional[Path]:
         if candidate.exists() and candidate.is_file():
             return candidate
     return None
+
+
+def _find_processed_image(
+    stem: str,
+    kind: Literal["thumb", "preview"],
+    *,
+    relative_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    base_dir = THUMB_OUTPUT_DIR if kind == "thumb" else PREVIEW_OUTPUT_DIR
+    target_dir = base_dir / relative_dir if relative_dir else base_dir
+    candidate = target_dir / f"{stem}_{kind}.webp"
+    if candidate.exists() and candidate.is_file():
+        return candidate
+    return None
+
+
+def _iter_source_images(source_dir: Path, thumb_dir: Path, preview_dir: Path) -> Iterable[Path]:
+    """Yield source images, skipping derived folders and unsupported formats."""
+
+    thumb_dir = thumb_dir.resolve()
+    preview_dir = preview_dir.resolve()
+    if not source_dir.exists() or not source_dir.is_dir():
+        return []
+
+    for root, dirs, files in os.walk(source_dir):
+        root_path = Path(root).resolve()
+        try:
+            root_path.relative_to(thumb_dir)
+            continue
+        except ValueError:
+            pass
+        try:
+            root_path.relative_to(preview_dir)
+            continue
+        except ValueError:
+            pass
+        for file_name in sorted(files):
+            entry = root_path / file_name
+            if entry.suffix.lower() not in _IMAGE_EXTENSIONS:
+                continue
+            yield entry
+
+
+def _resize_image_to_width(image: "Image.Image", target_width: int) -> "Image.Image":
+    if target_width <= 0:
+        return image.copy()
+    width, height = image.size
+    if width <= target_width:
+        return image.copy()
+    ratio = target_width / float(width)
+    target_height = max(1, int(height * ratio))
+    return image.resize((int(target_width), target_height), resample=Image.LANCZOS)
+
+
+def _save_webp(image: "Image.Image", target_path: Path) -> None:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(
+        target_path,
+        format="WEBP",
+        quality=90,
+        method=6,
+        optimize=True,
+    )
+
+
+def _process_single_image(
+    source_path: Path,
+    source_root: Path,
+    thumb_root: Path,
+    preview_root: Path,
+    *,
+    thumb_width: int = THUMB_MAX_WIDTH,
+    preview_width: int = PREVIEW_MAX_WIDTH,
+) -> Dict[str, Any]:
+    if source_path.suffix.lower() not in _IMAGE_EXTENSIONS:
+        return {"source": str(source_path), "skipped": True, "reason": "unsupported_extension"}
+
+    try:
+        relative_dir = source_path.parent.resolve().relative_to(source_root.resolve())
+    except ValueError:
+        relative_dir = Path()
+
+    thumb_dir = thumb_root / relative_dir
+    preview_dir = preview_root / relative_dir
+
+    thumb_path = thumb_dir / f"{source_path.stem}_thumb.webp"
+    preview_path = preview_dir / f"{source_path.stem}_preview.webp"
+
+    if thumb_path.exists() and preview_path.exists():
+        return {"source": str(source_path), "skipped": True, "reason": "derived_exists"}
+
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
+    with Image.open(source_path) as img:
+        img.load()
+        base = img.convert("RGBA") if img.mode in {"RGBA", "LA", "P"} else img.convert("RGB")
+
+        if not preview_path.exists():
+            preview = _resize_image_to_width(base, preview_width)
+            _save_webp(preview, preview_path)
+
+        if not thumb_path.exists():
+            thumb = _resize_image_to_width(base, thumb_width)
+            thumb = thumb.filter(ImageFilter.UnsharpMask(radius=1.0, percent=125, threshold=2))
+            _save_webp(thumb, thumb_path)
+
+    return {
+        "source": str(source_path),
+        "thumb": str(thumb_path),
+        "preview": str(preview_path),
+        "processed": True,
+    }
+
+
+def process_existing_images_on_disk(
+    source_dir: Path = IMAGE_INPUT_BASE,
+    *,
+    thumb_dir: Optional[Path] = None,
+    preview_dir: Optional[Path] = None,
+    thumb_width: int = THUMB_MAX_WIDTH,
+    preview_width: int = PREVIEW_MAX_WIDTH,
+) -> Dict[str, Any]:
+    if thumb_dir is None:
+        thumb_dir = THUMB_OUTPUT_DIR
+    if preview_dir is None:
+        preview_dir = PREVIEW_OUTPUT_DIR
+
+    if not source_dir.exists() or not source_dir.is_dir():
+        raise HTTPException(status_code=400, detail=f"Source directory not found: {source_dir}")
+
+    processed = 0
+    skipped = 0
+    files: List[Dict[str, Any]] = []
+
+    for entry in _iter_source_images(source_dir, thumb_dir, preview_dir):
+        result = _process_single_image(
+            entry,
+            source_dir,
+            thumb_dir,
+            preview_dir,
+            thumb_width=thumb_width,
+            preview_width=preview_width,
+        )
+        files.append(result)
+        if result.get("processed"):
+            processed += 1
+        else:
+            skipped += 1
+
+    return {
+        "source": str(source_dir),
+        "thumbnails_dir": str(thumb_dir),
+        "previews_dir": str(preview_dir),
+        "processed": processed,
+        "skipped": skipped,
+        "files": files,
+    }
 
 
 def _remove_existing_images(base_dir: Path, stem: str) -> None:
@@ -330,6 +518,62 @@ def _write_public_image(target_path: Path, content: bytes) -> None:
     except OSError as exc:
         logger.error("Unable to write uploaded image to %s: %s", target_path, exc)
         raise HTTPException(status_code=500, detail="Unable to store uploaded image.") from exc
+
+
+def _build_library_theme_payload(theme_key: str, request: Optional[Request] = None) -> Dict[str, Any]:
+    theme_dir = _resolve_library_theme_dir(theme_key)
+    existing = _find_existing_image(theme_dir, "cover")
+    if not existing and theme_dir.exists():
+        # fallback: pick the first image file in the theme folder
+        for entry in sorted(theme_dir.iterdir()):
+            if entry.is_file() and entry.suffix.lower() in _IMAGE_EXTENSIONS:
+                existing = entry
+                break
+    stem = existing.stem if existing else _sanitize_component(theme_key, "cover")
+    relative_dir: Optional[Path] = None
+    try:
+        relative_dir = theme_dir.resolve().relative_to(IMAGE_INPUT_BASE.resolve())
+    except ValueError:
+        relative_dir = None
+    processed_thumb = _find_processed_image(stem, "thumb", relative_dir=relative_dir)
+    processed_preview = _find_processed_image(stem, "preview", relative_dir=relative_dir)
+    cover_candidate = processed_preview or existing
+    thumb_candidate = processed_thumb or cover_candidate or existing
+    return {
+        "id": theme_key,
+        "label": theme_key,
+        "coverUrl": _public_url_for(cover_candidate, request) if cover_candidate else None,
+        # backward-compatible field name for UIs expecting thumbnailUrl
+        "thumbnailUrl": _public_url_for(thumb_candidate, request) if thumb_candidate else None,
+        "previewUrl": _public_url_for(processed_preview, request) if processed_preview else None,
+    }
+
+
+def _build_library_manifest(request: Optional[Request] = None) -> Dict[str, Any]:
+    themes = [_build_library_theme_payload(theme_key, request) for theme_key in LIBRARY_THEME_KEYS]
+
+    colour_versions: List[str] = []
+    if LIBRARY_COLOURS_DIR.exists():
+        for entry in sorted(LIBRARY_COLOURS_DIR.iterdir()):
+            if entry.is_dir():
+                colour_versions.append(entry.name)
+    if not colour_versions:
+        colour_versions = DEFAULT_COLOUR_VERSIONS
+
+    colours: Dict[str, Dict[str, Optional[str]]] = {}
+    for version in colour_versions:
+        version_dir = LIBRARY_COLOURS_DIR / version
+        grade_map: Dict[str, Optional[str]] = {}
+        for grade_code in LIBRARY_GRADE_CODES:
+            colour_path = _find_existing_image(version_dir, grade_code)
+            grade_map[grade_code] = _public_url_for(colour_path, request) if colour_path else None
+        colours[version] = grade_map
+
+    return {
+        "themes": themes,
+        "colour_versions": colour_versions,
+        "colours": colours,
+    }
 
 
 def _build_theme_payload_from_disk(theme_id: str, request: Optional[Request] = None) -> Dict[str, Any]:
@@ -501,10 +745,12 @@ cors_origins = _parse_csv(os.environ.get("CORS_ORIGINS"), default=["*"])
 allow_all_origins = "*" in cors_origins or not cors_origins
 normalized_origins = [origin for origin in cors_origins if origin != "*"]
 
+
+# middle ware configuration and app setup
 app = FastAPI()
 origins = [
     
-    "http://localhost:3000"  # remove * in production
+    "http://localhost:3000" , "http://192.168.0.102:3000" # remove * in production
 ]
 
 app.add_middleware(
@@ -517,11 +763,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount(PUBLIC_URL_PREFIX, StaticFiles(directory=PUBLIC_DIR, check_dir=False), name="public")
-
-
-
-
+app.mount(PUBLIC_URL_PREFIX, StaticFiles(directory=PUBLIC_DIR, check_dir=True), name="public")
 
 
 class PDFDependencyUnavailableError(RuntimeError):
@@ -1213,7 +1455,7 @@ async def save_cover_selection(
 
 
 @api_router.get("/cover-selections/{school_id}")
-def get_cover_selections(school_id: str, authorization: Optional[str] = Header(None)):
+def get_cover_selections(school_id: str, authorization: Optional[str] = Header(None), request: Request = None):
     """Return saved cover selections for all grades of a school."""
     _verify_and_decode_token(authorization)
 
@@ -1238,7 +1480,7 @@ def get_cover_selections(school_id: str, authorization: Optional[str] = Header(N
             "updated_at": data.get("updated_at"),
         }
 
-    return {"grades": grades}
+    return {"grades": grades, "library": _build_library_manifest(request)}
 
 
 @api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
@@ -1377,66 +1619,66 @@ async def select_rhyme(input: RhymeSelectionCreate):
 #     return {"message": "Selection removed successfully"}
 
 
-@api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}/{position}")
-async def remove_specific_rhyme_selection(
-    school_id: str, grade: str, page_index: int, position: str
-):
-    """Remove a specific rhyme selection for a position (top/bottom)"""
-    class_key = grade.strip().lower().replace(" ", "_")
-    class_doc_ref = _rhyme_collection_for_school(school_id).document(class_key)
-    class_doc = class_doc_ref.get()
-    data = class_doc.to_dict() or {}
-    selections = data.get("items", [])
+# @api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}/{position}")
+# async def remove_specific_rhyme_selection(
+#     school_id: str, grade: str, page_index: int, position: str
+# ):
+#     """Remove a specific rhyme selection for a position (top/bottom)"""
+#     class_key = grade.strip().lower().replace(" ", "_")
+#     class_doc_ref = _rhyme_collection_for_school(school_id).document(class_key)
+#     class_doc = class_doc_ref.get()
+#     data = class_doc.to_dict() or {}
+#     selections = data.get("items", [])
 
-    if not selections:
-        # raise HTTPException(status_code=404, detail="No selections found for this page")
-        return {"message": f"selection is removed"}
+#     if not selections:
+#         # raise HTTPException(status_code=404, detail="No selections found for this page")
+#         return {"message": f"selection is removed"}
 
-    # Find and remove the specific position rhyme
-    target_position = position.lower()
-    selection_to_remove = None
+#     # Find and remove the specific position rhyme
+#     target_position = position.lower()
+#     selection_to_remove = None
 
-    for selection in selections:
-        pages = float(selection.get("pages", 0))
-        stored_position = (selection.get("position") or "top").lower()
+#     for selection in selections:
+#         pages = float(selection.get("pages", 0))
+#         stored_position = (selection.get("position") or "top").lower()
 
-        if pages > 0.5:
-            if target_position == "top":
-                selection_to_remove = selection
-                break
-        elif pages == 0.5:
-            if stored_position == target_position:
-                selection_to_remove = selection
-                break
-            if selection.get("position") is None and target_position == "top":
-                selection_to_remove = selection
-                break
+#         if pages > 0.5:
+#             if target_position == "top":
+#                 selection_to_remove = selection
+#                 break
+#         elif pages == 0.5:
+#             if stored_position == target_position:
+#                 selection_to_remove = selection
+#                 break
+#             if selection.get("position") is None and target_position == "top":
+#                 selection_to_remove = selection
+#                 break
 
-    if not selection_to_remove:
-        for selection in selections:
-            if target_position == "top" and selection.get("pages") != 0.5:
-                selection_to_remove = selection
-                break
-            if target_position == "bottom" and selection.get("pages") == 0.5:
-                selection_to_remove = selection
-                break
+#     if not selection_to_remove:
+#         for selection in selections:
+#             if target_position == "top" and selection.get("pages") != 0.5:
+#                 selection_to_remove = selection
+#                 break
+#             if target_position == "bottom" and selection.get("pages") == 0.5:
+#                 selection_to_remove = selection
+#                 break
 
-    if not selection_to_remove:
-        raise HTTPException(
-            status_code=404, detail="Selection not found for the specified position"
-        )
+#     if not selection_to_remove:
+#         raise HTTPException(
+#             status_code=404, detail="Selection not found for the specified position"
+#         )
 
-    # Remove the selection by rewriting class items
-    remaining = [item for item in selections if item.get("id") != selection_to_remove["id"]]
-    class_doc_ref.set(
-        {
-            "grade": grade,
-            "items": remaining,
-            "updated_at": datetime.utcnow(),
-        }
-    )
+#     # Remove the selection by rewriting class items
+#     remaining = [item for item in selections if item.get("id") != selection_to_remove["id"]]
+#     class_doc_ref.set(
+#         {
+#             "grade": grade,
+#             "items": remaining,
+#             "updated_at": datetime.utcnow(),
+#         }
+#     )
 
-    return {"message": f"{position.capitalize()} selection removed successfully"}
+#     return {"message": f"{position.capitalize()} selection removed successfully"}
 
 
 @api_router.get("/rhymes/status/{school_id}")
@@ -1753,16 +1995,6 @@ async def get_rhyme_image(rhyme_code: str, file_name: str):
     return Response(content=content, media_type=mime_type)
 
 
-# @api_router.get("/cover-assets/manifest")
-# async def get_cover_assets_manifest():
-#     """Return a manifest describing all available cover SVG assets."""
-
-#     base_path = _ensure_cover_assets_base_path()
-#     assets = _build_cover_asset_manifest(base_path, include_markup=True)
-
-#     return {"assets": assets}
-
-
 @api_router.get("/cover-assets/themes")
 async def list_cover_theme_images(request: Request):
     """Return all theme thumbnails and colour PNGs stored on disk."""
@@ -1780,28 +2012,160 @@ async def get_cover_theme_images(theme_id: str, request: Request):
     return {"theme": _build_theme_payload_from_disk(theme_id, request)}
 
 
-@api_router.post("/cover-assets/themes/{theme_id}/thumbnail")
-async def upload_cover_theme_thumbnail(
-    theme_id: str,
-    request: Request,
-    file: UploadFile = File(...),
-    label: Optional[str] = Form(None),
-):
-    """Upload a PNG thumbnail for a theme and store it in the public directory."""
+# ---------------------------------------------------------------------------
+# Shared cover library (disk-backed PNGs for all schools)
+# ---------------------------------------------------------------------------
 
+
+@api_router.get("/cover-library")
+async def list_cover_library(request: Request):
+    """Return available theme covers and colour PNGs stored under public/cover-library."""
+
+    return {"library": _build_library_manifest(request)}
+
+
+@api_router.post("/cover-library/themes/{theme_key}/cover")
+async def upload_library_theme_cover(theme_key: str, file: UploadFile = File(...), request: Request = None):
     content = await file.read()
     if not content:
-        raise HTTPException(status_code=400, detail="Thumbnail image is empty.")
-
-    theme_dir = _resolve_theme_dir(theme_id)
+        raise HTTPException(status_code=400, detail="Cover image is empty.")
     extension = _guess_image_extension(file)
-    _remove_existing_images(theme_dir, "thumbnail")
-    target_path = theme_dir / f"thumbnail{extension}"
+    theme_dir = _resolve_library_theme_dir(theme_key)
+    _remove_existing_images(theme_dir, "cover")
+    target_path = theme_dir / f"cover{extension}"
     _write_public_image(target_path, content)
-    if label:
-        _save_theme_meta(theme_dir, theme_label=label)
+    return {"status": "ok", "theme": _build_library_theme_payload(theme_key, request), "library": _build_library_manifest(request)}
 
-    return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
+
+@api_router.delete("/cover-library/themes/{theme_key}/cover")
+async def delete_library_theme_cover(theme_key: str, request: Request):
+    theme_dir = _resolve_library_theme_dir(theme_key)
+    _remove_existing_images(theme_dir, "cover")
+    return {"status": "ok", "theme": _build_library_theme_payload(theme_key, request), "library": _build_library_manifest(request)}
+
+
+@api_router.post("/cover-library/colours/{version}/{grade_code}")
+async def upload_library_colour(version: str, grade_code: str, file: UploadFile = File(...), request: Request = None):
+    if grade_code.upper() not in LIBRARY_GRADE_CODES:
+        raise HTTPException(status_code=400, detail="Grade code must be one of P,N,L,U.")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Colour image is empty.")
+    extension = _guess_image_extension(file)
+    target_path = _resolve_library_colour_path(version, grade_code.upper(), extension)
+    _remove_existing_images(target_path.parent, Path(target_path).stem)
+    _write_public_image(target_path, content)
+    return {"status": "ok", "library": _build_library_manifest(request)}
+
+
+@api_router.delete("/cover-library/colours/{version}/{grade_code}")
+async def delete_library_colour(version: str, grade_code: str, request: Request):
+    if grade_code.upper() not in LIBRARY_GRADE_CODES:
+        raise HTTPException(status_code=400, detail="Grade code must be one of P,N,L,U.")
+    # remove any extension variant
+    version_dir = LIBRARY_COLOURS_DIR / _sanitize_component(version, "V1_C")
+    safe_grade = _sanitize_component(grade_code, "P")
+    _remove_existing_images(version_dir, safe_grade)
+    return {"status": "ok", "library": _build_library_manifest(request)}
+
+
+@api_router.post("/cover-assets/rebuild-images")
+async def rebuild_cover_images(source_dir: Optional[str] = None):
+    """
+    Generate WebP thumbnails and previews for existing cover images on disk.
+
+    Defaults to the cover themes directory; optional ``source_dir`` can override.
+    """
+
+    base_dir = Path(source_dir).resolve() if source_dir else IMAGE_INPUT_BASE
+    thumb_dir = THUMB_OUTPUT_DIR if not source_dir else (base_dir / "thumbnails-webp")
+    preview_dir = PREVIEW_OUTPUT_DIR if not source_dir else (base_dir / "previews-webp")
+
+    summary = process_existing_images_on_disk(
+        base_dir,
+        thumb_dir=thumb_dir,
+        preview_dir=preview_dir,
+        thumb_width=THUMB_MAX_WIDTH,
+        preview_width=PREVIEW_MAX_WIDTH,
+    )
+
+    return summary
+
+
+# Temporary helper UI to trigger the rebuild endpoint from a browser.
+@app.get("/admin/rebuild-images", response_class=HTMLResponse)
+async def rebuild_images_page():
+    html = """
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>Rebuild WebP Images</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 24px; max-width: 720px; margin: auto; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; }
+        input { width: 100%; padding: 8px; margin-bottom: 12px; }
+        button { padding: 10px 16px; font-size: 15px; cursor: pointer; }
+        #log { margin-top: 16px; font-family: monospace; white-space: pre-wrap; border: 1px solid #ddd; padding: 12px; border-radius: 6px; background: #f9fafb; }
+      </style>
+    </head>
+    <body>
+      <h2>Rebuild WebP Images</h2>
+      <p>Click to POST <code>/api/cover-assets/rebuild-images</code>. Leave the path blank to use defaults.</p>
+      <label for="dir">Source directory (optional)</label>
+      <input id="dir" type="text" placeholder="e.g. C:/path/to/covers or /public/cover-library/themes" />
+      <button id="run">Run rebuild</button>
+      <div id="log">Idle</div>
+      <script>
+        const btn = document.getElementById('run');
+        const log = document.getElementById('log');
+        btn.onclick = async () => {
+          btn.disabled = true;
+          log.textContent = 'Running...';
+          try {
+            const dir = document.getElementById('dir').value.trim();
+            const body = dir ? { source_dir: dir } : {};
+            const res = await fetch('/api/cover-assets/rebuild-images', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            log.textContent = JSON.stringify(data, null, 2);
+          } catch (err) {
+            log.textContent = 'Error: ' + err;
+          } finally {
+            btn.disabled = false;
+          }
+        };
+      </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+# @api_router.post("/cover-assets/themes/{theme_id}/thumbnail")
+# async def upload_cover_theme_thumbnail(
+#     theme_id: str,
+#     request: Request,
+#     file: UploadFile = File(...),
+#     label: Optional[str] = Form(None),
+# ):
+#     """Upload a PNG thumbnail for a theme and store it in the public directory."""
+
+#     content = await file.read()
+#     if not content:
+#         raise HTTPException(status_code=400, detail="Thumbnail image is empty.")
+
+#     theme_dir = _resolve_theme_dir(theme_id)
+#     extension = _guess_image_extension(file)
+#     _remove_existing_images(theme_dir, "thumbnail")
+#     target_path = theme_dir / f"thumbnail{extension}"
+#     _write_public_image(target_path, content)
+#     if label:
+#         _save_theme_meta(theme_dir, theme_label=label)
+
+#     return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
 
 
 @api_router.delete("/cover-assets/themes/{theme_id}/thumbnail")
@@ -2323,21 +2687,34 @@ async def download_rhyme_binder(school_id: str, grade: str):
     page_width, page_height = pdf_resources.page_size
     svg_backend = pdf_resources.svg_backend
 
-    svg_document_cache: Dict[str, Optional[_SvgDocument]] = {}
+    svg_document_cache: Dict[str, List[_SvgDocument]] = {}
 
-    def _get_svg_document(rhyme_code: str) -> Optional[_SvgDocument]:
-        """Return cached SVG metadata for ``rhyme_code`` within this request."""
+    def _get_svg_documents(rhyme_code: str) -> List[_SvgDocument]:
+        """Return cached SVG pages for ``rhyme_code`` within this request."""
 
         if rhyme_code in svg_document_cache:
             return svg_document_cache[rhyme_code]
 
+        documents: List[_SvgDocument] = []
         try:
-            document = _load_rhyme_svg_markup(rhyme_code)
-        except KeyError:
-            document = None
+            svg_payload = _get_cached_rhyme_pages(rhyme_code)
+            pages = svg_payload.get("pages") or []
+            sources = svg_payload.get("sources") or []
+            for index, page_markup in enumerate(pages):
+                source_value = sources[index] if index < len(sources) else None
+                source_path = Path(source_value) if source_value else None
+                documents.append(_SvgDocument(page_markup, source_path))
+        except HTTPException:
+            documents = []
 
-        svg_document_cache[rhyme_code] = document
-        return document
+        if not documents:
+            try:
+                documents.append(_load_rhyme_svg_markup(rhyme_code))
+            except KeyError:
+                documents = []
+
+        svg_document_cache[rhyme_code] = documents
+        return documents
 
     for page_index in sorted(pages_map.keys()):
         entries = pages_map[page_index]
@@ -2359,20 +2736,27 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
         if full_page_entry:
             rhyme_code = full_page_entry.get("rhyme_code")
-            svg_document = _get_svg_document(rhyme_code) if rhyme_code else None
+            svg_documents = _get_svg_documents(rhyme_code) if rhyme_code else []
 
-            if svg_document and _render_svg_on_canvas(
-                pdf_canvas,
-                svg_backend,
-                svg_document,
-                page_width,
-                page_height,
-                rhyme_code=rhyme_code,
-            ):
-                pdf_canvas.showPage()
+            if svg_documents:
+                for svg_document in svg_documents:
+                    if not _render_svg_on_canvas(
+                        pdf_canvas,
+                        svg_backend,
+                        svg_document,
+                        page_width,
+                        page_height,
+                        rhyme_code=rhyme_code,
+                    ):
+                        _draw_text_only_rhyme(
+                            pdf_canvas, full_page_entry, page_width, page_height
+                        )
+                    pdf_canvas.showPage()
                 continue
 
             _draw_text_only_rhyme(pdf_canvas, full_page_entry, page_width, page_height)
+            pdf_canvas.showPage()
+            continue
         else:
             slot_height = page_height / 2
             positioned_entries: Dict[str, Optional[Dict[str, Any]]] = {
@@ -2396,7 +2780,8 @@ async def download_rhyme_binder(school_id: str, grade: str):
                 svg_rendered = False
 
                 rhyme_code = entry.get("rhyme_code")
-                svg_document = _get_svg_document(rhyme_code) if rhyme_code else None
+                svg_documents = _get_svg_documents(rhyme_code) if rhyme_code else []
+                svg_document = svg_documents[0] if svg_documents else None
 
                 if svg_document:
                     svg_rendered = _render_svg_on_canvas(

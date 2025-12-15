@@ -7,7 +7,7 @@ export type ServiceStatus = 'yes' | 'no';
 export type OptionalServiceStatus = ServiceStatus | '';
 export type ServiceStatusMap = Record<SchoolServiceType, OptionalServiceStatus>;
 
-export type GradeKey = 'toddler' | 'playgroup' | 'nursery' | 'lkg' | 'ukg';
+export type GradeKey =  'playgroup' | 'nursery' | 'lkg' | 'ukg';
 export interface GradeSetting {
   enabled: boolean;
   label: string;
@@ -163,14 +163,6 @@ export interface ClassData {
   subjects: Subject[];
 }
 
-export interface CoverSelectionMeta {
-  themeId?: string | null;
-  themeLabel?: string | null;
-  colourId?: string | null;
-  colourLabel?: string | null;
-  status?: 'in-progress' | 'finished' | string | null;
-}
-
 export interface SelectionRecord {
   className: string;
   subjectName: string;
@@ -211,11 +203,6 @@ export interface FinalOutputItem {
   addon_cover?: string | undefined;
   addon_cover_title?: string | undefined;
   addon_spine?: string | undefined;
-  cover_theme_id?: string | null;
-  cover_theme_label?: string | null;
-  cover_colour_id?: string | null;
-  cover_colour_label?: string | null;
-  cover_status?: string | null;
 }
 
 export type AssessmentVariant = 'WITH_MARKS' | 'WITHOUT_MARKS';

@@ -12,6 +12,59 @@ import { API_BASE_URL } from '../lib/utils';
 import { loadPersistedAppState } from '../lib/storage';
 import { toast } from 'sonner';
 
+const SIGNATURE_FIELDS = [
+  'class',
+  'class_label',
+  'subject',
+  'grade_subject',
+  'type',
+  'core',
+  'core_cover',
+  'core_cover_title',
+  'core_spine',
+  'work',
+  'work_cover',
+  'work_cover_title',
+  'work_spine',
+  'addOn',
+  'addon_cover',
+  'addon_cover_title',
+  'addon_spine',
+  // 'cover_theme_id',
+  // 'cover_theme_label',
+  // 'cover_colour_id',
+  // 'cover_colour_label',
+  'cover_status',
+];
+
+const buildStableObject = (value: any): any => {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => buildStableObject(entry));
+  }
+  const sortedKeys = Object.keys(value).sort();
+  const result: Record<string, any> = {};
+  sortedKeys.forEach((key) => {
+    result[key] = buildStableObject(value[key]);
+  });
+  return result;
+};
+
+const normalizeItemForSignature = (item: any) => {
+  if (!item || typeof item !== 'object') {
+    return item;
+  }
+  const normalized: Record<string, any> = {};
+  SIGNATURE_FIELDS.forEach((key) => {
+    if (item[key] !== undefined) {
+      normalized[key] = item[key];
+    }
+  });
+  return normalized;
+};
+
 export type ViewState = 'LANDING' | 'WIZARD' | 'TITLES' | 'SUMMARY' | 'FINAL';
 
 interface WizardAppProps {
@@ -181,28 +234,16 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     return assessmentVariants[className] || 'WITH_MARKS';
   };
 
-  const buildStableObject = (value: any): any => {
-    if (value === null || typeof value !== 'object') {
-      return value;
-    }
-    if (Array.isArray(value)) {
-      return value.map((entry) => buildStableObject(entry));
-    }
-    const sortedKeys = Object.keys(value).sort();
-    const result: Record<string, any> = {};
-    sortedKeys.forEach((key) => {
-      result[key] = buildStableObject(value[key]);
-    });
-    return result;
-  };
-
-  const computeClassSignature = useCallback((items: any[]) => {
-    const normalized = items.map((item) => buildStableObject(item));
-    const sorted = normalized
-      .map((entry) => JSON.stringify(entry))
-      .sort((a, b) => a.localeCompare(b));
-    return JSON.stringify(sorted);
-  }, []);
+  const computeClassSignature = useCallback(
+    (items: any[]) => {
+      const normalized = items.map((item) => buildStableObject(normalizeItemForSignature(item)));
+      const uniqueStrings = Array.from(new Set(normalized.map((entry) => JSON.stringify(entry)))).sort(
+        (a, b) => a.localeCompare(b)
+      );
+      return JSON.stringify(uniqueStrings);
+    },
+    [buildStableObject, normalizeItemForSignature]
+  );
 
   const buildPayloadClassSignatures = useCallback(
     (finalItems: FinalOutputItem[]) => {
@@ -238,18 +279,36 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     const classData = SCHOOL_DATA.find((c) => c.name.toLowerCase() === className.toLowerCase());
     if (!classData) return null;
 
+    let subjectAwareLabelMatch: { option: BookOption; subjectName: string } | null = null;
+    let labelMatch: { option: BookOption; subjectName: string } | null = null;
+
+    const normalizedSavedSubject = typeof item?.subject === 'string' ? item.subject.toLowerCase() : null;
+
     for (const subject of classData.subjects) {
       for (const opt of subject.options) {
         const matchesCore = item.core && opt.coreId === item.core;
         const matchesWork = item.work && opt.workId === item.work;
         const matchesAddon = item.addOn && opt.addOnId === item.addOn;
-        const matchesLabel = item.type && opt.label === item.type;
-        if (matchesCore || matchesWork || matchesAddon || matchesLabel) {
+        if (matchesCore || matchesWork || matchesAddon) {
           return { option: opt, subjectName: subject.name };
+        }
+
+        const matchesLabel = item.type && opt.label === item.type;
+        const matchesLabelAndSubject =
+          matchesLabel &&
+          normalizedSavedSubject &&
+          typeof opt.jsonSubject === 'string' &&
+          opt.jsonSubject.toLowerCase() === normalizedSavedSubject;
+
+        if (matchesLabelAndSubject && !subjectAwareLabelMatch) {
+          subjectAwareLabelMatch = { option: opt, subjectName: subject.name };
+        } else if (matchesLabel && !labelMatch) {
+          labelMatch = { option: opt, subjectName: subject.name };
         }
       }
     }
-    return null;
+
+    return subjectAwareLabelMatch || labelMatch;
   };
 
   const buildSelectionFromSavedItem = useCallback((className: string, item: any): SelectionRecord | null => {
@@ -472,7 +531,8 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       setFinishStatus('error');
       return;
     }
-    lastSavedSelectionSignature.current = selectionSignature;
+    // Refresh from server so the UI shows the latest selections without a manual reload
+    await fetchSavedSelections();
     setFinishStatus('success');
     const allClasses = new Set(completedClasses);
     selections.forEach((s) => allClasses.add(s.className));
@@ -575,29 +635,14 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     );
 
     const currentSignatures = buildPayloadClassSignatures(finalSelections);
-    const savedClasses = Object.keys(savedClassSignatures);
-    const removedClasses = savedClasses.filter((className) => !(className in currentSignatures));
-    const changedClasses = [
-      ...Object.keys(currentSignatures).filter(
-        (className) => currentSignatures[className] !== savedClassSignatures[className]
-      ),
-      ...removedClasses,
-    ];
-
-    if (changedClasses.length === 0) {
-      toast.success('No changes to save.');
-      lastSavedSelectionSignature.current = selectionSignature;
-      return true;
-    }
-
-    const filteredSelections = finalSelections.filter(
-      (item) => changedClasses.includes(item.class_label || item.class || '')
+    const removedClasses = Object.keys(savedClassSignatures).filter(
+      (className) => !(className in currentSignatures)
     );
 
     const payload = {
       school_id: resolvedSchoolId,
-      selections: filteredSelections,
-      excluded_assessments: excludedAssessments.filter((className) => changedClasses.includes(className)),
+      selections: finalSelections,
+      excluded_assessments: excludedAssessments,
       grade_names: latestGradeNames,
       source: 'wizard',
       deleted_classes: removedClasses,
@@ -608,13 +653,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       await axios.post(`${API}/book-selections`, payload, { headers });
       toast.success('Book selections saved successfully');
-      setSavedClassSignatures((prev) => {
-        const next = { ...prev, ...currentSignatures };
-        removedClasses.forEach((cls) => {
-          delete next[cls];
-        });
-        return next;
-      });
+      setSavedClassSignatures(currentSignatures);
       lastSavedSelectionSignature.current = selectionSignature;
       return true;
     } catch (error) {
@@ -684,6 +723,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       const nextExcluded: Set<string> = new Set();
       const nextCompleted: Set<string> = new Set(completedClasses);
       const nextSignatures: Record<string, string> = {};
+      const seenSelections: Set<string> = new Set();
 
       classes.forEach((entry: any) => {
         const rawClass = entry.class || entry.class_name || '';
@@ -703,6 +743,26 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       items.forEach((item: any) => {
         const selection = buildSelectionFromSavedItem(normalizedClass, item);
         if (selection) {
+          const optionKey =
+            selection.selectedOption?.typeId ||
+            selection.selectedOption?.coreId ||
+            selection.selectedOption?.workId ||
+            selection.selectedOption?.addOnId ||
+            selection.selectedOption?.label ||
+            'unknown';
+          const dedupeKey = [
+            selection.className,
+            selection.subjectName,
+            optionKey,
+            selection.selectedOption?.coreId || '',
+            selection.selectedOption?.workId || '',
+            selection.selectedOption?.addOnId || '',
+          ].join('::');
+
+          if (seenSelections.has(dedupeKey)) {
+            return;
+          }
+          seenSelections.add(dedupeKey);
           nextSelections.push(selection);
         }
       });
@@ -811,7 +871,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
               if (!readOnlySummary) {
                 markClassCompleted(currentClassData.name);
               }
-              handleGoHome();
+              handleGoHome();SUMMARY
             }}
             onBack={() => {
                 if (readOnlySummary) {
@@ -1117,7 +1177,7 @@ const Header = ({ onHome, hasFinish, onFinish, showReturnToMenu = false, onRetur
     const isSaving = finishStatus === 'saving';
     const isSaved = finishStatus === 'success';
     const showFinish = hasFinish && finishStatus !== 'success';
-    const finishLabel = isSaving ? 'Saving…' : 'Finish';
+    const finishLabel = isSaving ? 'Saving...' : 'Finish';
 
     return (
         <header className="bg-white border-b py-3 px-6 shadow-sm sticky top-0">
