@@ -86,3 +86,4 @@ android-sdk/ -e
 *.env
 *.env.*
 !frontend/.env.example
+ BOOK CODES 2025-26.xlsx
