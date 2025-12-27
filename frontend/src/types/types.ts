@@ -1,11 +1,13 @@
 
+
+
 export type SchoolServiceType = 'id_cards' | 'report_cards' | 'certificates';
 
 export type ServiceStatus = 'yes' | 'no';
 export type OptionalServiceStatus = ServiceStatus | '';
 export type ServiceStatusMap = Record<SchoolServiceType, OptionalServiceStatus>;
 
-export type GradeKey = 'toddler' | 'playgroup' | 'nursery' | 'lkg' | 'ukg';
+export type GradeKey =  'playgroup' | 'nursery' | 'lkg' | 'ukg';
 export interface GradeSetting {
   enabled: boolean;
   label: string;
@@ -33,6 +35,10 @@ export interface SchoolProfile {
   grades?: GradeMap;
   service_type?: SchoolServiceType[];
   status?: BranchStatus;
+  selection_status?: 'pending' | 'approved' | 'rejected';
+  selections_approved?: boolean;
+  selection_locked_at?: string | null;
+  selection_locked_by?: string | null;
   id_card_fields?: string[];
   created_by_user_id?: string | null;
   created_by_email?: string | null;
@@ -109,3 +115,100 @@ export interface QuestionnaireAnswers {
     selections: LanguageSelection[];
   };
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export interface BookOption {
+  typeId: string; // Unique internal ID for the option
+  label: string;
+  coreId?: string;
+  coreCover?: string;
+  coreSpine?: string;
+  defaultCoreCoverTitle?: string;
+  workId?: string;
+  workCover?: string;
+  workSpine?: string;
+  defaultWorkCoverTitle?: string;
+  addOnId?: string;
+  addOnCover?: string;
+  addOnSpine?: string;
+  defaultAddonCoverTitle?: string;
+  link?: string;
+  info?: string;
+  isRecommended: boolean;
+  jsonSubject?: string; // Override subject name for JSON output
+}
+
+export interface Subject {
+  name: string;
+  isMultiSelect?: boolean; // If true, allows multiple options to be selected
+  options: BookOption[];
+}
+
+export interface ClassData {
+  name: string;
+  subjects: Subject[];
+}
+
+export interface SelectionRecord {
+  className: string;
+  subjectName: string;
+  selectedOption: BookOption | null; // null implies skipped
+  skipCore?: boolean; // If true, the core book is not selected
+  skipWork?: boolean; // If true, the work book is not selected
+  skipAddon?: boolean; // If true, the add-on book is not selected
+  
+  // Custom Overrides
+  customCoreTitle?: string;
+  customCoreId?: string;
+  customCoreSpine?: string;
+
+  customWorkTitle?: string;
+  customWorkId?: string;
+  customWorkSpine?: string;
+
+  customAddonTitle?: string;
+  customAddonId?: string;
+  customAddonSpine?: string;
+}
+
+export interface FinalOutputItem {
+  class: string;
+  class_label?: string;
+  grade_subject?: string;
+  subject: string;
+  type: string;
+  component?: 'core' | 'work' | 'addon';
+  core: string | undefined;
+  core_cover?: string | undefined;
+  core_cover_title?: string | undefined;
+  core_spine?: string | undefined;
+  work: string | undefined;
+  work_cover?: string | undefined;
+  work_cover_title?: string | undefined;
+  work_spine?: string | undefined;
+  addOn: string | undefined;
+  addon_cover?: string | undefined;
+  addon_cover_title?: string | undefined;
+  addon_spine?: string | undefined;
+  cover_theme_id?: string | null;
+  cover_theme_label?: string | null;
+  cover_colour_id?: string | null;
+  cover_colour_label?: string | null;
+  cover_status?: string | null;
+}
+
+export type AssessmentVariant = 'WITH_MARKS' | 'WITHOUT_MARKS';

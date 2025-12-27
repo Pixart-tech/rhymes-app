@@ -487,6 +487,12 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
     if record.get("logo_blob"):
         logo_url = f"/api/schools/{school_id}/logo"
 
+    school_image_urls: List[str] = []
+    for idx in range(1, 5):
+        key = f"school_image_{idx}"
+        if record.get(key):
+            school_image_urls.append(f"/api/schools/{school_id}/images/{idx}")
+
     grades_from_record = record.get("grades")
     logging.debug(f"build_school_from_record: grades from record type: {type(grades_from_record)}, value: {grades_from_record}")
 
@@ -495,6 +501,7 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         school_id=school_id,
         school_name=record.get("school_name") or "School",
         logo_url=logo_url,
+        school_image_urls=school_image_urls,
         email=record.get("email"),
         phone=record.get("phone"),
         address=record.get("address"),
@@ -512,6 +519,10 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         grades=normalize_grades(grades_from_record),
         branch_parent_id=record.get("branch_parent_id"),
         status=record.get("status") or BRANCH_STATUS_ACTIVE,
+        selection_status=record.get("selection_status"),
+        selections_approved=bool(record.get("selections_approved")),
+        selection_locked_at=record.get("selection_locked_at"),
+        selection_locked_by=record.get("selection_locked_by"),
         created_by_user_id=record.get("created_by_user_id"),
         created_by_email=record.get("created_by_email"),
         id_card_fields=record.get("id_card_fields"),
@@ -536,6 +547,7 @@ def create_school_profile(
     user_record: Dict[str, Any],
     logo_blob: Optional[bytes] = None,
     logo_mime_type: Optional[str] = None,
+    school_image_blobs: Optional[List[Tuple[Optional[bytes], Optional[str]]]] = None,
 ) -> School:
     user_id = user_record.get("uid")
     if not user_id:
@@ -600,6 +612,12 @@ def create_school_profile(
         "updated_at": now,
         "timestamp": now,
     }
+
+    if school_image_blobs:
+        for idx, (blob, mime) in enumerate(school_image_blobs, start=1):
+            if blob:
+                school_payload[f"school_image_{idx}"] = blob
+                school_payload[f"school_image_{idx}_mime"] = mime
 
     db.collection("schools").document(school_id).set(school_payload)
     if assignee_id:

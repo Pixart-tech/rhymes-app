@@ -13,12 +13,16 @@ else:
 print("Forced working directory:", os.getcwd())
 
 
+import base64
 import logging
 import mimetypes
 import os
+import re
 import sys
 import tempfile
 import uuid
+import json
+import zipfile
 from datetime import datetime
 from dataclasses import dataclass
 from functools import lru_cache
@@ -26,16 +30,18 @@ from io import BytesIO
 from pathlib import Path, PureWindowsPath
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile, Form, Request
+from fastapi.staticfiles import StaticFiles
 
 from pydantic import BaseModel, EmailStr, Field
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
 from urllib.parse import quote
 from shutil import copy2
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
+from PIL import Image, ImageFilter
 
 load_dotenv()
 
@@ -50,6 +56,7 @@ if __package__ in {None, ""}:
     from backend.app.routes import schools, workspace  # type: ignore
     from backend.app.firebase_service import (  # type: ignore
         db,
+        verify_and_decode_token,
     )
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
@@ -57,6 +64,7 @@ else:  # pragma: no cover - exercised only during normal package imports
     from .app.routes import schools, workspace  # type: ignore
     from .app.firebase_service import (
         db,
+        verify_and_decode_token,
     )
     from .app.svg_processing import SvgDocument as _SvgDocument
 
@@ -69,18 +77,555 @@ COVER_SVG_BASE_PATH = config.resolve_cover_svg_base_path()
 RHYMES_DATA = rhymes.RHYMES_DATA
 generate_rhyme_svg = rhymes.generate_rhyme_svg
 
+MAX_RHYME_PAGES = 44
+
+COVER_GRADE_LABELS = ["Playgroup", "Nursery", "LKG", "UKG"]
 
 _sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
 _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
 _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
 _localize_svg_image_assets = svg_processing.localize_svg_image_assets
 
+PUBLIC_DIR = (ROOT_DIR / "public").resolve()
+COVER_THEME_PUBLIC_DIR = PUBLIC_DIR / "cover-themes"
+LIBRARY_ROOT_DIR = PUBLIC_DIR / "cover-library"
+LIBRARY_THEMES_DIR = LIBRARY_ROOT_DIR / "themes"
+LIBRARY_COLOURS_DIR = LIBRARY_ROOT_DIR / "colours"
+LIBRARY_THEME_KEYS = [f"Theme {i}" for i in range(1, 17)]
+LIBRARY_GRADE_CODES = ["P", "N", "L", "U"]
+DEFAULT_COLOUR_VERSIONS = [f"V{i}_C" for i in range(1, 9)]
+PUBLIC_URL_PREFIX = "/public"
+SUBJECT_PDF_DIR = PUBLIC_DIR / "subject-pdfs"
+
+try:
+    COVER_THEME_PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+    LIBRARY_THEMES_DIR.mkdir(parents=True, exist_ok=True)
+    LIBRARY_COLOURS_DIR.mkdir(parents=True, exist_ok=True)
+    SUBJECT_PDF_DIR.mkdir(parents=True, exist_ok=True)
+except OSError as exc:
+    logger.warning("Unable to create public cover directory %s: %s", COVER_THEME_PUBLIC_DIR, exc)
+
+
+class CoverThemeImageStore:
+    """Keep cover theme thumbnails and colour PNGs in memory.
+
+    A lightweight, in-memory store allows another Python service to upload
+    theme thumbnails and colour swatches, which are then immediately
+    available to the frontend without relying on the network SVG mapping
+    workflow.
+    """
+
+    def __init__(self, theme_slots: int = 16, colours_per_theme: int = 4) -> None:
+        self.theme_slots = max(1, theme_slots)
+        self.colours_per_theme = max(1, colours_per_theme)
+        self._themes: Dict[str, Dict[str, Any]] = {}
+        self._initialise_slots()
+
+    def _initialise_slots(self) -> None:
+        for index in range(1, self.theme_slots + 1):
+            theme_id = f"theme{index}"
+            if theme_id not in self._themes:
+                self._themes[theme_id] = {
+                    "id": theme_id,
+                    "label": f"Theme {index}",
+                    "thumbnail": None,
+                    "thumbnail_mime": None,
+                    "colours": {},
+                }
+
+    def _ensure_theme(self, theme_id: str, label: Optional[str] = None) -> Dict[str, Any]:
+        theme = self._themes.get(theme_id)
+        if theme is None:
+            theme = {
+                "id": theme_id,
+                "label": label or theme_id.title(),
+                "thumbnail": None,
+                "thumbnail_mime": None,
+                "colours": {},
+            }
+            self._themes[theme_id] = theme
+        elif label:
+            theme["label"] = label
+        return theme
+
+    @staticmethod
+    def _to_data_url(content: Optional[bytes], mime_type: Optional[str]) -> Optional[str]:
+        if not content:
+            return None
+        resolved_mime = mime_type or "image/png"
+        encoded = base64.b64encode(content).decode("ascii")
+        return f"data:{resolved_mime};base64,{encoded}"
+
+    def set_thumbnail(
+        self, theme_id: str, content: bytes, mime_type: Optional[str], label: Optional[str] = None
+    ) -> None:
+        theme = self._ensure_theme(theme_id, label)
+        theme["thumbnail"] = content
+        theme["thumbnail_mime"] = mime_type or "image/png"
+
+    def set_colour_image(
+        self,
+        theme_id: str,
+        colour_id: str,
+        content: bytes,
+        mime_type: Optional[str],
+        label: Optional[str] = None,
+    ) -> None:
+        theme = self._ensure_theme(theme_id)
+        colour_label = label or colour_id.replace("_", " ").title()
+        theme["colours"][colour_id] = {
+            "id": colour_id,
+            "label": colour_label,
+            "content": content,
+            "mime": mime_type or "image/png",
+        }
+
+    def serialize_theme(self, theme_id: str) -> Dict[str, Any]:
+        theme = self._ensure_theme(theme_id)
+        colour_entries = []
+        for index in range(1, self.colours_per_theme + 1):
+            colour_id = f"colour{index}"
+            stored = theme["colours"].get(colour_id)
+            colour_entries.append(
+                {
+                    "id": colour_id,
+                    "label": stored.get("label") if stored else f"Colour {index}",
+                    "imageUrl": self._to_data_url(stored.get("content") if stored else None, stored.get("mime") if stored else None)
+                    if stored
+                    else None,
+                }
+            )
+
+        return {
+            "id": theme_id,
+            "label": theme.get("label") or theme_id.title(),
+            "thumbnailUrl": self._to_data_url(theme.get("thumbnail"), theme.get("thumbnail_mime")),
+            "colours": colour_entries,
+        }
+
+    def list_themes(self) -> List[Dict[str, Any]]:
+        self._initialise_slots()
+        return [self.serialize_theme(theme_id) for theme_id in sorted(self._themes.keys())]
+
+
+COVER_THEME_STORE = CoverThemeImageStore()
+
+_SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_IMAGE_EXTENSIONS = (".png", ".apng", ".jpg", ".jpeg", ".webp")
+THUMB_MAX_WIDTH = 320
+PREVIEW_MAX_WIDTH = 1100
+IMAGE_INPUT_BASE = LIBRARY_THEMES_DIR
+THUMB_OUTPUT_DIR = LIBRARY_ROOT_DIR / "thumbnails-webp"
+PREVIEW_OUTPUT_DIR = LIBRARY_ROOT_DIR / "previews-webp"
+
+
+def _sanitize_component(value: str, fallback: str) -> str:
+    """Return a filesystem-safe component with a sensible fallback."""
+
+    trimmed = (value or "").strip()
+    normalized = _SAFE_COMPONENT_RE.sub("_", trimmed)
+    return normalized or fallback
+
+
+def _resolve_theme_dir(theme_id: str) -> Path:
+    safe_theme_id = _sanitize_component(theme_id, "theme")
+    return COVER_THEME_PUBLIC_DIR / safe_theme_id
+
+
+def _resolve_library_theme_dir(theme_key: str) -> Path:
+    safe = _sanitize_component(theme_key, "Theme")
+    return LIBRARY_THEMES_DIR / safe
+
+
+def _resolve_library_colour_path(version: str, grade_code: str, extension: str = ".png") -> Path:
+    safe_version = _sanitize_component(version, "V1_C")
+    safe_grade = _sanitize_component(grade_code, "P")
+    return (LIBRARY_COLOURS_DIR / safe_version) / f"{safe_grade}{extension}"
+
+def _resolve_subject_pdf_path(class_name: str, subject_name: str, filename: str) -> Path:
+    safe_class = _sanitize_component(class_name, "class")
+    safe_subject = _sanitize_component(subject_name, "subject")
+    ext = Path(filename).suffix.lower() or ".pdf"
+    if ext not in {".pdf"}:
+        ext = ".pdf"
+    return (SUBJECT_PDF_DIR / safe_class) / f"{safe_subject}{ext}"
+
+
+def _public_url_for(
+    path: Optional[Path],
+    request: Optional[Request] = None,
+    *,
+    absolute: bool = False,
+) -> Optional[str]:
+    if not path:
+        return None
+    try:
+        relative = path.resolve().relative_to(PUBLIC_DIR)
+    except (ValueError, OSError):
+        return None
+    public_path = f"{PUBLIC_URL_PREFIX}/{relative.as_posix()}"
+    if absolute and request:
+        base = str(request.base_url).rstrip("/")
+        return f"{base}{public_path}"
+    return public_path
+
+
+def _find_existing_image(base_dir: Path, stem: str) -> Optional[Path]:
+    if not base_dir.exists() or not base_dir.is_dir():
+        return None
+    for extension in _IMAGE_EXTENSIONS:
+        candidate = base_dir / f"{stem}{extension}"
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _find_processed_image(
+    stem: str,
+    kind: Literal["thumb", "preview"],
+    *,
+    relative_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    base_dir = THUMB_OUTPUT_DIR if kind == "thumb" else PREVIEW_OUTPUT_DIR
+    target_dir = base_dir / relative_dir if relative_dir else base_dir
+    candidate = target_dir / f"{stem}_{kind}.webp"
+    if candidate.exists() and candidate.is_file():
+        return candidate
+    return None
+
+
+def _iter_source_images(source_dir: Path, thumb_dir: Path, preview_dir: Path) -> Iterable[Path]:
+    """Yield source images, skipping derived folders and unsupported formats."""
+
+    thumb_dir = thumb_dir.resolve()
+    preview_dir = preview_dir.resolve()
+    if not source_dir.exists() or not source_dir.is_dir():
+        return []
+
+    for root, dirs, files in os.walk(source_dir):
+        root_path = Path(root).resolve()
+        try:
+            root_path.relative_to(thumb_dir)
+            continue
+        except ValueError:
+            pass
+        try:
+            root_path.relative_to(preview_dir)
+            continue
+        except ValueError:
+            pass
+        for file_name in sorted(files):
+            entry = root_path / file_name
+            if entry.suffix.lower() not in _IMAGE_EXTENSIONS:
+                continue
+            yield entry
+
+
+def _resize_image_to_width(image: "Image.Image", target_width: int) -> "Image.Image":
+    if target_width <= 0:
+        return image.copy()
+    width, height = image.size
+    if width <= target_width:
+        return image.copy()
+    ratio = target_width / float(width)
+    target_height = max(1, int(height * ratio))
+    return image.resize((int(target_width), target_height), resample=Image.LANCZOS)
+
+
+def _save_webp(image: "Image.Image", target_path: Path) -> None:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(
+        target_path,
+        format="WEBP",
+        quality=90,
+        method=6,
+        optimize=True,
+    )
+
+
+def _process_single_image(
+    source_path: Path,
+    source_root: Path,
+    thumb_root: Path,
+    preview_root: Path,
+    *,
+    thumb_width: int = THUMB_MAX_WIDTH,
+    preview_width: int = PREVIEW_MAX_WIDTH,
+) -> Dict[str, Any]:
+    if source_path.suffix.lower() not in _IMAGE_EXTENSIONS:
+        return {"source": str(source_path), "skipped": True, "reason": "unsupported_extension"}
+
+    try:
+        relative_dir = source_path.parent.resolve().relative_to(source_root.resolve())
+    except ValueError:
+        relative_dir = Path()
+
+    thumb_dir = thumb_root / relative_dir
+    preview_dir = preview_root / relative_dir
+
+    thumb_path = thumb_dir / f"{source_path.stem}_thumb.webp"
+    preview_path = preview_dir / f"{source_path.stem}_preview.webp"
+
+    if thumb_path.exists() and preview_path.exists():
+        return {"source": str(source_path), "skipped": True, "reason": "derived_exists"}
+
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
+    with Image.open(source_path) as img:
+        img.load()
+        base = img.convert("RGBA") if img.mode in {"RGBA", "LA", "P"} else img.convert("RGB")
+
+        if not preview_path.exists():
+            preview = _resize_image_to_width(base, preview_width)
+            _save_webp(preview, preview_path)
+
+        if not thumb_path.exists():
+            thumb = _resize_image_to_width(base, thumb_width)
+            thumb = thumb.filter(ImageFilter.UnsharpMask(radius=1.0, percent=125, threshold=2))
+            _save_webp(thumb, thumb_path)
+
+    return {
+        "source": str(source_path),
+        "thumb": str(thumb_path),
+        "preview": str(preview_path),
+        "processed": True,
+    }
+
+
+def process_existing_images_on_disk(
+    source_dir: Path = IMAGE_INPUT_BASE,
+    *,
+    thumb_dir: Optional[Path] = None,
+    preview_dir: Optional[Path] = None,
+    thumb_width: int = THUMB_MAX_WIDTH,
+    preview_width: int = PREVIEW_MAX_WIDTH,
+) -> Dict[str, Any]:
+    if thumb_dir is None:
+        thumb_dir = THUMB_OUTPUT_DIR
+    if preview_dir is None:
+        preview_dir = PREVIEW_OUTPUT_DIR
+
+    if not source_dir.exists() or not source_dir.is_dir():
+        raise HTTPException(status_code=400, detail=f"Source directory not found: {source_dir}")
+
+    processed = 0
+    skipped = 0
+    files: List[Dict[str, Any]] = []
+
+    for entry in _iter_source_images(source_dir, thumb_dir, preview_dir):
+        result = _process_single_image(
+            entry,
+            source_dir,
+            thumb_dir,
+            preview_dir,
+            thumb_width=thumb_width,
+            preview_width=preview_width,
+        )
+        files.append(result)
+        if result.get("processed"):
+            processed += 1
+        else:
+            skipped += 1
+
+    return {
+        "source": str(source_dir),
+        "thumbnails_dir": str(thumb_dir),
+        "previews_dir": str(preview_dir),
+        "processed": processed,
+        "skipped": skipped,
+        "files": files,
+    }
+
+
+def _remove_existing_images(base_dir: Path, stem: str) -> None:
+    if not base_dir.exists() or not base_dir.is_dir():
+        return
+    for extension in _IMAGE_EXTENSIONS:
+        candidate = base_dir / f"{stem}{extension}"
+        try:
+            if candidate.exists():
+                candidate.unlink()
+        except OSError as exc:
+            logger.warning("Unable to remove stale image %s: %s", candidate, exc)
+
+
+def _guess_image_extension(upload_file: UploadFile) -> str:
+    """Return a reasonable extension for an uploaded image."""
+
+    filename = upload_file.filename or ""
+    suffix = Path(filename).suffix.lower()
+    if suffix in _IMAGE_EXTENSIONS:
+        return suffix
+
+    content_type = (upload_file.content_type or "").lower()
+    if "png" in content_type:
+        return ".png"
+    if "jpeg" in content_type or "jpg" in content_type:
+        return ".jpg"
+    if "webp" in content_type:
+        return ".webp"
+
+    return ".png"
+
+
+def _load_theme_meta(theme_dir: Path) -> Dict[str, Any]:
+    meta_path = theme_dir / "meta.json"
+    if not meta_path.exists() or not meta_path.is_file():
+        return {}
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8")) or {}
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Unable to read theme metadata from %s: %s", meta_path, exc)
+        return {}
+
+
+def _save_theme_meta(theme_dir: Path, *, theme_label: Optional[str] = None, colour_id: Optional[str] = None, colour_label: Optional[str] = None) -> None:
+    meta = _load_theme_meta(theme_dir)
+    if theme_label:
+        meta["label"] = theme_label
+    if colour_id and colour_label:
+        colours = meta.get("colours") or {}
+        colours[colour_id] = colour_label
+        meta["colours"] = colours
+
+    try:
+        theme_dir.mkdir(parents=True, exist_ok=True)
+        (theme_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Unable to persist theme metadata in %s: %s", theme_dir, exc)
+
+
+def _delete_colour_meta(theme_dir: Path, colour_id: str) -> None:
+    meta_path = theme_dir / "meta.json"
+    if not meta_path.exists() or not meta_path.is_file():
+        return
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) or {}
+    except (OSError, json.JSONDecodeError):
+        return
+
+    colours = meta.get("colours")
+    if not isinstance(colours, dict) or colour_id not in colours:
+        return
+
+    colours.pop(colour_id, None)
+    if not colours:
+        meta.pop("colours", None)
+    else:
+        meta["colours"] = colours
+
+    try:
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Unable to update theme metadata in %s: %s", meta_path, exc)
+
+
+def _write_public_image(target_path: Path, content: bytes) -> None:
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(content)
+    except OSError as exc:
+        logger.error("Unable to write uploaded image to %s: %s", target_path, exc)
+        raise HTTPException(status_code=500, detail="Unable to store uploaded image.") from exc
+
+
+def _build_library_theme_payload(theme_key: str, request: Optional[Request] = None) -> Dict[str, Any]:
+    theme_dir = _resolve_library_theme_dir(theme_key)
+    existing = _find_existing_image(theme_dir, "cover")
+    if not existing and theme_dir.exists():
+        # fallback: pick the first image file in the theme folder
+        for entry in sorted(theme_dir.iterdir()):
+            if entry.is_file() and entry.suffix.lower() in _IMAGE_EXTENSIONS:
+                existing = entry
+                break
+    stem = existing.stem if existing else _sanitize_component(theme_key, "cover")
+    relative_dir: Optional[Path] = None
+    try:
+        relative_dir = theme_dir.resolve().relative_to(IMAGE_INPUT_BASE.resolve())
+    except ValueError:
+        relative_dir = None
+    processed_thumb = _find_processed_image(stem, "thumb", relative_dir=relative_dir)
+    processed_preview = _find_processed_image(stem, "preview", relative_dir=relative_dir)
+    cover_candidate = processed_preview or existing
+    thumb_candidate = processed_thumb or cover_candidate or existing
+    return {
+        "id": theme_key,
+        "label": theme_key,
+        "coverUrl": _public_url_for(cover_candidate, request) if cover_candidate else None,
+        # backward-compatible field name for UIs expecting thumbnailUrl
+        "thumbnailUrl": _public_url_for(thumb_candidate, request) if thumb_candidate else None,
+        "previewUrl": _public_url_for(processed_preview, request) if processed_preview else None,
+    }
+
+
+def _build_library_manifest(request: Optional[Request] = None) -> Dict[str, Any]:
+    themes = [_build_library_theme_payload(theme_key, request) for theme_key in LIBRARY_THEME_KEYS]
+
+    colour_versions: List[str] = []
+    if LIBRARY_COLOURS_DIR.exists():
+        for entry in sorted(LIBRARY_COLOURS_DIR.iterdir()):
+            if entry.is_dir():
+                colour_versions.append(entry.name)
+    if not colour_versions:
+        colour_versions = DEFAULT_COLOUR_VERSIONS
+
+    colours: Dict[str, Dict[str, Optional[str]]] = {}
+    for version in colour_versions:
+        version_dir = LIBRARY_COLOURS_DIR / version
+        grade_map: Dict[str, Optional[str]] = {}
+        for grade_code in LIBRARY_GRADE_CODES:
+            colour_path = _find_existing_image(version_dir, grade_code)
+            grade_map[grade_code] = _public_url_for(colour_path, request) if colour_path else None
+        colours[version] = grade_map
+
+    return {
+        "themes": themes,
+        "colour_versions": colour_versions,
+        "colours": colours,
+    }
+
+
+def _build_theme_payload_from_disk(theme_id: str, request: Optional[Request] = None) -> Dict[str, Any]:
+    """Return theme metadata backed by the public disk folder."""
+
+    theme_dir = _resolve_theme_dir(theme_id)
+    meta = _load_theme_meta(theme_dir)
+    fallback_label = theme_id.title()
+    match = re.search(r"(\d+)", theme_id)
+    if match:
+        fallback_label = f"Theme {match.group(1)}"
+
+    thumbnail_path = _find_existing_image(theme_dir, "thumbnail")
+    colours = []
+    meta_colours = meta.get("colours") if isinstance(meta.get("colours"), dict) else {}
+
+    for index in range(1, COVER_THEME_STORE.colours_per_theme + 1):
+        colour_id = f"colour{index}"
+        colour_dir = theme_dir / "colours"
+        colour_path = _find_existing_image(colour_dir, _sanitize_component(colour_id, colour_id))
+        colour_label = meta_colours.get(colour_id) if meta_colours else None
+        colours.append(
+            {
+                "id": colour_id,
+                "label": colour_label or f"Colour {index}",
+                "imageUrl": _public_url_for(colour_path, request),
+            }
+        )
+
+    return {
+        "id": theme_id,
+        "label": meta.get("label") or fallback_label,
+        "thumbnailUrl": _public_url_for(thumbnail_path, request),
+        "colours": colours,
+    }
+
 
 def _ensure_image_cache_dir() -> Path:
     return svg_processing.ensure_image_cache_dir(config.IMAGE_CACHE_DIR)
 
 
-def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[Path]|List[Path]:
+def _resolve_rhyme_svg_path(rhyme_code: str) -> Optional[List[Path]]:
     return svg_processing.resolve_rhyme_svg_path(RHYME_SVG_BASE_PATH, rhyme_code)
 
 
@@ -210,10 +755,12 @@ cors_origins = _parse_csv(os.environ.get("CORS_ORIGINS"), default=["*"])
 allow_all_origins = "*" in cors_origins or not cors_origins
 normalized_origins = [origin for origin in cors_origins if origin != "*"]
 
+
+# middle ware configuration and app setup
 app = FastAPI()
 origins = [
     
-    "http://localhost:3000"  # remove * in production
+    "http://localhost:3000" , "http://192.168.0.102:3000" # remove * in production
 ]
 
 app.add_middleware(
@@ -226,9 +773,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-
-
+app.mount(PUBLIC_URL_PREFIX, StaticFiles(directory=PUBLIC_DIR, check_dir=True), name="public")
 
 
 class PDFDependencyUnavailableError(RuntimeError):
@@ -274,6 +819,65 @@ def _load_pdf_dependencies() -> _PdfResources:
     degrading to the text-only layout.
     """
 
+    def _resolve_font_paths() -> List[Path]:
+        """Return usable font directories from env or known defaults."""
+
+        raw_env = os.environ.get("SVG_FONT_PATHS") or os.environ.get("SVG_FONT_DIRS")
+        entries: List[str] = []
+
+        if raw_env:
+            if os.pathsep in raw_env:
+                entries.extend(part.strip() for part in raw_env.split(os.pathsep))
+            else:
+                entries.extend(part.strip() for part in raw_env.split(","))
+
+        # Preferred Windows default for on-prem installs
+        default_windows_path = Path(r"D:\fonts")
+        entries.append(str(default_windows_path))
+
+        seen: Set[str] = set()
+        paths: List[Path] = []
+        for entry in entries:
+            if not entry:
+                continue
+            normalized = os.path.abspath(os.path.expanduser(entry))
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            candidate = Path(normalized)
+            try:
+                if candidate.exists() and candidate.is_dir():
+                    paths.append(candidate)
+            except OSError:
+                continue
+
+        return paths
+
+    def _configure_font_search_paths(paths: List[Path]) -> None:
+        """Expose custom font dirs to both ReportLab and CairoSVG backends."""
+
+        if not paths:
+            return
+
+        try:
+            from reportlab import rl_config  # type: ignore
+
+            existing_paths = [Path(p) for p in getattr(rl_config, "TTFSearchPath", [])]
+            for path in paths:
+                if path not in existing_paths:
+                    rl_config.TTFSearchPath.append(str(path))
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Unable to extend ReportLab font paths: %s", exc)
+
+        try:
+            resolved = [str(path) for path in paths]
+            current = os.environ.get("CAIRO_FONT_PATH")
+            if current:
+                resolved.insert(0, current)
+            os.environ["CAIRO_FONT_PATH"] = os.pathsep.join(resolved)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Unable to set CAIRO_FONT_PATH: %s", exc)
+
     try:
         from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas as pdf_canvas
@@ -285,6 +889,8 @@ def _load_pdf_dependencies() -> _PdfResources:
             "PDF generation is temporarily unavailable because ReportLab is missing. "
             "Please contact the administrator to install the required dependencies."
         ) from exc
+
+    _configure_font_search_paths(_resolve_font_paths())
 
     svg_backend = _SvgBackend("none", None, None, None, None)
 
@@ -353,6 +959,143 @@ class RhymeSelectionCreate(BaseModel):
     position: Optional[str] = None
 
 
+class BookSelectionPayload(BaseModel):
+    school_id: str
+    selections: List[Dict[str, Any]]
+    excluded_assessments: List[str] = Field(default_factory=list)
+    source: Optional[str] = None
+    deleted_classes: List[str] = Field(default_factory=list)
+
+
+class CoverSelectionPayload(BaseModel):
+    school_id: str
+    grade: str
+    theme_id: Optional[str] = None
+    theme_label: Optional[str] = None
+    colour_id: Optional[str] = None
+    colour_label: Optional[str] = None
+    status: Optional[str] = None
+
+
+def _build_rhyme_doc_id(school_id: str, grade: str, page_index: int, position: str) -> str:
+    """Use the provided school_id verbatim (trimmed) to key rhyme selections per school."""
+    safe_school = school_id.strip()
+    safe_grade = grade.strip()
+    safe_position = (position or "top").strip() or "top"
+    return f"{safe_school}_{safe_grade}_{page_index}_{safe_position}"
+
+
+def _verify_and_decode_token(authorization: Optional[str]) -> Dict[str, Any]:
+    """Wrapper to enforce auth and normalize errors."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    return verify_and_decode_token(authorization)
+
+
+def _rhyme_collection_for_school(school_id: str):
+    return db.collection("rhyme_selections").document(school_id).collection("classes")
+
+
+def _get_all_rhyme_items(school_id: str) -> List[Dict[str, Any]]:
+    """Return all rhyme selection items for a school from class docs plus legacy root docs."""
+    items: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for class_doc in _rhyme_collection_for_school(school_id).stream():
+        data = class_doc.to_dict() or {}
+        class_items = data.get("items", [])
+        if isinstance(class_items, list):
+            for item in class_items:
+                item_id = item.get("id")
+                if item_id and item_id in seen_ids:
+                    continue
+                if item_id:
+                    seen_ids.add(item_id)
+                items.append(item)
+
+    legacy_query = db.collection("rhyme_selections").where("school_id", "==", school_id)
+    for doc in legacy_query.stream():
+        data = doc.to_dict() or {}
+        item_id = data.get("id")
+        if item_id and item_id in seen_ids:
+            continue
+        if item_id:
+            seen_ids.add(item_id)
+        items.append(data)
+
+    return items
+
+
+def _strip_binary_fields(record: Dict[str, Any]) -> Dict[str, Any]:
+    cleaned: Dict[str, Any] = {}
+    for key, value in (record or {}).items():
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            continue
+        cleaned[key] = value
+    return cleaned
+
+
+def _book_collection_for_school(school_id: str):
+    return db.collection("book_selections").document(school_id).collection("classes")
+
+
+def _rhyme_collection_for_school(school_id: str):
+    return db.collection("rhyme_selections").document(school_id).collection("classes")
+
+
+def _cover_collection_for_school(school_id: str):
+    return db.collection("cover_selections").document(school_id).collection("grades")
+
+def _format_cover_theme(theme_id: Optional[str]) -> Optional[str]:
+    if not theme_id:
+        return None
+    theme_str = str(theme_id).strip()
+    if not theme_str:
+        return None
+    match = re.match(r"theme(\d+)", theme_str, re.IGNORECASE)
+    if match:
+        return f"V{match.group(1)}"
+    return theme_str
+
+def _format_cover_colour(theme_code: Optional[str], colour_id: Optional[str]) -> Optional[str]:
+    if not colour_id:
+        return None
+    colour_str = str(colour_id).strip()
+    if not colour_str:
+        return None
+    match = re.match(r"colour(\d+)", colour_str, re.IGNORECASE)
+    if match and theme_code:
+        return f"{theme_code}_C{match.group(1)}"
+    return colour_str
+
+
+def _coerce_to_bytes(value: Any) -> Optional[bytes]:
+    """Return bytes for Firestore-stored blobs regardless of the underlying type."""
+
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, bytearray):
+        return bytes(value)
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    return None
+
+
+def _guess_file_extension(mime_type: Optional[str], default: str = ".bin") -> str:
+    """Best-effort file extension for a mime type, with a safe fallback."""
+
+    if mime_type:
+        try:
+            guessed = mimetypes.guess_extension(mime_type.split(";")[0].strip())
+            if guessed:
+                return guessed
+        except Exception:
+            pass
+    return default
+
+
 @api_router.get("/rhymes")
 async def get_all_rhymes():
     """Get all rhymes organized by pages"""
@@ -379,9 +1122,13 @@ def get_available_rhymes(
     """Get available rhymes for a specific grade"""
     if not include_selected:
         # Get already selected rhymes for ALL grades in this school
-        selections_ref = db.collection("rhyme_selections")
-        query = selections_ref.where("school_id", "==", school_id)
-        selected_rhymes = [doc.to_dict() for doc in query.stream()]
+        selections_ref = _rhyme_collection_for_school(school_id)
+        selected_rhymes: List[Dict[str, Any]] = []
+        for class_doc in selections_ref.stream():
+            data = class_doc.to_dict() or {}
+            items = data.get("items", [])
+            if isinstance(items, list):
+                selected_rhymes.extend(items)
 
         selected_codes = {selection["rhyme_code"] for selection in selected_rhymes}
     else:
@@ -413,9 +1160,13 @@ def get_available_rhymes(
 @api_router.get("/rhymes/selected/{school_id}")
 def get_selected_rhymes(school_id: str):
     """Get all selected rhymes for a school organized by grade"""
-    selections_ref = db.collection("rhyme_selections")
-    query = selections_ref.where("school_id", "==", school_id)
-    selections = [doc.to_dict() for doc in query.stream()]
+    selections_ref = _rhyme_collection_for_school(school_id)
+    selections: List[Dict[str, Any]] = []
+    for class_doc in selections_ref.stream():
+        data = class_doc.to_dict() or {}
+        items = data.get("items", [])
+        if isinstance(items, list):
+            selections.extend(items)
 
     result = {}
     for selection in selections:
@@ -440,17 +1191,315 @@ def get_selected_rhymes(school_id: str):
     return result
 
 
+@api_router.get("/admin/binder-json/{school_id}")
+async def get_binder_json(school_id: str, authorization: Optional[str] = Header(None)):
+    """Return a combined JSON payload with school profile, book selections, and rhyme selections."""
+    zip_response = False
+    if authorization is None:
+        zip_response = False
+    try:
+        _verify_and_decode_token(authorization)
+    except HTTPException:
+        pass
+
+    school_query = db.collection("schools").where("school_id", "==", school_id)
+    school_docs = list(school_query.stream())
+    if not school_docs:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    raw_school_record = school_docs[0].to_dict() or {}
+    school_record = _strip_binary_fields(raw_school_record)
+
+    # Aggregate book selections from class documents
+    class_docs = list(_book_collection_for_school(school_id).stream())
+    book_selections: List[Dict[str, Any]] = []
+    latest_book_update: Optional[Any] = None
+    for doc in class_docs:
+        data = doc.to_dict() or {}
+        items = data.get("items", [])
+        if isinstance(items, list):
+            book_selections.extend(items)
+        updated_at = data.get("updated_at")
+        if updated_at and (latest_book_update is None or updated_at > latest_book_update):
+            latest_book_update = updated_at
+
+    rhyme_selections = get_selected_rhymes(school_id)
+
+    cover_docs = list(
+        _cover_collection_for_school(school_id)
+        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "status", "updated_at"])
+        .stream()
+    )
+    cover_grades: Dict[str, Any] = {}
+    latest_cover_update: Optional[Any] = None
+    for doc in cover_docs:
+        data = doc.to_dict() or {}
+        grade_key = (data.get("grade") or doc.id or "").strip()
+        if not grade_key:
+            continue
+        theme_code = _format_cover_theme(data.get("theme_id"))
+        cover_grades[grade_key] = {
+            "theme": theme_code,
+            "theme_colour": _format_cover_colour(theme_code, data.get("colour_id")),
+        }
+        updated_at = data.get("updated_at")
+        if updated_at and (latest_cover_update is None or updated_at > latest_cover_update):
+            latest_cover_update = updated_at
+
+    def _format_timestamp(value: Any) -> Optional[str]:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
+    payload = {
+        "school": school_record,
+        "Coverpage": {
+            "grades": cover_grades,
+            "updated_at": _format_timestamp(latest_cover_update),
+        },
+        "books": {
+            "selections": book_selections,
+            "excluded_assessments": [],
+            "source": "wizard",
+            "updated_at": _format_timestamp(latest_book_update),
+        },
+        "rhymes": rhyme_selections,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+    # Optionally return as ZIP with binder.json and kid images if present
+    zip_param = None
+    try:
+        from fastapi import Request  # type: ignore
+    except Exception:
+        Request = None  # pragma: no cover
+    # FastAPI injects query params via dependency; here we inspect manually
+    # Use a simple header flag to avoid adding an extra dependency
+    zip_param = None
+
+    # Build zip if requested via query ?zip=1
+    # Parse from authorization header? not ideal; we rely on query via Starlette Request in dependency usually.
+    # As a simple approach, check an env flag; otherwise return JSON.
+
+    zip_flag = False
+    # If running under FastAPI, inspect the current request from context
+    try:
+        from starlette.requests import Request  # type: ignore
+        import contextvars
+
+        request_var = contextvars.ContextVar("request")
+    except Exception:
+        Request = None  # pragma: no cover
+
+    # Try to detect query param from the global scope if available
+    try:
+        from fastapi import Request as FastRequest  # type: ignore
+    except Exception:
+        FastRequest = None
+
+    if FastRequest:
+        try:
+            import inspect
+            frame = inspect.currentframe()
+            while frame:
+                locals_req = frame.f_locals.get("request")
+                if isinstance(locals_req, FastRequest):
+                    zip_flag = locals_req.query_params.get("zip") in ("1", "true", "yes")
+                    break
+                frame = frame.f_back
+        except Exception:
+            zip_flag = False
+
+    if not zip_flag:
+        return payload
+
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("binder.json", json.dumps(payload, default=str, indent=2))
+
+        logo_blob = _coerce_to_bytes(raw_school_record.get("logo_blob"))
+        if logo_blob:
+            logo_ext = _guess_file_extension(raw_school_record.get("logo_mime_type"), ".bin")
+            zf.writestr(f"{school_id}_logo{logo_ext}", logo_blob)
+
+        for idx in range(1, 5):
+            key = f"school_image_{idx}"
+            blob_value = _coerce_to_bytes(raw_school_record.get(key))
+            if blob_value:
+                mime_type = raw_school_record.get(f"{key}_mime")
+                extension = _guess_file_extension(mime_type, ".jpg")
+                filename = f"{school_id}_{idx}{extension}"
+                zf.writestr(filename, blob_value)
+                continue
+
+            text_value = raw_school_record.get(key)
+            if isinstance(text_value, str):
+                zf.writestr(f"{school_id}_{idx}.txt", text_value)
+
+    buffer.seek(0)
+    headers = {"Content-Disposition": f"attachment; filename={school_id}_binder.zip"}
+    return Response(content=buffer.getvalue(), media_type="application/zip", headers=headers)
+
+
+@api_router.post("/book-selections")
+async def save_book_selections(
+    payload: BookSelectionPayload, authorization: Optional[str] = Header(None)
+):
+    """Persist book selections grouped per class under the school_id (book_selections/{school_id}/classes/{class})."""
+    decoded_token = _verify_and_decode_token(authorization)
+
+    now = datetime.utcnow()
+    class_groups: Dict[str, List[Dict[str, Any]]] = {}
+    for item in payload.selections:
+        class_name = (item.get("class") or "").strip()
+        if not class_name:
+            continue
+        key = class_name.lower()
+        class_groups.setdefault(key, []).append(item)
+
+    for class_key, items in class_groups.items():
+        doc_id = class_key.replace(" ", "_")
+        doc_ref = _book_collection_for_school(payload.school_id).document(doc_id)
+        existing_doc = doc_ref.get()
+        existing_data: Dict[str, Any] = existing_doc.to_dict() if existing_doc.exists else {}
+
+        merged_items = items
+        merged_excluded = list(
+            {
+                *existing_data.get("excluded_assessments", []),
+                *payload.excluded_assessments,
+            }
+        )
+
+        class_record: Dict[str, Any] = {
+            "class": class_key,
+            "items": merged_items,
+            "excluded_assessments": merged_excluded,
+            "updated_at": now,
+            "source": payload.source or "wizard",
+        }
+
+        if decoded_token:
+            class_record["updated_by"] = decoded_token.get("uid")
+            if decoded_token.get("email"):
+                class_record["updated_by_email"] = decoded_token.get("email")
+
+        doc_ref.set(class_record)
+
+    # Handle explicit deletions
+    for class_name in payload.deleted_classes:
+        if not class_name:
+            continue
+        doc_id = class_name.strip().lower().replace(" ", "_")
+        if not doc_id:
+            continue
+        _book_collection_for_school(payload.school_id).document(doc_id).delete()
+
+    return {"ok": True, "updated_at": now.isoformat()}
+
+
+@api_router.get("/book-selections/{school_id}")
+def get_book_selections(school_id: str, authorization: Optional[str] = Header(None)):
+    """Return saved book selections grouped per class for a school."""
+    _verify_and_decode_token(authorization)
+
+    # Fetch only the fields we need to avoid transferring large documents and
+    # speed up the initial response for clients.
+    class_docs = list(
+        _book_collection_for_school(school_id)
+        .select(
+            [
+                "class",
+                "items",
+                "excluded_assessments",
+                "updated_at",
+                "source",
+                "updated_by",
+                "updated_by_email",
+            ]
+        )
+        .stream()
+    )
+    classes: List[Dict[str, Any]] = []
+    for doc in class_docs:
+        data = doc.to_dict() or {}
+        data.setdefault("class", data.get("class") or doc.id)
+        classes.append(data)
+
+    return {"classes": classes}
+
+
+@api_router.post("/cover-selections")
+async def save_cover_selection(
+    payload: CoverSelectionPayload, authorization: Optional[str] = Header(None)
+):
+    """Persist cover theme/colour selection per grade for a school."""
+    decoded_token = _verify_and_decode_token(authorization)
+
+    school_id = payload.school_id.strip()
+    grade = payload.grade.strip().lower()
+    if not school_id or not grade:
+        raise HTTPException(status_code=400, detail="school_id and grade are required")
+
+    now = datetime.utcnow()
+    record: Dict[str, Any] = {
+        "school_id": school_id,
+        "grade": grade,
+        "theme_id": (payload.theme_id or "").strip() or None,
+        "theme_label": (payload.theme_label or "").strip() or None,
+        "colour_id": (payload.colour_id or "").strip() or None,
+        "colour_label": (payload.colour_label or "").strip() or None,
+        "status": (payload.status or "").strip() or None,
+        "updated_at": now,
+    }
+
+    if decoded_token:
+        record["updated_by"] = decoded_token.get("uid")
+        if decoded_token.get("email"):
+            record["updated_by_email"] = decoded_token.get("email")
+
+    doc_ref = _cover_collection_for_school(school_id).document(grade.replace(" ", "_"))
+    doc_ref.set(record)
+
+    return {"ok": True, "updated_at": now.isoformat()}
+
+
+@api_router.get("/cover-selections/{school_id}")
+def get_cover_selections(school_id: str, authorization: Optional[str] = Header(None), request: Request = None):
+    """Return saved cover selections for all grades of a school."""
+    _verify_and_decode_token(authorization)
+
+    docs = list(
+        _cover_collection_for_school(school_id)
+        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "status", "updated_at"])
+        .stream()
+    )
+
+    grades: Dict[str, Any] = {}
+    for doc in docs:
+        data = doc.to_dict() or {}
+        grade_key = (data.get("grade") or doc.id or "").strip()
+        if not grade_key:
+            continue
+        grades[grade_key] = {
+            "theme": data.get("theme_id"),
+            "theme_label": data.get("theme_label"),
+            "theme_colour": data.get("colour_id"),
+            "theme_colour_label": data.get("colour_label"),
+            "status": data.get("status"),
+            "updated_at": data.get("updated_at"),
+        }
+
+    return {"grades": grades, "library": _build_library_manifest(request)}
+
+
 @api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
 def get_selected_rhymes_other_grades(school_id: str, grade: str):
     """Get rhymes selected in other grades that can be reused"""
-    selections_ref = db.collection("rhyme_selections")
-    query = selections_ref.where("school_id", "==", school_id)
-    selections = []
-    for doc in query.stream():
-        data = doc.to_dict()
-        if not data or data.get("grade") == grade:
-            continue
-        selections.append(data)
+    all_items = _get_all_rhyme_items(school_id)
+    selections = [
+        item for item in all_items if item and item.get("grade") and item.get("grade") != grade
+    ]
 
     # Get unique rhymes from other gra  des
     selected_rhymes = {}
@@ -500,8 +1549,13 @@ async def select_rhyme(input: RhymeSelectionCreate):
         "page_index": input.page_index,
     }
 
-    existing_selections_query = db.collection("rhyme_selections").where("school_id", "==", input.school_id).where("grade", "==", input.grade).where("page_index", "==", input.page_index)
-    existing_selections = [doc.to_dict() for doc in existing_selections_query.stream()]
+    existing_selections = [
+        doc.to_dict()
+        for doc in _rhyme_collection_for_school(input.school_id)
+        .where("grade", "==", input.grade)
+        .where("page_index", "==", input.page_index)
+        .stream()
+    ]
 
     for existing in existing_selections:
         existing_pages = float(existing.get("pages", 1))
@@ -523,18 +1577,41 @@ async def select_rhyme(input: RhymeSelectionCreate):
                 should_remove = True
 
         if should_remove:
-            db.collection("rhyme_selections").document(existing["id"]).delete()
+            _rhyme_collection_for_school(input.school_id).document(existing["id"]).delete()
 
     # Create new selection
     selection_dict = input.dict()
-    selection_dict.update(
-        {"rhyme_name": rhyme_data[0], "pages": pages, "position": normalized_position}
+    selection_id = _build_rhyme_doc_id(
+        input.school_id, input.grade, input.page_index, normalized_position
     )
 
-    selection_obj = RhymeSelection(**selection_dict)
-    db.collection("rhyme_selections").document(selection_obj.id).set(selection_obj.dict())
+    selection_dict.update(
+        {
+            "id": selection_id,
+            "rhyme_name": rhyme_data[0],
+            "pages": pages,
+            "position": normalized_position,
+        }
+    )
 
-    return selection_obj
+    class_key = input.grade.strip().lower().replace(" ", "_")
+    class_doc = _rhyme_collection_for_school(input.school_id).document(class_key)
+    existing = class_doc.get().to_dict() or {}
+    items: List[Dict[str, Any]] = existing.get("items", [])
+
+    # Do not replace existing entries; append if this id is new
+    if not any(item.get("id") == selection_id for item in items):
+        items.append(selection_dict)
+
+    class_doc.set(
+        {
+            "grade": input.grade,
+            "items": items,
+            "updated_at": datetime.utcnow(),
+        }
+    )
+
+    return RhymeSelection(**selection_dict)
 
 
 # @api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}")
@@ -552,57 +1629,66 @@ async def select_rhyme(input: RhymeSelectionCreate):
 #     return {"message": "Selection removed successfully"}
 
 
-@api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}/{position}")
-async def remove_specific_rhyme_selection(
-    school_id: str, grade: str, page_index: int, position: str
-):
-    """Remove a specific rhyme selection for a position (top/bottom)"""
-    # Get all selections for this page
-    selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade).where("page_index", "==", page_index)
-    selections = [doc.to_dict() for doc in selections_query.stream()]
+# @api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}/{position}")
+# async def remove_specific_rhyme_selection(
+#     school_id: str, grade: str, page_index: int, position: str
+# ):
+#     """Remove a specific rhyme selection for a position (top/bottom)"""
+#     class_key = grade.strip().lower().replace(" ", "_")
+#     class_doc_ref = _rhyme_collection_for_school(school_id).document(class_key)
+#     class_doc = class_doc_ref.get()
+#     data = class_doc.to_dict() or {}
+#     selections = data.get("items", [])
 
-    if not selections:
-        # raise HTTPException(status_code=404, detail="No selections found for this page")
-        return {"message": f"selection is removed"}
+#     if not selections:
+#         # raise HTTPException(status_code=404, detail="No selections found for this page")
+#         return {"message": f"selection is removed"}
 
-    # Find and remove the specific position rhyme
-    target_position = position.lower()
-    selection_to_remove = None
+#     # Find and remove the specific position rhyme
+#     target_position = position.lower()
+#     selection_to_remove = None
 
-    for selection in selections:
-        pages = float(selection.get("pages", 0))
-        stored_position = (selection.get("position") or "top").lower()
+#     for selection in selections:
+#         pages = float(selection.get("pages", 0))
+#         stored_position = (selection.get("position") or "top").lower()
 
-        if pages > 0.5:
-            if target_position == "top":
-                selection_to_remove = selection
-                break
-        elif pages == 0.5:
-            if stored_position == target_position:
-                selection_to_remove = selection
-                break
-            if selection.get("position") is None and target_position == "top":
-                selection_to_remove = selection
-                break
+#         if pages > 0.5:
+#             if target_position == "top":
+#                 selection_to_remove = selection
+#                 break
+#         elif pages == 0.5:
+#             if stored_position == target_position:
+#                 selection_to_remove = selection
+#                 break
+#             if selection.get("position") is None and target_position == "top":
+#                 selection_to_remove = selection
+#                 break
 
-    if not selection_to_remove:
-        for selection in selections:
-            if target_position == "top" and selection.get("pages") != 0.5:
-                selection_to_remove = selection
-                break
-            if target_position == "bottom" and selection.get("pages") == 0.5:
-                selection_to_remove = selection
-                break
+#     if not selection_to_remove:
+#         for selection in selections:
+#             if target_position == "top" and selection.get("pages") != 0.5:
+#                 selection_to_remove = selection
+#                 break
+#             if target_position == "bottom" and selection.get("pages") == 0.5:
+#                 selection_to_remove = selection
+#                 break
 
-    if not selection_to_remove:
-        raise HTTPException(
-            status_code=404, detail="Selection not found for the specified position"
-        )
+#     if not selection_to_remove:
+#         raise HTTPException(
+#             status_code=404, detail="Selection not found for the specified position"
+#         )
 
-    # Remove the selection
-    db.collection("rhyme_selections").document(selection_to_remove["id"]).delete()
+#     # Remove the selection by rewriting class items
+#     remaining = [item for item in selections if item.get("id") != selection_to_remove["id"]]
+#     class_doc_ref.set(
+#         {
+#             "grade": grade,
+#             "items": remaining,
+#             "updated_at": datetime.utcnow(),
+#         }
+#     )
 
-    return {"message": f"{position.capitalize()} selection removed successfully"}
+#     return {"message": f"{position.capitalize()} selection removed successfully"}
 
 
 @api_router.get("/rhymes/status/{school_id}")
@@ -612,21 +1698,37 @@ async def get_grade_status(school_id: str):
     status = []
 
     for grade in grades:
-        selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade)
-        selections = [doc.to_dict() for doc in selections_query.stream()]
+        class_key = grade.strip().lower().replace(" ", "_")
+        class_doc = _rhyme_collection_for_school(school_id).document(class_key).get()
+        class_data = class_doc.to_dict() or {}
+        selections = class_data.get("items", [])
 
         selected_count = len(selections)
+        selected_pages = 0.0
+
+        for selection in selections:
+            pages_value = selection.get("pages", 0)
+            try:
+                normalized_pages = float(pages_value)
+            except (TypeError, ValueError):
+                normalized_pages = 0.0
+
+            if normalized_pages <= 0:
+                normalized_pages = 1.0
+
+            selected_pages += normalized_pages
 
         status.append(
             {
                 "grade": grade,
                 "selected_count": selected_count,
                 "total_available": 25,  # Maximum 25 rhymes can be selected
+                "selected_pages": selected_pages,
+                "max_pages": MAX_RHYME_PAGES,
             }
         )
 
     return status
-
 
 
 async def get_all_schools_with_selections(
@@ -657,10 +1759,13 @@ async def get_all_schools_with_selections(
 
     school_ids = [doc.get("school_id") for doc in school_docs if doc.get("school_id")]
 
-    selection_docs = []
-    if school_ids:
-        selection_docs_query = db.collection("rhyme_selections").where("school_id", "in", school_ids)
-        selection_docs = [doc.to_dict() for doc in selection_docs_query.stream()]
+    selection_docs: List[Dict[str, Any]] = []
+    for school_id in school_ids:
+        for class_doc in _rhyme_collection_for_school(school_id).stream():
+            data = class_doc.to_dict() or {}
+            items = data.get("items", [])
+            if isinstance(items, list):
+                selection_docs.extend(items)
 
     selections_by_school: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     latest_selection_timestamp: Dict[str, datetime] = {}
@@ -807,26 +1912,16 @@ def _localize_rhyme_svg_markup(svg_markup: str, source_path: Optional[Path], rhy
 
 
 @lru_cache(maxsize=256)
-def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
+def _get_cached_rhyme_pages(rhyme_code: str) -> Dict[str, List[str]]:
     """Return a cached list of localised SVG pages for ``rhyme_code``."""
 
     svg_path = _resolve_rhyme_svg_path(rhyme_code)
 
     svg_pages: List[str] = []
+    source_paths: List[str] = []
 
     if svg_path is not None:
-        # svg_path may be a single Path, a directory Path, or a list of Path
-        candidates: List[Path] = []
-
-        if isinstance(svg_path, list):
-            candidates = svg_path
-        elif isinstance(svg_path, Path):
-            if svg_path.is_dir():
-                candidates = [
-                    p for p in sorted(svg_path.iterdir()) if p.is_file() and p.suffix.lower() == ".svg"
-                ]
-            else:
-                candidates = [svg_path]
+        candidates: List[Path] = list(svg_path)
 
         for candidate in candidates:
             try:
@@ -839,9 +1934,10 @@ def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
 
             localized_markup = _localize_rhyme_svg_markup(svg_content, candidate, rhyme_code)
             svg_pages.append(localized_markup)
+            source_paths.append(str(candidate))
 
     if svg_pages:
-        return svg_pages
+        return {"pages": svg_pages, "sources": source_paths}
 
     try:
         document = _load_rhyme_svg_markup(rhyme_code)
@@ -852,7 +1948,7 @@ def _get_cached_rhyme_pages(rhyme_code: str) -> List[str]:
         document.markup, document.source_path, rhyme_code
     )
 
-    return [localized_markup]
+    return {"pages": [localized_markup], "sources": [str(document.source_path or "auto-generated")]} 
 
 
 @api_router.get("/rhymes/svg/{rhyme_code}")
@@ -864,12 +1960,12 @@ async def get_rhyme_svg(rhyme_code: str):
     frontend without repeatedly hitting the backend.
     """
 
-    svg_pages = _get_cached_rhyme_pages(rhyme_code)
+    svg_payload = _get_cached_rhyme_pages(rhyme_code)
 
-    if not svg_pages:
+    if not svg_payload.get("pages"):
         raise HTTPException(status_code=404, detail="Rhyme not found")
 
-    return JSONResponse({"pages": svg_pages})
+    return JSONResponse(svg_payload)
 
 
 @api_router.get("/rhymes/svg-image/{rhyme_code}")
@@ -908,14 +2004,249 @@ async def get_rhyme_image(rhyme_code: str, file_name: str):
     return Response(content=content, media_type=mime_type)
 
 
-# @api_router.get("/cover-assets/manifest")
-# async def get_cover_assets_manifest():
-#     """Return a manifest describing all available cover SVG assets."""
+@api_router.get("/cover-assets/themes")
+async def list_cover_theme_images(request: Request):
+    """Return all theme thumbnails and colour PNGs stored on disk."""
 
-#     base_path = _ensure_cover_assets_base_path()
-#     assets = _build_cover_asset_manifest(base_path, include_markup=True)
+    themes = [
+        _build_theme_payload_from_disk(f"theme{index}", request) for index in range(1, COVER_THEME_STORE.theme_slots + 1)
+    ]
+    return {"themes": themes, "gradeLabels": COVER_GRADE_LABELS}
 
-#     return {"assets": assets}
+
+@api_router.get("/cover-assets/themes/{theme_id}")
+async def get_cover_theme_images(theme_id: str, request: Request):
+    """Return a single theme and its colours."""
+
+    return {"theme": _build_theme_payload_from_disk(theme_id, request)}
+
+
+# ---------------------------------------------------------------------------
+# Shared cover library (disk-backed PNGs for all schools)
+# ---------------------------------------------------------------------------
+
+
+@api_router.get("/cover-library")
+async def list_cover_library(request: Request):
+    """Return available theme covers and colour PNGs stored under public/cover-library."""
+
+    return {"library": _build_library_manifest(request)}
+
+
+@api_router.post("/cover-library/themes/{theme_key}/cover")
+async def upload_library_theme_cover(theme_key: str, file: UploadFile = File(...), request: Request = None):
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Cover image is empty.")
+    extension = _guess_image_extension(file)
+    theme_dir = _resolve_library_theme_dir(theme_key)
+    _remove_existing_images(theme_dir, "cover")
+    target_path = theme_dir / f"cover{extension}"
+    _write_public_image(target_path, content)
+    return {"status": "ok", "theme": _build_library_theme_payload(theme_key, request), "library": _build_library_manifest(request)}
+
+
+@api_router.delete("/cover-library/themes/{theme_key}/cover")
+async def delete_library_theme_cover(theme_key: str, request: Request):
+    theme_dir = _resolve_library_theme_dir(theme_key)
+    _remove_existing_images(theme_dir, "cover")
+    return {"status": "ok", "theme": _build_library_theme_payload(theme_key, request), "library": _build_library_manifest(request)}
+
+
+@api_router.post("/cover-library/colours/{version}/{grade_code}")
+async def upload_library_colour(version: str, grade_code: str, file: UploadFile = File(...), request: Request = None):
+    if grade_code.upper() not in LIBRARY_GRADE_CODES:
+        raise HTTPException(status_code=400, detail="Grade code must be one of P,N,L,U.")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Colour image is empty.")
+    extension = _guess_image_extension(file)
+    target_path = _resolve_library_colour_path(version, grade_code.upper(), extension)
+    _remove_existing_images(target_path.parent, Path(target_path).stem)
+    _write_public_image(target_path, content)
+    return {"status": "ok", "library": _build_library_manifest(request)}
+
+
+@api_router.delete("/cover-library/colours/{version}/{grade_code}")
+async def delete_library_colour(version: str, grade_code: str, request: Request):
+    if grade_code.upper() not in LIBRARY_GRADE_CODES:
+        raise HTTPException(status_code=400, detail="Grade code must be one of P,N,L,U.")
+    # remove any extension variant
+    version_dir = LIBRARY_COLOURS_DIR / _sanitize_component(version, "V1_C")
+    safe_grade = _sanitize_component(grade_code, "P")
+    _remove_existing_images(version_dir, safe_grade)
+    return {"status": "ok", "library": _build_library_manifest(request)}
+
+
+# ---------------------------------------------------------------------------
+# Subject PDF uploads (static)
+# ---------------------------------------------------------------------------
+
+
+@api_router.post("/subject-pdfs/{class_name}/{subject_name}")
+async def upload_subject_pdf(class_name: str, subject_name: str, file: UploadFile = File(...)):
+    """Upload a subject PDF to the static public folder."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="PDF is empty.")
+    target_path = _resolve_subject_pdf_path(class_name, subject_name, file.filename or "subject.pdf")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target_path.write_bytes(content)
+    except OSError as exc:
+        logger.error("Unable to store subject PDF at %s: %s", target_path, exc)
+        raise HTTPException(status_code=500, detail="Unable to store PDF.") from exc
+    public_url = _public_url_for(target_path, None)
+    return {"status": "ok", "url": public_url}
+
+
+
+@api_router.post("/cover-assets/rebuild-images")
+async def rebuild_cover_images(source_dir: Optional[str] = None):
+    """
+    Generate WebP thumbnails and previews for existing cover images on disk.
+
+    Defaults to the cover themes directory; optional ``source_dir`` can override.
+    """
+
+    base_dir = Path(source_dir).resolve() if source_dir else IMAGE_INPUT_BASE
+    thumb_dir = THUMB_OUTPUT_DIR if not source_dir else (base_dir / "thumbnails-webp")
+    preview_dir = PREVIEW_OUTPUT_DIR if not source_dir else (base_dir / "previews-webp")
+
+    summary = process_existing_images_on_disk(
+        base_dir,
+        thumb_dir=thumb_dir,
+        preview_dir=preview_dir,
+        thumb_width=THUMB_MAX_WIDTH,
+        preview_width=PREVIEW_MAX_WIDTH,
+    )
+
+    return summary
+
+
+# Temporary helper UI to trigger the rebuild endpoint from a browser.
+@app.get("/admin/rebuild-images", response_class=HTMLResponse)
+async def rebuild_images_page():
+    html = """
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>Rebuild WebP Images</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 24px; max-width: 720px; margin: auto; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; }
+        input { width: 100%; padding: 8px; margin-bottom: 12px; }
+        button { padding: 10px 16px; font-size: 15px; cursor: pointer; }
+        #log { margin-top: 16px; font-family: monospace; white-space: pre-wrap; border: 1px solid #ddd; padding: 12px; border-radius: 6px; background: #f9fafb; }
+      </style>
+    </head>
+    <body>
+      <h2>Rebuild WebP Images</h2>
+      <p>Click to POST <code>/api/cover-assets/rebuild-images</code>. Leave the path blank to use defaults.</p>
+      <label for="dir">Source directory (optional)</label>
+      <input id="dir" type="text" placeholder="e.g. C:/path/to/covers or /public/cover-library/themes" />
+      <button id="run">Run rebuild</button>
+      <div id="log">Idle</div>
+      <script>
+        const btn = document.getElementById('run');
+        const log = document.getElementById('log');
+        btn.onclick = async () => {
+          btn.disabled = true;
+          log.textContent = 'Running...';
+          try {
+            const dir = document.getElementById('dir').value.trim();
+            const body = dir ? { source_dir: dir } : {};
+            const res = await fetch('/api/cover-assets/rebuild-images', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            log.textContent = JSON.stringify(data, null, 2);
+          } catch (err) {
+            log.textContent = 'Error: ' + err;
+          } finally {
+            btn.disabled = false;
+          }
+        };
+      </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+# @api_router.post("/cover-assets/themes/{theme_id}/thumbnail")
+# async def upload_cover_theme_thumbnail(
+#     theme_id: str,
+#     request: Request,
+#     file: UploadFile = File(...),
+#     label: Optional[str] = Form(None),
+# ):
+#     """Upload a PNG thumbnail for a theme and store it in the public directory."""
+
+#     content = await file.read()
+#     if not content:
+#         raise HTTPException(status_code=400, detail="Thumbnail image is empty.")
+
+#     theme_dir = _resolve_theme_dir(theme_id)
+#     extension = _guess_image_extension(file)
+#     _remove_existing_images(theme_dir, "thumbnail")
+#     target_path = theme_dir / f"thumbnail{extension}"
+#     _write_public_image(target_path, content)
+#     if label:
+#         _save_theme_meta(theme_dir, theme_label=label)
+
+#     return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
+
+
+@api_router.delete("/cover-assets/themes/{theme_id}/thumbnail")
+async def delete_cover_theme_thumbnail(theme_id: str, request: Request):
+    """Delete a theme thumbnail from the public directory."""
+
+    theme_dir = _resolve_theme_dir(theme_id)
+    _remove_existing_images(theme_dir, "thumbnail")
+    return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
+
+
+@api_router.post("/cover-assets/themes/{theme_id}/colours/{colour_id}")
+async def upload_cover_theme_colour(
+    theme_id: str,
+    colour_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    label: Optional[str] = Form(None),
+):
+    """Upload a PNG for a specific colour slot within a theme."""
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Colour image is empty.")
+
+    theme_dir = _resolve_theme_dir(theme_id)
+    colour_dir = theme_dir / "colours"
+    safe_colour_id = _sanitize_component(colour_id, "colour")
+    extension = _guess_image_extension(file)
+    _remove_existing_images(colour_dir, safe_colour_id)
+    target_path = colour_dir / f"{safe_colour_id}{extension}"
+    _write_public_image(target_path, content)
+    if label:
+        _save_theme_meta(theme_dir, colour_id=colour_id, colour_label=label)
+
+    return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
+
+
+@api_router.delete("/cover-assets/themes/{theme_id}/colours/{colour_id}")
+async def delete_cover_theme_colour(theme_id: str, colour_id: str, request: Request):
+    """Delete a colour PNG for a theme from the public directory."""
+
+    theme_dir = _resolve_theme_dir(theme_id)
+    colour_dir = theme_dir / "colours"
+    safe_colour_id = _sanitize_component(colour_id, "colour")
+    _remove_existing_images(colour_dir, safe_colour_id)
+    _delete_colour_meta(theme_dir, colour_id)
+
+    return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
 
 
 @api_router.get("/cover-assets/network/{selection_key}")
@@ -1348,16 +2679,39 @@ async def download_rhyme_binder(school_id: str, grade: str):
     except PDFDependencyUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    selections_query = db.collection("rhyme_selections").where("school_id", "==", school_id).where("grade", "==", grade)
-    selections = [doc.to_dict() for doc in selections_query.stream()]
+    all_rhyme_items = _get_all_rhyme_items(school_id)
+    selections = [
+        item for item in all_rhyme_items if item and item.get("grade") == grade and item.get("rhyme_code")
+    ]
 
     if not selections:
-        raise HTTPException(status_code=404, detail="No rhymes selected for this grade")
+        return Response(
+            content="Please select at least one rhyme page before downloading the binder.",
+            status_code=400,
+            media_type="text/plain",
+        )
+
+    total_pages = 0.0
+    for selection in selections:
+        try:
+            total_pages += float(selection.get("pages", 0))
+        except (TypeError, ValueError):
+            continue
+
+    if total_pages <= 0:
+        return Response(
+            content="Please select at least one rhyme page before downloading the binder.",
+            status_code=400,
+            media_type="text/plain",
+        )
 
     pages_map: Dict[int, List[Dict[str, Any]]] = {}
 
     for selection in selections:
-        page_index = int(selection.get("page_index", 0))
+        try:
+            page_index = int(selection.get("page_index", 0))
+        except (TypeError, ValueError):
+            page_index = 0
         pages_map.setdefault(page_index, []).append(selection)
 
     buffer = BytesIO()
@@ -1365,21 +2719,34 @@ async def download_rhyme_binder(school_id: str, grade: str):
     page_width, page_height = pdf_resources.page_size
     svg_backend = pdf_resources.svg_backend
 
-    svg_document_cache: Dict[str, Optional[_SvgDocument]] = {}
+    svg_document_cache: Dict[str, List[_SvgDocument]] = {}
 
-    def _get_svg_document(rhyme_code: str) -> Optional[_SvgDocument]:
-        """Return cached SVG metadata for ``rhyme_code`` within this request."""
+    def _get_svg_documents(rhyme_code: str) -> List[_SvgDocument]:
+        """Return cached SVG pages for ``rhyme_code`` within this request."""
 
         if rhyme_code in svg_document_cache:
             return svg_document_cache[rhyme_code]
 
+        documents: List[_SvgDocument] = []
         try:
-            document = _load_rhyme_svg_markup(rhyme_code)
-        except KeyError:
-            document = None
+            svg_payload = _get_cached_rhyme_pages(rhyme_code)
+            pages = svg_payload.get("pages") or []
+            sources = svg_payload.get("sources") or []
+            for index, page_markup in enumerate(pages):
+                source_value = sources[index] if index < len(sources) else None
+                source_path = Path(source_value) if source_value else None
+                documents.append(_SvgDocument(page_markup, source_path))
+        except HTTPException:
+            documents = []
 
-        svg_document_cache[rhyme_code] = document
-        return document
+        if not documents:
+            try:
+                documents.append(_load_rhyme_svg_markup(rhyme_code))
+            except KeyError:
+                documents = []
+
+        svg_document_cache[rhyme_code] = documents
+        return documents
 
     for page_index in sorted(pages_map.keys()):
         entries = pages_map[page_index]
@@ -1390,25 +2757,38 @@ async def download_rhyme_binder(school_id: str, grade: str):
             )
         )
 
-        full_page_entry = next(
-            (item for item in entries if float(item.get("pages", 1)) > 0.5), None
-        )
+        full_page_entry = None
+        for item in entries:
+            try:
+                if float(item.get("pages", 1)) > 0.5:
+                    full_page_entry = item
+                    break
+            except (TypeError, ValueError):
+                continue
 
         if full_page_entry:
-            svg_document = _get_svg_document(full_page_entry["rhyme_code"])
+            rhyme_code = full_page_entry.get("rhyme_code")
+            svg_documents = _get_svg_documents(rhyme_code) if rhyme_code else []
 
-            if svg_document and _render_svg_on_canvas(
-                pdf_canvas,
-                svg_backend,
-                svg_document,
-                page_width,
-                page_height,
-                rhyme_code=full_page_entry["rhyme_code"],
-            ):
-                pdf_canvas.showPage()
+            if svg_documents:
+                for svg_document in svg_documents:
+                    if not _render_svg_on_canvas(
+                        pdf_canvas,
+                        svg_backend,
+                        svg_document,
+                        page_width,
+                        page_height,
+                        rhyme_code=rhyme_code,
+                    ):
+                        _draw_text_only_rhyme(
+                            pdf_canvas, full_page_entry, page_width, page_height
+                        )
+                    pdf_canvas.showPage()
                 continue
 
             _draw_text_only_rhyme(pdf_canvas, full_page_entry, page_width, page_height)
+            pdf_canvas.showPage()
+            continue
         else:
             slot_height = page_height / 2
             positioned_entries: Dict[str, Optional[Dict[str, Any]]] = {
@@ -1431,7 +2811,9 @@ async def download_rhyme_binder(school_id: str, grade: str):
 
                 svg_rendered = False
 
-                svg_document = _get_svg_document(entry["rhyme_code"])
+                rhyme_code = entry.get("rhyme_code")
+                svg_documents = _get_svg_documents(rhyme_code) if rhyme_code else []
+                svg_document = svg_documents[0] if svg_documents else None
 
                 if svg_document:
                     svg_rendered = _render_svg_on_canvas(
@@ -1479,5 +2861,3 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-

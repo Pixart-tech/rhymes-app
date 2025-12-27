@@ -43,18 +43,14 @@ def resolve_rhyme_svg_path(base_path: Optional[Path], rhyme_code: str):
     if base_path is None:
         return None
 
-    # prefer a file named {rhyme_code}.svg but also accept a directory named {rhyme_code}
     candidate = base_path / f"{rhyme_code}.svg"
     dir_candidate = base_path / f"{rhyme_code}"
 
-   
-
-    # Ensure svg_files is defined for all code paths to avoid UnboundLocalError.
     svg_files: List[Path] = []
 
     try:
         if candidate.is_file():
-            return candidate
+            return [candidate]
 
         if dir_candidate.is_dir():
             svg_files = [
@@ -62,10 +58,11 @@ def resolve_rhyme_svg_path(base_path: Optional[Path], rhyme_code: str):
                 for svg in sorted(dir_candidate.iterdir())
                 if svg.is_file() and svg.suffix.lower() == ".svg"
             ]
+
         if svg_files:
             return svg_files
 
-        if (dir_candidate).exists():
+        if dir_candidate.exists():
             logger.warning(
                 "Authored SVG for rhyme %s exists at %s but is not a file.",
                 rhyme_code,
@@ -502,17 +499,27 @@ def load_rhyme_svg_markup(
 
     svg_path = resolve_rhyme_svg_path(base_path, rhyme_code)
 
-    if svg_path is not None:
+    candidate_path: Optional[Path] = None
+
+    if isinstance(svg_path, Path):
+        candidate_path = svg_path
+    elif isinstance(svg_path, Iterable):
+        for candidate in svg_path:
+            if isinstance(candidate, Path):
+                candidate_path = candidate
+                break
+
+    if candidate_path is not None:
         try:
-            svg_text = svg_path.read_text(encoding="utf-8")
+            svg_text = candidate_path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, svg_path)
+            logger.warning("SVG file not found for rhyme %s at %s", rhyme_code, candidate_path)
         except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
             logger.error(
-                "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, svg_path, exc
+                "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, candidate_path, exc
             )
         else:
-            return SvgDocument(svg_text, svg_path)
+            return SvgDocument(svg_text, candidate_path)
 
     packaged = _read_packaged_rhyme(rhyme_code)
     if packaged is not None:
@@ -534,4 +541,3 @@ __all__ = [
     "sanitize_svg_for_svglib",
     "svg_requires_raster_backend",
 ]
-

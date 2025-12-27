@@ -5,8 +5,52 @@ import { QuestionnaireAnswers } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { saveSelection } from '../services/api';
 import { CATALOG } from '../data/catalog';
-import { Button } from '../components/ui/button';
-import { CLASS_THEME, ClassLevel, ClassTheme } from '../theme';
+
+type ClassLevel = 'Nursery' | 'LKG' | 'UKG';
+
+type ClassTheme = {
+    bgColor50: string;
+    bgColor600: string;
+    border200: string;
+    border500: string;
+    border600: string;
+    text600: string;
+    text700: string;
+    hoverBg50: string;
+    hoverBg100: string;
+    hoverBg700: string;
+    hoverText800: string;
+    hoverBorder400: string;
+    focusRing500: string;
+    focusWithinRing500: string;
+    focusWithinBorder500: string;
+    ring500: string;
+};
+
+const createTheme = (accent: string): ClassTheme => ({
+    bgColor50: `bg-${accent}-50`,
+    bgColor600: `bg-${accent}-600`,
+    border200: `border-${accent}-200`,
+    border500: `border-${accent}-500`,
+    border600: `border-${accent}-600`,
+    text600: `text-${accent}-600`,
+    text700: `text-${accent}-700`,
+    hoverBg50: `hover:bg-${accent}-50`,
+    hoverBg100: `hover:bg-${accent}-100`,
+    hoverBg700: `hover:bg-${accent}-700`,
+    hoverText800: `hover:text-${accent}-800`,
+    hoverBorder400: `hover:border-${accent}-400`,
+    focusRing500: `focus:ring-${accent}-500`,
+    focusWithinRing500: `focus-within:ring-${accent}-500`,
+    focusWithinBorder500: `focus-within:border-${accent}-500`,
+    ring500: `ring-${accent}-500`,
+});
+
+const CLASS_THEME: Record<ClassLevel, ClassTheme> = {
+    Nursery: createTheme('emerald'),
+    LKG: createTheme('amber'),
+    UKG: createTheme('violet'),
+};
 
 // --- OPTIONS CONFIGURATION ---
 const OPTIONS = {
@@ -394,7 +438,6 @@ const QuestionnairePage: React.FC = () => {
         } else {
             setShowClassIntro(true);
             setSummaryReturnTarget(null);
-            
         }
     };
 
@@ -770,10 +813,6 @@ const QuestionnairePage: React.FC = () => {
     const renderClassSelection = () => (
         <div className="flex flex-col items-center gap-10 text-center">
             <div className="space-y-4 max-w-2xl">
-                <div>
-                   <a href='HomePage'>Return to dashboard</a>                 
-
-                    </div>
                 <h1 className="text-4xl md:text-5xl font-extrabold text-gray-900">
                     Customise your perfect early curriculum
                 </h1>

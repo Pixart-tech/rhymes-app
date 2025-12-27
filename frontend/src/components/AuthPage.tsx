@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
@@ -14,7 +14,8 @@ import {
   UserRoundPen,
   Search,
   MoreVertical,
-  TrendingUp
+  TrendingUp,
+  LogOut
 } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth';
@@ -25,7 +26,6 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from './ui/card'
 import {
   AdminSchoolProfile,
   BranchStatus,
-  GradeKey,
   SchoolProfile,
   SchoolFormValues,
   SchoolServiceType,
@@ -58,11 +58,6 @@ const SERVICE_LABELS: Record<SchoolServiceType, string> = {
   certificates: 'Certificates'
 };
 type AdminServiceFilter = 'all' | SchoolServiceType;
-const GRADE_DOWNLOAD_OPTIONS: GradeKey[] = ['nursery', 'lkg', 'ukg', 'playgroup'];
-const PAGE_SIZE_OPTIONS = [5, 10, 15];
-type FetchOptions = {
-  showLoading?: boolean;
-};
 
 const getLogoSrc = (school: SchoolProfile, resolvedLogos?: Record<string, string>): string | null => {
   if (resolvedLogos?.[school.school_id]) {
@@ -134,6 +129,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [logoMap, setLogoMap] = useState<Record<string, string>>({});
   const [adminSearch, setAdminSearch] = useState('');
   const [serviceFilter, setServiceFilter] = useState<AdminServiceFilter>('all');
+  const [approvingSchoolId, setApprovingSchoolId] = useState<string | null>(null);
+  const workspaceFetchInFlight = useRef(false);
+  const lastFetchedWorkspaceUserId = useRef<string | null>(null);
   const allSchoolsForLogos = useMemo(() => {
     const deduped: Record<string, SchoolProfile> = {};
     [...schools, ...adminSchools].forEach((school) => {
@@ -164,6 +162,19 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     });
     return { rootSchools, branchMap, orphanBranches };
   }, [schools]);
+  const isSchoolApproved = useCallback(
+    (school?: { selection_status?: string; selections_approved?: boolean } | null) => {
+      if (!school) {
+        return false;
+      }
+      if (school.selections_approved === true) {
+        return true;
+      }
+      const statusValue = (school.selection_status || '').toString().toLowerCase();
+      return statusValue === 'approved';
+    },
+    []
+  );
   const resolveDirectLogoUrl = useCallback((value?: string | null) => {
     if (!value) {
       return null;
@@ -184,14 +195,23 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     return null;
   }, []);
 
-  const fetchWorkspace = useCallback(async ({ showLoading = true }: FetchOptions = {}) => {
+  const fetchWorkspace = useCallback(async (options?: { force?: boolean }) => {
     if (!user) {
       return;
     }
-    if (showLoading) {
-      setWorkspaceLoading(true);
-      setWorkspaceError(null);
+
+    if (workspaceFetchInFlight.current) {
+      return;
     }
+
+    const currentUserId = user.uid;
+    if (!options?.force && lastFetchedWorkspaceUserId.current === currentUserId) {
+      return;
+    }
+
+    workspaceFetchInFlight.current = true;
+    setWorkspaceLoading(true);
+    setWorkspaceError(null);
 
     try {
       const token = await getIdToken();
@@ -205,21 +225,17 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       const nextUser = response.data.user;
       setWorkspaceUser(nextUser);
       setSchools(response.data.schools);
-      if (showLoading) {
-        const shouldStartInCreate = nextUser.role !== 'super-admin' && response.data.schools.length === 0;
-        setView(shouldStartInCreate ? 'create' : 'list');
-      }
-      setWorkspaceError(null);
+      const shouldStartInCreate = nextUser.role !== 'super-admin' && response.data.schools.length === 0;
+      setView(shouldStartInCreate ? 'create' : 'list');
+      lastFetchedWorkspaceUserId.current = currentUserId;
     } catch (error) {
       console.error('Failed to load workspace', error);
-      if (showLoading) {
-        setWorkspaceError('Unable to load your workspace. Please try again.');
-        toast.error('Unable to load your workspace. Please try again.');
-      }
+      setWorkspaceError('Unable to load your workspace. Please try again.');
+      toast.error('Unable to load your workspace. Please try again.');
+      lastFetchedWorkspaceUserId.current = null;
     } finally {
-      if (showLoading) {
-        setWorkspaceLoading(false);
-      }
+      setWorkspaceLoading(false);
+      workspaceFetchInFlight.current = false;
     }
   }, [user, getIdToken]);
 
@@ -229,6 +245,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       setSchools([]);
       setView('list');
       setEditingSchool(null);
+      lastFetchedWorkspaceUserId.current = null;
       return;
     }
     void fetchWorkspace();
@@ -578,23 +595,65 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     onAuth({ school, user: workspaceUser });
   };
 
-  const handleDownloadBinder = useCallback((schoolId: string) => {
-    const promptValue = window.prompt(
-      'Enter the grade to download a binder (nursery, lkg, ukg, playgroup):',
-      'nursery'
-    );
-    if (!promptValue) {
-      return;
-    }
-    const normalizedGrade = promptValue.trim().toLowerCase();
-    if (!GRADE_DOWNLOAD_OPTIONS.includes(normalizedGrade as GradeKey)) {
-      toast.error('Please enter a valid grade (nursery, lkg, ukg, or playgroup).');
-      return;
-    }
-    const gradeKey = normalizedGrade as GradeKey;
-    const downloadUrl = `${API}/rhymes/binder/${schoolId}/${gradeKey}`;
-    window.open(downloadUrl, '_blank', 'noopener,noreferrer');
-  }, []);
+  const handleDownloadBinder = useCallback(
+    async (school: SchoolProfile) => {
+      try {
+        const token = await getIdToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+        const response = await axios.get(`${API}/admin/binder-json/${school.school_id}?zip=1`, {
+          headers,
+          responseType: 'blob'
+        });
+        const downloadUrl = URL.createObjectURL(response.data);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = `${school.school_id}-binder.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(downloadUrl);
+        toast.success('Binder JSON download started');
+      } catch (error) {
+        console.error('Failed to download binder JSON', error);
+        toast.error('Unable to download binder JSON. Please try again.');
+      }
+    },
+    [getIdToken]
+  );
+
+  const handleApproveSelections = useCallback(
+    async (school: SchoolProfile) => {
+      if (!workspaceUser || workspaceUser.role !== 'super-admin') {
+        return;
+      }
+      setApprovingSchoolId(school.school_id);
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+        const response = await axios.patch<SchoolProfile>(
+          `${API}/admin/schools/${school.school_id}/approve-selections`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const updatedSchool = response.data;
+        setAdminSchools((prev) =>
+          prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))
+        );
+        setSchools((prev) =>
+          prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))
+        );
+        toast.success('Selections approved and frozen for this school.');
+      } catch (error) {
+        console.error('Failed to approve selections', error);
+        toast.error('Unable to approve selections. Please try again.');
+      } finally {
+        setApprovingSchoolId(null);
+      }
+    },
+    [workspaceUser, getIdToken]
+  );
 
   const handleBranchSubmit = useCallback(
     async (values: BranchFormValues) => {
@@ -1155,6 +1214,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                   <UserRoundPen className="h-4 w-4" />
                   Edit profile
                 </Button>
+                <Button
+                  variant="outline"
+                  className="border-rose-200 text-rose-700 hover:border-rose-300"
+                  onClick={onLogout}
+                >
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </Button>
                 <Button asChild variant="outline" className="border-slate-200 text-slate-700 hover:border-slate-300">
                   <Link to="/admin/upload">Admin tools</Link>
                 </Button>
@@ -1306,6 +1373,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                         const branchStatus = school.status ?? 'active';
                         const isBranch = Boolean(school.branch_parent_id);
                         const isBranchUpdating = branchStatusUpdatingId === school.school_id;
+                        const isApproved = isSchoolApproved(school);
+                        const isApproving = approvingSchoolId === school.school_id;
                         const services = school.service_type ?? [];
 
                         return (
@@ -1374,7 +1443,16 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                 {branchStatus === 'active' ? 'Active' : 'Inactive'}
                               </span>
                             </td>
-                            <td className="px-4 py-4 text-slate-700">{school.total_selections ?? 0}</td>
+                            <td className="px-4 py-4 text-slate-700">
+                              <div className="flex items-center gap-2">
+                                <span>{school.total_selections ?? 0}</span>
+                                {isApproved && (
+                                  <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                                    Frozen
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="px-4 py-4 text-slate-700">{gradeCount}</td>
                             <td className="px-4 py-4 text-slate-700">
                               {formatDate(school.last_updated ?? school.timestamp ?? null)}
@@ -1401,6 +1479,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                     }}
                                   >
                                     Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      void handleApproveSelections(school);
+                                    }}
+                                    disabled={isApproved || isApproving}
+                                  >
+                                    {isApproved ? 'Selections approved' : isApproving ? 'Approving...' : 'Approve selections'}
                                   </DropdownMenuItem>
                                   {school.branch_parent_id ? (
                                     branchStatus === 'inactive' ? (
@@ -1430,8 +1516,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                       Delete
                                     </DropdownMenuItem>
                                   )}
-                                  <DropdownMenuItem onClick={() => handleDownloadBinder(school.school_id)}>
-                                    Binder
+                                  <DropdownMenuItem onClick={() => handleDownloadBinder(school)}>
+                                    Binder JSON
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
@@ -1579,6 +1665,18 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   return (
     <div className="min-h-screen bg-slate-50 flex items-start justify-center px-4 py-10">
       <div className="w-full max-w-6xl space-y-6">
+        {isSuperAdmin && view !== 'list' && (
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              className="border-rose-200 text-rose-700 hover:border-rose-300"
+              onClick={onLogout}
+            >
+              <LogOut className="h-4 w-4" />
+              Logout
+            </Button>
+          </div>
+        )}
         {isCreateView ? (
           <div className="w-full max-w-4xl">
             <SchoolForm
@@ -1656,7 +1754,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                 />
               </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="flex gap-3">
               <Button type="button" variant="outline" onClick={() => setProfileDialogOpen(false)} disabled={profileSubmitting}>
                 Cancel
               </Button>
