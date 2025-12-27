@@ -11,7 +11,6 @@ import { useAuth } from '../hooks/useAuth';
 import { API_BASE_URL } from '../lib/utils';
 import { loadPersistedAppState } from '../lib/storage';
 import { toast } from 'sonner';
-
 const SIGNATURE_FIELDS = [
   'class',
   'class_label',
@@ -140,6 +139,17 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const [bookSelectionSchoolId, setBookSelectionSchoolId] = useState<string | null>(null);
   const [isFinalized, setIsFinalized] = useState(resolveApprovalStatus(persistedState?.school));
   const [finishStatus, setFinishStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [hasAcceptedTerms, setHasAcceptedTerms] = useState<boolean>(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    try {
+      return window.localStorage.getItem('bookSelectionTermsAccepted') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [showTermsModal, setShowTermsModal] = useState(false);
   const [completedClasses, setCompletedClasses] = useState<Set<string>>(() => {
     if (typeof window === 'undefined') {
       return new Set<string>();
@@ -183,7 +193,9 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     [assessmentVariants, customAssessmentTitles, excludedAssessments, selections]
   );
   const lastSavedSelectionSignature = useRef<string | null>(null);
-  const canFinish = !isFinalized && selections.length > 0 && finishStatus !== 'success';
+  const hasPendingSelections = selections.length > 0;
+  const needsTermsAcceptance = !isFinalized && hasPendingSelections && !hasAcceptedTerms;
+  const canFinish = !isFinalized && hasPendingSelections && finishStatus !== 'success' && hasAcceptedTerms;
 
   useEffect(() => {
     if (finishStatus === 'success' && selectionSignature !== lastSavedSelectionSignature.current) {
@@ -194,26 +206,46 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     }
   }, [finishStatus, selectionSignature]);
 
+  useEffect(() => {
+    if (!hasAcceptedTerms) {
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      window.localStorage.setItem('bookSelectionTermsAccepted', 'true');
+    } catch (error) {
+      console.warn('Unable to persist terms acceptance', error);
+    }
+  }, [hasAcceptedTerms]);
+
   const currentClassData = currentClassIndex >= 0 ? SCHOOL_DATA[currentClassIndex] : null;
   const currentSubject = currentClassData ? currentClassData.subjects[currentSubjectIndex] : null;
 
   const calculateBookCount = (className: string) => {
     const classSelections = selections.filter(s => s.className === className);
     let count = 0;
+
+    const hasActive = (s: SelectionRecord): boolean => {
+      if (!s.selectedOption) return false;
+      const coreActive = !!s.selectedOption.coreId && !s.skipCore;
+      const workActive = !!s.selectedOption.workId && !s.skipWork;
+      const addonActive = !!s.selectedOption.addOnId && !s.skipAddon;
+      return coreActive || workActive || addonActive;
+    };
     
     classSelections.forEach(s => {
       if (s.selectedOption) {
-        // Count selected items even if the user marked them as skipped,
-        // so the total reflects all choices made rather than hiding dropped items.
-        if (s.selectedOption.coreId) count++;
-        if (s.selectedOption.workId) count++;
-        if (s.selectedOption.addOnId) count++;
+        if (hasActive(s) && !!s.selectedOption.coreId && !s.skipCore) count++;
+        if (hasActive(s) && !!s.selectedOption.workId && !s.skipWork) count++;
+        if (hasActive(s) && !!s.selectedOption.addOnId && !s.skipAddon) count++;
       }
     });
 
     if (!excludedAssessments.includes(className)) {
-        const englishSelection = classSelections.find(s => s.subjectName === "English")?.selectedOption || null;
-        const mathsSelection = classSelections.find(s => s.subjectName === "Maths")?.selectedOption || null;
+        const englishSelection = classSelections.find(s => s.subjectName === "English" && hasActive(s))?.selectedOption || null;
+        const mathsSelection = classSelections.find(s => s.subjectName === "Maths" && hasActive(s))?.selectedOption || null;
         const assessment = getAssessmentForClass(
           className,
           englishSelection,
@@ -369,6 +401,15 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     }
   }, []);
 
+  const handleAcceptTerms = () => {
+    setHasAcceptedTerms(true);
+    setShowTermsModal(false);
+  };
+
+  const handleDismissTerms = () => {
+    setShowTermsModal(false);
+  };
+
   const handleStartClass = (index: number) => {
     const className = SCHOOL_DATA[index]?.name;
     const readOnlyForClass = className ? isClassReadOnly(className) : false;
@@ -517,6 +558,49 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       setCustomAssessmentTitles(prev => ({ ...prev, [className]: title }));
   };
 
+  const handleAddManualSubject = (
+    className: string,
+    subject: string,
+    coreCode: string,
+    coreCover: string,
+    coreSpine: string
+  ) => {
+    const trimmedSubject = subject.trim();
+    const subjectName = trimmedSubject || 'Custom Subject';
+    const option: BookOption = {
+      typeId: `manual-${className}-${subjectName}-${coreCode}`.replace(/\s+/g, '-').toLowerCase(),
+      label: 'Custom',
+      coreId: coreCode,
+      coreCover: coreCover || undefined,
+      coreSpine: coreSpine || undefined,
+      isRecommended: false,
+      jsonSubject: subjectName
+    };
+
+    setSelections((prev) => {
+      const filtered = prev.filter(
+        (item) =>
+          !(
+            item.className === className &&
+            item.subjectName.toLowerCase() === subjectName.toLowerCase() &&
+            item.selectedOption?.typeId === option.typeId
+          )
+      );
+
+      return [
+        ...filtered,
+        {
+          className,
+          subjectName,
+          selectedOption: option,
+          skipCore: false,
+          skipWork: true,
+          skipAddon: true
+        }
+      ];
+    });
+  };
+
   const markClassCompleted = (className: string) => {
     const next = new Set(completedClasses);
     next.add(className);
@@ -525,6 +609,12 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   };
 
   const handleFinishAll = async () => {
+    if (!hasAcceptedTerms) {
+      setShowTermsModal(true);
+      toast.error('Please accept the terms and conditions before finishing.');
+      return;
+    }
+
     setFinishStatus('saving');
     const saved = await persistFinalSelections();
     if (!saved) {
@@ -550,11 +640,14 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     setExcludedAssessments([]);
     setAssessmentVariants({});
     setCustomAssessmentTitles({});
+    setHasAcceptedTerms(false);
+    setShowTermsModal(false);
     setCompletedClasses(new Set());
     setFinishStatus('idle');
     lastSavedSelectionSignature.current = null;
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem('bookSelectionCompletedClasses');
+      window.localStorage.removeItem('bookSelectionTermsAccepted');
     }
     setIsFinalized(false);
     setCurrentClassIndex(-1);
@@ -731,45 +824,77 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           return;
         }
         const normalizedClass = resolveClassName(rawClass);
-      const items = Array.isArray(entry.items) ? entry.items : [];
-      const excludedList = Array.isArray(entry.excluded_assessments) ? entry.excluded_assessments : [];
-      excludedList.forEach((c) => {
-        if (typeof c === 'string') {
-          const mapped = resolveClassName(c);
-          nextExcluded.add(mapped || c);
-        }
-      });
-      nextSignatures[normalizedClass] = computeClassSignature(items);
-      items.forEach((item: any) => {
-        const selection = buildSelectionFromSavedItem(normalizedClass, item);
-        if (selection) {
-          const optionKey =
-            selection.selectedOption?.typeId ||
-            selection.selectedOption?.coreId ||
-            selection.selectedOption?.workId ||
-            selection.selectedOption?.addOnId ||
-            selection.selectedOption?.label ||
-            'unknown';
-          const dedupeKey = [
-            selection.className,
-            selection.subjectName,
-            optionKey,
-            selection.selectedOption?.coreId || '',
-            selection.selectedOption?.workId || '',
-            selection.selectedOption?.addOnId || '',
-          ].join('::');
-
-          if (seenSelections.has(dedupeKey)) {
-            return;
+        const items = Array.isArray(entry.items) ? entry.items : [];
+        const excludedList = Array.isArray(entry.excluded_assessments) ? entry.excluded_assessments : [];
+        excludedList.forEach((c) => {
+          if (typeof c === 'string') {
+            const mapped = resolveClassName(c);
+            nextExcluded.add(mapped || c);
           }
-          seenSelections.add(dedupeKey);
-          nextSelections.push(selection);
+        });
+        nextSignatures[normalizedClass] = computeClassSignature(items);
+
+        // Merge separate component rows (core/work/addon) back into a single selection per subject/type.
+        const grouped: Record<string, any> = {};
+        items.forEach((item: any) => {
+          const subjectKey = (item.subject || '').toString().trim().toLowerCase();
+          const typeKey = (item.type || '').toString().trim().toLowerCase();
+          const key = [subjectKey, typeKey].join('||');
+          if (!grouped[key]) {
+            grouped[key] = { ...item };
+          } else {
+            const target = grouped[key];
+            if (item.core) {
+              target.core = item.core;
+              target.core_cover = item.core_cover;
+              target.core_cover_title = item.core_cover_title;
+              target.core_spine = item.core_spine;
+            }
+            if (item.work) {
+              target.work = item.work;
+              target.work_cover = item.work_cover;
+              target.work_cover_title = item.work_cover_title;
+              target.work_spine = item.work_spine;
+            }
+            if (item.addOn) {
+              target.addOn = item.addOn;
+              target.addon_cover = item.addon_cover;
+              target.addon_cover_title = item.addon_cover_title;
+              target.addon_spine = item.addon_spine;
+            }
+          }
+        });
+
+        Object.values(grouped).forEach((item: any) => {
+          const selection = buildSelectionFromSavedItem(normalizedClass, item);
+          if (selection) {
+            const optionKey =
+              selection.selectedOption?.typeId ||
+              selection.selectedOption?.coreId ||
+              selection.selectedOption?.workId ||
+              selection.selectedOption?.addOnId ||
+              selection.selectedOption?.label ||
+              'unknown';
+            const dedupeKey = [
+              selection.className,
+              selection.subjectName,
+              optionKey,
+              selection.selectedOption?.coreId || '',
+              selection.selectedOption?.workId || '',
+              selection.selectedOption?.addOnId || '',
+            ].join('::');
+
+            if (seenSelections.has(dedupeKey)) {
+              return;
+            }
+            seenSelections.add(dedupeKey);
+            nextSelections.push(selection);
+          }
+        });
+        if (items.length > 0) {
+          nextCompleted.add(normalizedClass);
         }
       });
-      if (items.length > 0) {
-        nextCompleted.add(normalizedClass);
-      }
-    });
 
       const serverApproved = Array.isArray(classes)
         ? classes.some((entry: any) => {
@@ -829,6 +954,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           showReturnToMenu={viewState === 'LANDING'}
           onReturnToMenu={handleReturnToMainMenu}
         />
+        <TermsModal
+          open={showTermsModal}
+          onAccept={handleAcceptTerms}
+          onClose={handleDismissTerms}
+        />
         <TitleCustomization
           classData={currentClassData}
           selections={selections}
@@ -858,6 +988,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             showReturnToMenu={viewState === 'LANDING'}
             onReturnToMenu={handleReturnToMainMenu}
           />
+          <TermsModal
+            open={showTermsModal}
+            onAccept={handleAcceptTerms}
+            onClose={handleDismissTerms}
+          />
           <ClassSummary 
             classData={currentClassData}
             selections={selections}
@@ -867,11 +1002,16 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             onUpdateSelections={handleUpdateSelection}
             onExcludeAssessment={handleExcludeAssessment}
             onRestoreAssessment={handleRestoreAssessment}
+            onAssessmentVariantChange={handleAssessmentVariantChange}
+            onAddManualSubject={handleAddManualSubject}
             onConfirm={() => {
               if (!readOnlySummary) {
                 markClassCompleted(currentClassData.name);
+                if (!hasAcceptedTerms) {
+                  setShowTermsModal(true);
+                }
               }
-              handleGoHome();SUMMARY
+              handleGoHome();
             }}
             onBack={() => {
                 if (readOnlySummary) {
@@ -898,6 +1038,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           onFinish={() => {}}
           showReturnToMenu={viewState === 'LANDING'}
           onReturnToMenu={handleReturnToMainMenu}
+        />
+        <TermsModal
+          open={showTermsModal}
+          onAccept={handleAcceptTerms}
+          onClose={handleDismissTerms}
         />
         
         <div className="flex-1 flex flex-col items-center py-4 px-3 md:py-6 md:px-4">
@@ -1069,6 +1214,12 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         onReturnToMenu={handleReturnToMainMenu}
       />
 
+      <TermsModal
+        open={showTermsModal}
+        onAccept={handleAcceptTerms}
+        onClose={handleDismissTerms}
+      />
+
       <main className="flex-1 max-w-6xl mx-auto w-full p-4">
         {isFinalized && (
           <div className="mb-6">
@@ -1076,6 +1227,32 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
               {isAdmin
                 ? 'Book selections are approved and currently view-only.'
                 : 'Book selections are approved and locked. Further changes are disabled. Please contact an admin for any updates.'}
+            </div>
+          </div>
+        )}
+        {needsTermsAcceptance && (
+          <div className="mb-6">
+            <div className="max-w-3xl mx-auto bg-white border border-slate-200 rounded-xl shadow-sm p-4 md:p-5">
+              <h3 className="text-lg font-bold text-slate-800 mb-1">Terms &amp; Conditions</h3>
+              <p className="text-sm text-slate-600">
+                Curriculum may be subjected to changes. Please review and accept the terms before finishing your selections.
+              </p>
+              <div className="mt-4 flex flex-col sm:flex-row sm:justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTermsModal(true)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg bg-white hover:bg-slate-50 text-sm font-medium"
+                >
+                  View details
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAcceptTerms}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
+                >
+                  Accept &amp; continue
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1228,4 +1405,43 @@ const Header = ({ onHome, hasFinish, onFinish, showReturnToMenu = false, onRetur
             </div>
         </header>
     );
+};
+
+type TermsModalProps = {
+  open: boolean;
+  onAccept: () => void;
+  onClose: () => void;
+};
+
+const TermsModal = ({ open, onAccept, onClose }: TermsModalProps) => {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-5 md:p-6 border border-slate-200">
+        <h3 className="text-xl font-bold text-slate-800 mb-2">Terms &amp; Conditions</h3>
+        <p className="text-sm text-slate-700 leading-relaxed">
+          Curriculum may be subjected to changes. By accepting, you acknowledge that future updates may modify the current selections.
+        </p>
+        <div className="mt-5 flex flex-col sm:flex-row sm:justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={onAccept}
+            className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700"
+          >
+            Accept
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 };

@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Maximize2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { cn, API_BASE_URL, normalizeAssetUrl } from '../lib/utils';
 import { COVER_THEME_CATALOGUE } from '../theme';
@@ -12,14 +11,20 @@ const GRADE_OPTIONS = [
   { id: 'L', label: 'LKG' },
   { id: 'U', label: 'UKG' }
 ];
-const DEFAULT_GRADE_ID = GRADE_OPTIONS[0].id;
+const resolveCoverUrl = (theme) => {
+  const rawId = theme?.id || theme?.themeId;
+  const id = typeof rawId === 'string' ? rawId.trim().replace(/\s+/g, '_') : rawId;
+  if (!id) return '';
+  return normalizeAssetUrl(`/public/cover-library/themes/${id}/cover.png`);
+};
+
 const normalizeLibraryPayload = (library) => {
   const themes = Array.isArray(library?.themes)
     ? library.themes.map((theme) => ({
         ...theme,
-        coverUrl: normalizeAssetUrl(theme?.coverUrl),
-        thumbnailUrl: normalizeAssetUrl(theme?.thumbnailUrl),
-        previewUrl: normalizeAssetUrl(theme?.previewUrl),
+        coverUrl: resolveCoverUrl(theme),
+        thumbnailUrl: '', // force use of original cover
+        previewUrl: '',   // force use of original cover
       }))
     : [];
 
@@ -82,12 +87,22 @@ const CoverSelection = () => {
   const [previewError, setPreviewError] = useState('');
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [libraryError, setLibraryError] = useState('');
-  const [activeGradeCode, setActiveGradeCode] = useState(DEFAULT_GRADE_ID);
   const [lightboxImage, setLightboxImage] = useState(null);
+  const [pngAssignments, setPngAssignments] = useState({});
 
   const themeCatalogue = useMemo(() => {
-    if (library?.themes?.length) return library.themes;
-    return themeCatalogueFallback;
+    if (library?.themes?.length) return library.themes.map((t) => ({
+      ...t,
+      coverUrl: resolveCoverUrl(t),
+      previewUrl: '',
+      thumbnailUrl: '',
+    }));
+    return themeCatalogueFallback.map((t) => ({
+      ...t,
+      coverUrl: resolveCoverUrl(t),
+      previewUrl: '',
+      thumbnailUrl: '',
+    }));
   }, [library]);
 
   useEffect(() => {
@@ -187,30 +202,6 @@ const CoverSelection = () => {
   }, [selectedColourId, selectedThemeId]);
 
   useEffect(() => {
-    if (!shouldShowPreview || !selectedTheme || !selectedColour) {
-      return;
-    }
-
-    setIsLoadingPreview(true);
-    setPreviewError('');
-
-    if (selectedColour?.grades) {
-      const gradeItems = Object.entries(selectedColour.grades)
-        .filter(([, src]) => src)
-        .map(([grade, src]) => ({
-          id: `${selectedColour.id}-${grade}`,
-          title: grade,
-          src,
-        }));
-      setPreviewItems(gradeItems);
-      if (!gradeItems.length) {
-        setPreviewError('No cover artwork has been uploaded for this colour yet.');
-      }
-    }
-    setIsLoadingPreview(false);
-  }, [selectedColour, shouldShowPreview]);
-
-  useEffect(() => {
     setPreviewItems([]);
     setPreviewError('');
     setShouldShowPreview(false);
@@ -221,8 +212,23 @@ const CoverSelection = () => {
     setValidationError('');
   }, []);
 
-  const handleSelectColour = useCallback((colourId) => {
-    setSelectedColourId(colourId);
+  const handleAssignGradePng = useCallback((gradeId, colourId, pngSrc) => {
+    const key = `${colourId}:${pngSrc}`;
+    setPngAssignments((prev) => {
+      const next = { ...prev };
+      if (!gradeId) {
+        delete next[key];
+        return next;
+      }
+      // ensure a grade is only assigned to one PNG
+      Object.entries(next).forEach(([entryKey, entry]) => {
+        if (entry?.gradeId === gradeId) {
+          delete next[entryKey];
+        }
+      });
+      next[key] = { gradeId, colourId, src: pngSrc };
+      return next;
+    });
     setValidationError('');
   }, []);
 
@@ -232,40 +238,45 @@ const CoverSelection = () => {
       return;
     }
 
-    if (!selectedColour) {
-      setValidationError('Please choose a colour before previewing the cover.');
+    const assignedEntries = Object.values(pngAssignments);
+    if (!assignedEntries.length) {
+      setValidationError('Assign at least one PNG to a grade before previewing.');
       setShouldShowPreview(false);
       return;
     }
 
     setValidationError('');
     setShouldShowPreview(true);
-  }, [selectedColour, selectedTheme]);
+    const items = assignedEntries.map(({ gradeId, src }) => ({
+      id: `${gradeId}-${src}`,
+      title: GRADE_OPTIONS.find((g) => g.id === gradeId)?.label || gradeId,
+      src
+    }));
+    setPreviewItems(items);
+    if (!items.length) {
+      setPreviewError('No cover artwork has been uploaded for the selected grades yet.');
+    } else {
+      setPreviewError('');
+    }
+  }, [pngAssignments, selectedTheme]);
 
   const hasValidationError = Boolean(validationError);
-  const activeGradeLabel = useMemo(
-    () => GRADE_OPTIONS.find((grade) => grade.id === activeGradeCode)?.label || activeGradeCode,
-    [activeGradeCode]
-  );
-  const colourPreviewStrip = useMemo(
-    () =>
-      colourOptions.map((colour) => ({
-        ...colour,
-        previewSrc: (colour.grades && colour.grades[activeGradeCode]) || '',
-      })),
-    [activeGradeCode, colourOptions]
-  );
+  const displayColourOptions = useMemo(() => colourOptions.slice(0, 4), [colourOptions]);
+  const gradeLabel = (code) => GRADE_OPTIONS.find((g) => g.id === code)?.label || code;
+
+  const handleThemeKeyPress = (event, themeId) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleSelectTheme({ target: { value: themeId } });
+    }
+  };
 
   const buildThemeSources = (item) => {
-    const thumb = item?.thumbnailUrl || null;
-    const preview = item?.previewUrl || null;
-    const cover = item?.coverUrl || null;
-    if (!thumb && !preview) return null;
+    let cover = item?.coverUrl || '';
+    if (!cover) return null;
     return {
-      preview,
-      thumb,
-      original: cover || preview || thumb,
-      fallback: preview || thumb,
+      cover,
+      original: cover,
     };
   };
 
@@ -303,83 +314,38 @@ const CoverSelection = () => {
       <div>
         <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Themes</h3>
           <p className="mt-1 text-sm text-slate-600">
-            Tap a theme to select. Optimized for mobile: two rows of 8 slots on large screens.
+            Tap a theme to select. Previews now show the full PNG inside a clean container.
           </p>
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl-grid-cols-4 gap-4 sm:gap-6 max-w-[520px] sm:max-w-6xl mx-auto">
           {themeCatalogue.map((item) => {
             const isActive = item.id === selectedThemeId;
             const sources = buildThemeSources(item);
-            const imgSrc = sources?.thumb || sources?.preview || '';
-            const imgSrcSet = sources?.preview
-              ? `${sources.preview} 1x, ${sources.preview} 2x`
-              : sources?.thumb
-                ? `${sources.thumb} 1x, ${sources.thumb} 2x`
-                : `${imgSrc} 1x, ${imgSrc} 2x`;
+            const imgSrc = sources?.cover || sources?.original || '';
             return (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => handleSelectTheme({ target: { value: item.id } })}
+                onKeyDown={(event) => handleThemeKeyPress(event, item.id)}
                 className={cn(
-                  'group flex h-full w-full min-w-[0] flex-col gap-3 overflow-hidden rounded-none border bg-white p-3 shadow-sm transition hover:-translate-y-1 hover:border-indigo-200 hover:shadow-md',
+                  'group relative block w-full max-w-[900px] mx-auto overflow-hidden border bg-white shadow-sm transition hover:-translate-y-1 hover:border-indigo-200 hover:shadow-md focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 aspect-[5009/3473] cursor-pointer',
                   isActive ? 'border-indigo-500 ring-2 ring-indigo-300' : 'border-slate-200'
                 )}
+                aria-pressed={isActive}
               >
-                <div className="relative overflow-hidden rounded-none bg-slate-50 w-full aspect-[5009/3473] max-h-56 flex items-center justify-center">
+                <div className="h-full w-full overflow-hidden">
                   {imgSrc ? (
-                    <>
-                      <img
-                        src={imgSrc}
-                        srcSet={imgSrcSet}
-                        sizes="(max-width: 768px) 45vw, 300px"
-                        width={300}
-                        height={208}
-                        alt={`${item.label || item.id}`}
-                        className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.02]"
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-2 top-2 hidden rounded-full bg-black/60 p-2 text-white shadow hover:bg-black/80 sm:inline-flex"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          const modalSrc = sources?.original || sources?.preview || item.previewUrl || imgSrc;
-                          const modalSrcSet = sources?.preview ? `${sources.preview} 1200w` : undefined;
-                          setLightboxImage({
-                            src: modalSrc,
-                            srcSet: modalSrcSet,
-                            title: item.label || item.id,
-                          });
-                        }}
-                        aria-label="View full size"
-                      >
-                        <Maximize2 className="h-4 w-4" />
-                      </button>
-                    </>
+                    <img
+                      src={imgSrc}
+                      width={1000}
+                      height={1000}
+                      alt={`${item.label || item.id}`}
+                      loading="lazy"
+                      decoding="async"
+                      className="block h-full w-full object-contain transition duration-300 group-hover:scale-[1.02]"
+                    />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">No image</div>
-                  )}
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-600 truncate">{item.label || item.id}</p>
-                  {imgSrc && (
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-semibold uppercase text-indigo-700 shadow-sm sm:hidden"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        const modalSrc = sources?.original || sources?.preview || item.previewUrl || imgSrc;
-                        const modalSrcSet = sources?.preview ? `${sources.preview} 1200w` : undefined;
-                        setLightboxImage({
-                          src: modalSrc,
-                          srcSet: modalSrcSet,
-                          title: item.label || item.id,
-                        });
-                      }}
-                      aria-label="View full size"
-                    >
-                      <Maximize2 className="h-3 w-3" />
-                      View
-                    </button>
                   )}
                 </div>
               </button>
@@ -425,78 +391,76 @@ const CoverSelection = () => {
       >
         <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Pick a colour family</h3>
         <p className="mt-1 text-sm text-slate-600">
-          Select a colour to highlight your cover. Use the grade dropdown to view PNG thumbnails for that grade.
+          Assign PNGs to grades. Each colour card below is an option; use the dropdown on a thumbnail to assign that PNG to a grade (dropdown is for assignment, not preview).
         </p>
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Viewing grade: <span className="text-slate-800">{activeGradeLabel}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <label htmlFor="cover-grade" className="text-[11px] font-semibold text-slate-600">
-              Grade
-            </label>
-            <select
-              id="cover-grade"
-              value={activeGradeCode}
-              onChange={(event) => setActiveGradeCode(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            >
-              {GRADE_OPTIONS.map((grade) => (
-                <option key={grade.id} value={grade.id}>
-                  {grade.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {colourPreviewStrip.length === 0 ? (
+        {displayColourOptions.length === 0 ? (
           <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-600">
             No colour PNGs have been uploaded yet. Upload PNG files to the cover library to see thumbnails here.
           </div>
         ) : (
-          <div className="mt-4 overflow-x-auto pb-2">
-            <div className="flex min-w-max gap-4 sm:gap-6 pr-1">
-              {colourPreviewStrip.map((colour) => {
-                const isSelected = colour.id === selectedColourId;
+          <div className="mt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-2 gap-4 sm:gap-6">
+              {displayColourOptions.map((colour) => {
+                const thumbnails = Array.from(
+                  new Map(
+                    Object.entries(colour.grades || {})
+                      .filter(([, src]) => !!src)
+                      .map(([gradeCode, src]) => [src, { gradeCode, src }])
+                  ).values()
+                );
                 return (
-                  <button
-                    type="button"
+                  <div
                     key={colour.id}
-                    onClick={() => handleSelectColour(colour.id)}
                     className={cn(
-                      'flex w-[280px] sm:w-[340px] flex-none flex-col gap-3 rounded-xl border bg-white p-3 text-left shadow-sm transition duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2',
-                      isSelected ? 'border-indigo-500 ring-2 ring-indigo-400 ring-offset-2' : 'border-slate-200'
+                      'flex w-full flex-col gap-3 rounded-xl border bg-white p-3 text-left shadow-sm transition duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2',
+                      'border-slate-200'
                     )}
-                    aria-pressed={isSelected}
                   >
-                    <div className="w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50">
-                      {colour.previewSrc ? (
-                        <img
-                          src={colour.previewSrc}
-                          alt={`${colour.id} ${activeGradeLabel}`}
-                          className="h-44 w-full object-contain"
-                        />
-                      ) : (
-                        <div className="flex h-44 w-full items-center justify-center text-xs text-slate-400">
-                          No {activeGradeLabel} PNG
+                    <div className="flex flex-col">
+                      <span className="text-sm font-semibold text-slate-800">{colour.id}</span>
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">Assign PNGs</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {thumbnails.length === 0 ? (
+                        <div className="col-span-2 flex h-44 items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50 text-xs text-slate-400">
+                          No PNGs uploaded for this colour.
                         </div>
+                      ) : (
+                        thumbnails.map((thumb) => {
+                          const pngKey = `${colour.id}:${thumb.src}`;
+                          const assignedGrade = pngAssignments[pngKey]?.gradeId;
+                          return (
+                            <div
+                              key={`${colour.id}-${thumb.gradeCode}-${thumb.src}`}
+                              className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-2"
+                            >
+                              <div className="aspect-square overflow-hidden rounded bg-white border border-slate-200">
+                                <img
+                                  src={thumb.src}
+                                  width={1000}
+                                  height={1000}
+                                  alt={`${colour.id} thumbnail`}
+                                  className="h-full w-full object-contain"
+                                />
+                              </div>
+                              <select
+                                className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-200"
+                                value={assignedGrade || ''}
+                                onChange={(event) => handleAssignGradePng(event.target.value, colour.id, thumb.src)}
+                              >
+                                <option value="">Select grade</option>
+                                {GRADE_OPTIONS.map((grade) => (
+                                  <option key={grade.id} value={grade.id}>
+                                    {grade.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-semibold text-slate-800">{colour.id}</span>
-                        <span className="text-[11px] font-semibold uppercase text-slate-500">
-                          {activeGradeLabel}
-                        </span>
-                      </div>
-                      {isSelected && (
-                        <span className="rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-semibold uppercase text-indigo-700">
-                          Selected
-                        </span>
-                      )}
-                    </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -510,13 +474,13 @@ const CoverSelection = () => {
               <div>
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Preview covers</h3>
                 <p className="mt-1 text-sm text-slate-600">
-                  The preview shows the per-grade PNGs for the selected colour.
+                  The preview shows the PNGs you assigned per grade.
                 </p>
               </div>
               <Button
                 type="button"
                 onClick={handlePreview}
-                disabled={!selectedTheme || !selectedColour || isLoadingPreview}
+                disabled={!selectedTheme || isLoadingPreview}
                 className="w-full sm:w-auto self-stretch sm:self-start rounded-full bg-indigo-600 px-8 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 {isLoadingPreview ? 'Preparing preview...' : 'Preview cover'}
@@ -526,8 +490,8 @@ const CoverSelection = () => {
         <div className="mt-6 min-h-[220px] rounded-xl border border-dashed border-slate-300 bg-white p-6">
           {!shouldShowPreview ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-slate-500">
-              <span className="font-medium">Choose a colour, then click "Preview cover".</span>
-              <span className="text-xs text-slate-400">The preview will display every SVG for your selection.</span>
+              <span className="font-medium">Assign PNGs to grades, then click "Preview cover".</span>
+              <span className="text-xs text-slate-400">The preview will display the PNG you assigned per grade.</span>
             </div>
           ) : isLoadingPreview ? (
             <div className="flex h-full items-center justify-center text-sm font-medium text-indigo-600">Loading preview...</div>

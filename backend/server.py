@@ -95,11 +95,13 @@ LIBRARY_THEME_KEYS = [f"Theme {i}" for i in range(1, 17)]
 LIBRARY_GRADE_CODES = ["P", "N", "L", "U"]
 DEFAULT_COLOUR_VERSIONS = [f"V{i}_C" for i in range(1, 9)]
 PUBLIC_URL_PREFIX = "/public"
+SUBJECT_PDF_DIR = PUBLIC_DIR / "subject-pdfs"
 
 try:
     COVER_THEME_PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
     LIBRARY_THEMES_DIR.mkdir(parents=True, exist_ok=True)
     LIBRARY_COLOURS_DIR.mkdir(parents=True, exist_ok=True)
+    SUBJECT_PDF_DIR.mkdir(parents=True, exist_ok=True)
 except OSError as exc:
     logger.warning("Unable to create public cover directory %s: %s", COVER_THEME_PUBLIC_DIR, exc)
 
@@ -239,6 +241,14 @@ def _resolve_library_colour_path(version: str, grade_code: str, extension: str =
     safe_version = _sanitize_component(version, "V1_C")
     safe_grade = _sanitize_component(grade_code, "P")
     return (LIBRARY_COLOURS_DIR / safe_version) / f"{safe_grade}{extension}"
+
+def _resolve_subject_pdf_path(class_name: str, subject_name: str, filename: str) -> Path:
+    safe_class = _sanitize_component(class_name, "class")
+    safe_subject = _sanitize_component(subject_name, "subject")
+    ext = Path(filename).suffix.lower() or ".pdf"
+    if ext not in {".pdf"}:
+        ext = ".pdf"
+    return (SUBJECT_PDF_DIR / safe_class) / f"{safe_subject}{ext}"
 
 
 def _public_url_for(
@@ -1721,7 +1731,6 @@ async def get_grade_status(school_id: str):
     return status
 
 
-
 async def get_all_schools_with_selections(
     page: int = 1, limit: int = 10, authorization: Optional[str] = Header(None)
 ):
@@ -2067,6 +2076,29 @@ async def delete_library_colour(version: str, grade_code: str, request: Request)
     safe_grade = _sanitize_component(grade_code, "P")
     _remove_existing_images(version_dir, safe_grade)
     return {"status": "ok", "library": _build_library_manifest(request)}
+
+
+# ---------------------------------------------------------------------------
+# Subject PDF uploads (static)
+# ---------------------------------------------------------------------------
+
+
+@api_router.post("/subject-pdfs/{class_name}/{subject_name}")
+async def upload_subject_pdf(class_name: str, subject_name: str, file: UploadFile = File(...)):
+    """Upload a subject PDF to the static public folder."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="PDF is empty.")
+    target_path = _resolve_subject_pdf_path(class_name, subject_name, file.filename or "subject.pdf")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target_path.write_bytes(content)
+    except OSError as exc:
+        logger.error("Unable to store subject PDF at %s: %s", target_path, exc)
+        raise HTTPException(status_code=500, detail="Unable to store PDF.") from exc
+    public_url = _public_url_for(target_path, None)
+    return {"status": "ok", "url": public_url}
+
 
 
 @api_router.post("/cover-assets/rebuild-images")

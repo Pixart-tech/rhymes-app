@@ -1,5 +1,5 @@
 
-import { ClassData, BookOption, Subject, AssessmentVariant } from './types';
+import { ClassData, BookOption, Subject, AssessmentVariant } from '../types/types';
 
 // Helper to generate IDs
 const generateId = () => Math.random().toString(36).substr(2, 9);

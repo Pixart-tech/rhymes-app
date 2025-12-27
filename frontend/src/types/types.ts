@@ -191,6 +191,7 @@ export interface FinalOutputItem {
   grade_subject?: string;
   subject: string;
   type: string;
+  component?: 'core' | 'work' | 'addon';
   core: string | undefined;
   core_cover?: string | undefined;
   core_cover_title?: string | undefined;
@@ -203,6 +204,11 @@ export interface FinalOutputItem {
   addon_cover?: string | undefined;
   addon_cover_title?: string | undefined;
   addon_spine?: string | undefined;
+  cover_theme_id?: string | null;
+  cover_theme_label?: string | null;
+  cover_colour_id?: string | null;
+  cover_colour_label?: string | null;
+  cover_status?: string | null;
 }
 
 export type AssessmentVariant = 'WITH_MARKS' | 'WITHOUT_MARKS';

@@ -4,6 +4,7 @@ import { ClassData, SelectionRecord, AssessmentVariant } from '../types/types';
 import { getAssessmentForClass, CLASS_THEMES, DEFAULT_THEME } from '../constants/constants';
 import { Eye, EyeOff, AlertTriangle, Book, Trash2, ArrowLeft, Check, RotateCcw, Plus, X } from 'lucide-react';
 import PdfViewer from './PdfViewer';
+import { API_BASE_URL } from '../lib/utils';
 
 interface ClassSummaryProps {
   classData: ClassData;
@@ -42,6 +43,15 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   const [expandedPdf, setExpandedPdf] = useState<string | null>(null);
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [manualForm, setManualForm] = useState({ subject: '', coreCode: '', coreCover: '', coreSpine: '' });
+
+  const hasActiveBook = (s: SelectionRecord) => {
+    const opt = s.selectedOption;
+    if (!opt) return false;
+    const coreActive = !!opt.coreId && !s.skipCore;
+    const workActive = !!opt.workId && !s.skipWork;
+    const addonActive = !!opt.addOnId && !s.skipAddon;
+    return coreActive || workActive || addonActive;
+  };
 
   const pruneEmptySelections = (list: SelectionRecord[]) => {
     return list.filter((s) => {
@@ -275,8 +285,8 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
     });
 
     // 2. Assessment
-    const englishSelection = classSelections.find(s => s.subjectName === "English")?.selectedOption || null;
-    const mathsSelection = classSelections.find(s => s.subjectName === "Maths")?.selectedOption || null;
+    const englishSelection = classSelections.find(s => s.subjectName === "English" && hasActiveBook(s))?.selectedOption || null;
+    const mathsSelection = classSelections.find(s => s.subjectName === "Maths" && hasActiveBook(s))?.selectedOption || null;
     const assessment = getAssessmentForClass(classData.name, englishSelection, mathsSelection, currentAssessmentVariant);
 
     if (assessment) {

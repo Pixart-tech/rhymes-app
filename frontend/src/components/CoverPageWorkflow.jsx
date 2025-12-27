@@ -6,7 +6,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
-import { CheckCircle2, ImageOff, Maximize2 } from 'lucide-react';
+import { CheckCircle2, ImageOff } from 'lucide-react';
 
 import { API_BASE_URL, cn, normalizeAssetUrl } from '../lib/utils';
 import { COVER_COLOUR_OPTIONS, COVER_THEME_CATALOGUE, COVER_THEME_SLOT_COUNT } from '../theme';
@@ -28,13 +28,20 @@ const GRADE_CODE_MAP = {
   ukg: 'U',
 };
 
+const resolveCoverUrl = (theme) => {
+  const rawId = theme?.id || theme?.themeId;
+  const id = typeof rawId === 'string' ? rawId.trim().replace(/\s+/g, '_') : rawId;
+  if (!id) return '';
+  return normalizeAssetUrl(`/public/cover-library/themes/${id}/cover.png`);
+};
+
 const normalizeLibraryPayload = (library) => {
   const themes = Array.isArray(library?.themes)
     ? library.themes.map((theme) => ({
         ...theme,
-        coverUrl: normalizeAssetUrl(theme?.coverUrl),
-        thumbnailUrl: normalizeAssetUrl(theme?.thumbnailUrl),
-        previewUrl: normalizeAssetUrl(theme?.previewUrl),
+        coverUrl: resolveCoverUrl(theme),
+        thumbnailUrl: '',
+        previewUrl: '',
       }))
     : [];
 
@@ -113,26 +120,25 @@ const mapLibraryToThemes = (library) => {
   return themeList.slice(0, COVER_THEME_SLOT_COUNT).map((theme, idx) => ({
     id: theme?.id || `theme${idx + 1}`,
     label: theme?.label || theme?.id || `Theme ${idx + 1}`,
-    thumbnailUrl: theme?.thumbnailUrl || theme?.coverUrl || '',
-    coverUrl: theme?.coverUrl || theme?.thumbnailUrl || '',
+    thumbnailUrl: theme?.thumbnailUrl || '',
+    coverUrl: theme?.coverUrl || '',
     colours: colourEntries,
   }));
 };
 
 const buildThemeSources = (theme) => {
-  const thumb = theme?.thumbnailUrl || null;
-  const preview = theme?.previewUrl || null;
-  const cover = theme?.coverUrl || null;
-  if (!preview && !thumb && !cover) return null;
-
-  const resolvedPreview = preview;
-  const resolvedThumb = thumb;
-  const resolvedOriginal = cover || preview || thumb || null;
+  let cover = theme?.coverUrl || '';
+  // If only preview is present, derive the original cover path
+  if (!cover && theme?.previewUrl) {
+    cover = theme.previewUrl
+      .replace('/previews-webp/', '/themes/')
+      .replace('cover_preview.webp', 'cover.png');
+  }
+  if (!cover) return null;
 
   return {
-    thumb: resolvedThumb,
-    preview: resolvedPreview,
-    original: resolvedOriginal,
+    cover,
+    original: cover,
   };
 };
 
@@ -168,11 +174,10 @@ const CoverPageWorkflow = ({
   const [selectedThemeId, setSelectedThemeId] = useState('');
   const [selectedColourId, setSelectedColourId] = useState('');
   const [selectedColoursByGrade, setSelectedColoursByGrade] = useState({});
+  const [pngAssignments, setPngAssignments] = useState({});
   const [isFinished, setIsFinished] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [hasHydratedFromServer, setHasHydratedFromServer] = useState(false);
-  const [gradePreviewSelections, setGradePreviewSelections] = useState({});
-  const [lightboxImage, setLightboxImage] = useState(null);
 
   const selectedTheme = useMemo(
     () => themes.find((theme) => theme.id === selectedThemeId) || null,
@@ -192,27 +197,12 @@ const CoverPageWorkflow = ({
 
     return chosenVersions.map((version, index) => ({
       id: version,
-      label: `Colour option ${index + 1}`,
+      label: version,
       grades: libraryColours[version] || {},
     }));
   }, [libraryColours, selectedThemeId]);
-  const activeColourId = useMemo(
-    () => selectedColoursByGrade[grade] || selectedColourId,
-    [grade, selectedColourId, selectedColoursByGrade]
-  );
-  const selectedColour = useMemo(
-    () => colourOptions.find((colour) => colour.id === activeColourId) || null,
-    [colourOptions, activeColourId]
-  );
-  const getPreviewCodesForColour = (colourId) => {
-    const defaults = ['P', 'N', 'L', 'U'];
-    const stored = gradePreviewSelections[colourId];
-    if (Array.isArray(stored) && stored.length === defaults.length) {
-      return stored;
-    }
-    return defaults;
-  };
-
+  const activeColourId = useMemo(() => selectedColoursByGrade[grade] || selectedColourId, [grade, selectedColourId, selectedColoursByGrade]);
+  const selectedColour = useMemo(() => colourOptions.find((colour) => colour.id === activeColourId) || null, [colourOptions, activeColourId]);
   useEffect(() => {
     const schoolId = school?.school_id;
     if (!schoolId || !grade) {
@@ -239,17 +229,12 @@ const CoverPageWorkflow = ({
     });
 
     setSelectedColoursByGrade(loadedColours);
+    setPngAssignments({});
     setSelectedThemeId(activeThemeId || '');
     setSelectedColourId(activeColour || '');
     setIsFinished(activeFinished);
     setLastSavedAt(activeUpdatedAt);
   }, [grade, school?.school_id]);
-
-  useEffect(() => {
-    if (grade) {
-      setGradePreviewSelections({});
-    }
-  }, [grade]);
 
   useEffect(() => {
     const schoolId = school?.school_id;
@@ -310,6 +295,7 @@ const CoverPageWorkflow = ({
         });
 
         setSelectedColoursByGrade((prev) => ({ ...loadedColours, ...prev }));
+        setPngAssignments({});
         setSelectedThemeId((prev) => loadedThemeId || prev);
         setSelectedColourId((prev) => loadedColourId || prev);
         setIsFinished(loadedFinished);
@@ -463,23 +449,28 @@ const CoverPageWorkflow = ({
     setSelectedThemeId(themeId);
     setSelectedColourId('');
     setSelectedColoursByGrade({});
+    setPngAssignments({});
     setIsFinished(false);
   };
 
-  const handleColourSelect = (targetGrade, colourId) => {
-    if (isReadOnly || !targetGrade) {
-      return;
-    }
-
-    setSelectedColoursByGrade((current) => ({
-      ...current,
-      [targetGrade]: colourId,
-    }));
-
-    if (targetGrade === grade) {
+  const handleAssignPng = (gradeKey, colourId, pngSrc) => {
+    if (isReadOnly || !gradeKey || !colourId || !pngSrc) return;
+    const key = `${colourId}:${pngSrc}`;
+    setPngAssignments((prev) => {
+      const next = { ...prev };
+      // ensure one PNG per grade
+      Object.entries(next).forEach(([entryKey, entry]) => {
+        if (entry?.gradeKey === gradeKey) {
+          delete next[entryKey];
+        }
+      });
+      next[key] = { gradeKey, colourId, src: pngSrc };
+      return next;
+    });
+    setSelectedColoursByGrade((current) => ({ ...current, [gradeKey]: colourId }));
+    if (gradeKey === grade) {
       setSelectedColourId(colourId);
     }
-
     setIsFinished(false);
   };
 
@@ -488,40 +479,10 @@ const CoverPageWorkflow = ({
   };
 
   const completionDisabled =
-    !selectedThemeId || !activeColourId || isReadOnly;
+    !selectedThemeId || isReadOnly || Object.keys(pngAssignments).length === 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
-      {lightboxImage && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4"
-          onClick={() => setLightboxImage(null)}
-        >
-          <div
-            className="relative max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="absolute right-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs font-semibold uppercase text-white hover:bg-black/80"
-              onClick={() => setLightboxImage(null)}
-            >
-              Close
-            </button>
-            <div className="flex max-h-[90vh] items-center justify-center bg-white p-4">
-              <img
-                src={lightboxImage.src}
-                srcSet={lightboxImage.srcSet || undefined}
-                sizes="100vw"
-                alt={lightboxImage.alt}
-                className="max-h-[80vh] w-full object-contain"
-                style={{ imageRendering: 'crisp-edges' }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="mx-auto max-w-7xl space-y-8">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-2">
@@ -545,13 +506,6 @@ const CoverPageWorkflow = ({
             </Button>
           </div>
         </div>
-
-        <Alert className="border-orange-200 bg-orange-50/70 text-orange-800">
-          <AlertTitle>Cover previews use uploaded PNG thumbnails</AlertTitle>
-          <AlertDescription>
-            Pick a theme and colour to mark this grade as finished. Thumbnails come from admin uploads; no live SVG previews are used.
-          </AlertDescription>
-        </Alert>
 
         <Card className="border-none bg-white/70 shadow-md shadow-orange-100/40">
           <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
@@ -577,7 +531,7 @@ const CoverPageWorkflow = ({
       <Card className="border-none shadow-xl shadow-orange-100/60">
         <CardHeader className="space-y-2">
           <CardTitle className="text-2xl font-semibold text-slate-900">Choose a theme</CardTitle>
-          <p className="text-base text-slate-600">Sixteen PNG thumbnails are available. Pick one to reveal the colour grid.</p>
+          <p className="text-base text-slate-600">Sixteen PNG containers are available. Pick one to reveal the colour grid.</p>
         </CardHeader>
           <CardContent className="space-y-4">
             {isLoadingThemes && (
@@ -592,83 +546,42 @@ const CoverPageWorkflow = ({
               </div>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-y-6 gap-x-4 sm:gap-y-10 sm:gap-x-12 lg:gap-x-14 xl:gap-x-16">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-y-6 gap-x-4 sm:gap-y-10 sm:gap-x-12 lg:gap-x-14 xl:gap-x-16 max-w-[520px] sm:max-w-6xl mx-auto">
               {themes.map((theme) => {
                 const isSelected = selectedThemeId === theme.id;
                 const sources = buildThemeSources(theme);
-                const cardSrc = sources?.thumb || sources?.preview || '';
-                const cardSrcSet = sources?.preview
-                  ? `${sources.preview} 300w, ${sources.preview} 1200w`
-                  : sources?.thumb
-                    ? `${sources.thumb} 300w, ${sources.thumb} 1200w`
-                    : `${cardSrc} 300w, ${cardSrc} 1200w`;
+                const cardSrc = sources?.cover || sources?.original || '';
                 return (
                   <button
                     key={theme.id}
                     type="button"
                     onClick={() => handleThemeSelect(theme.id)}
                     className={cn(
-                      'group flex h-full w-full min-w-[0] flex-col overflow-hidden rounded-none border border-slate-200 bg-white/80 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-300',
+                      'group relative block w-full max-w-[900px] mx-auto overflow-hidden border border-slate-200 bg-white/80 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md active:scale-[0.99] focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-300 aspect-[5009/3473]',
                       isSelected ? 'border-orange-500 ring-2 ring-orange-400' : '',
                       isReadOnly ? 'cursor-not-allowed opacity-60' : ''
                     )}
                     aria-pressed={isSelected}
                     disabled={isReadOnly}
                   >
-                    <div className="relative w-full overflow-hidden bg-white aspect-[5009/3473] max-h-[28rem] flex items-center justify-center rounded-none border border-slate-200">
+                    <div className="h-full w-full overflow-hidden">
                       {cardSrc ? (
-                        <>
-                          <img
-                            src={cardSrc}
-                            srcSet={cardSrcSet}
-                            sizes="(max-width: 768px) 45vw, 300px"
-                            width={300}
-                            height={208}
-                            loading="lazy"
-                            decoding="async"
-                            alt={`${theme.label} thumbnail`}
-                            className="block h-full w-full object-contain"
-                            style={{ imageRendering: 'optimizeQuality' }}
-                          />
-                          <button
-                            type="button"
-                            className="absolute right-3 top-3 hidden rounded-full bg-black/60 p-2 text-white shadow hover:bg-black/80 sm:inline-flex"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              const modalSrc = sources?.original || sources?.preview || cardSrc;
-                              const modalSrcSet = sources?.preview ? `${sources.preview} 1200w` : undefined;
-                              setLightboxImage({ src: modalSrc, srcSet: modalSrcSet, alt: `${theme.label} thumbnail` });
-                            }}
-                            aria-label="View full size"
-                          >
-                            <Maximize2 className="h-4 w-4" />
-                          </button>
-                        </>
+                        <img
+                          src={cardSrc}
+                          width={1000}
+                          height={1000}
+                          alt={`${theme.label} thumbnail`}
+                          loading="lazy"
+                          decoding="async"
+                          className="block h-full w-full object-contain"
+                          style={{ imageRendering: 'optimizeQuality' }}
+                        />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-slate-400">
                           <ImageOff className="h-8 w-8" />
                         </div>
                       )}
                     </div>
-                    {cardSrc && (
-                      <div className="mt-2 flex items-center justify-between sm:hidden">
-                        <span className="text-xs font-medium uppercase tracking-wide text-slate-600 truncate">{theme.label}</span>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2 py-1 text-[11px] font-semibold uppercase text-orange-700 shadow-sm"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            const modalSrc = sources?.original || sources?.preview || cardSrc;
-                            const modalSrcSet = sources?.preview ? `${sources.preview} 1200w` : undefined;
-                            setLightboxImage({ src: modalSrc, srcSet: modalSrcSet, alt: `${theme.label} thumbnail` });
-                          }}
-                          aria-label="View full size"
-                        >
-                          <Maximize2 className="h-3 w-3" />
-                          View
-                        </button>
-                      </div>
-                    )}
                   </button>
                 );
               })}
@@ -687,101 +600,73 @@ const CoverPageWorkflow = ({
             <CardContent className="space-y-4">
               <div className="space-y-6">
                 {colourOptions.map((colour, index) => {
-                  const previewCodes = getPreviewCodesForColour(colour.id);
-                  const isChosen = selectedColoursByGrade[grade] === colour.id;
+                  const thumbnails = Object.entries(colour.grades || {})
+                    .filter(([, src]) => !!src)
+                    .map(([gradeCode, src]) => ({ gradeCode, src }));
+                  const fullyAssigned =
+                    thumbnails.length > 0 &&
+                    thumbnails.every((thumb) => pngAssignments[`${colour.id}:${thumb.src}`]?.gradeKey);
                   return (
-                    <button
+                    <div
                       key={colour.id}
-                      type="button"
-                      onClick={() => handleColourSelect(grade, colour.id)}
                       className={cn(
-                        'flex h-full flex-col gap-4 rounded-2xl border bg-white p-4 text-left shadow-sm transition duration-200 hover:-translate-y-1 hover:border-orange-200 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300 focus-visible:ring-offset-2',
-                        isChosen ? 'border-orange-500 ring-2 ring-orange-400 ring-offset-2' : 'border-slate-200',
+                        'flex h-full flex-col gap-4 rounded-2xl border bg-white p-4 text-left shadow-sm transition duration-200',
+                        fullyAssigned ? 'border-orange-500 ring-2 ring-orange-400 ring-offset-2' : 'border-slate-200',
                         isReadOnly ? 'cursor-not-allowed opacity-60' : '',
                         'w-full sm:min-w-[360px]'
                       )}
-                      aria-pressed={isChosen}
-                      disabled={isReadOnly}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-base font-semibold text-slate-800">{`Colour option ${index + 1}`}</span>
-                        {isChosen && (
+                        <span className="text-base font-semibold text-slate-800">{colour.label || `Colour ${index + 1}`}</span>
+                        {fullyAssigned && (
                           <span className="rounded-full bg-orange-50 px-2 py-1 text-[11px] font-semibold uppercase text-orange-700">
                             Selected
                           </span>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          Grade
-                        </label>
-                        <span className="text-xs text-slate-600">Choose per slot below</span>
-                      </div>
-
-                      <div className="flex flex-wrap gap-4 w-full">
-                        {previewCodes.map((code, slotIndex) => {
-                          const slotSrc = (colour.grades && colour.grades[code]) || '';
-                          return (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
+                        {thumbnails.length === 0 ? (
+                          <div className="col-span-2 flex h-56 items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50 text-xs text-slate-400">
+                            No PNGs uploaded for this colour.
+                          </div>
+                        ) : (
+                          thumbnails.map((thumb) => (
                             <div
-                              key={`${colour.id}-${slotIndex}`}
-                              className="relative w-full overflow-hidden rounded-xl border border-slate-200 bg-white min-w-[240px] sm:min-w-[300px] max-w-[380px] flex-1"
+                              key={`${colour.id}-${thumb.gradeCode}`}
+                              className="relative w-full overflow-hidden rounded-xl border border-slate-200 bg-white"
                             >
                               <div className="flex items-center justify-between px-2 py-2">
-                                <span className="text-[11px] font-semibold uppercase text-slate-500">PNG {slotIndex + 1}</span>
                                 <select
-                                  value={code}
+                                  value={pngAssignments[`${colour.id}:${thumb.src}`]?.gradeKey || ''}
                                   onChange={(event) => {
                                     event.stopPropagation();
-                                    setGradePreviewSelections((prev) => {
-                                      const next = Array.isArray(prev[colour.id]) ? [...prev[colour.id]] : [...previewCodes];
-                                      next[slotIndex] = event.target.value;
-                                      return { ...prev, [colour.id]: next };
-                                    });
+                                    handleAssignPng(event.target.value, colour.id, thumb.src);
                                   }}
                                   className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-200"
                                   disabled={isReadOnly}
                                 >
-                                  {['P', 'N', 'L', 'U'].map((option) => (
-                                    <option key={option} value={option}>
-                                      {option}
+                                  <option value="">Assign to grade</option>
+                                  {Object.entries(GRADE_CODE_MAP).map(([gradeKey]) => (
+                                    <option key={gradeKey} value={gradeKey}>
+                                      {resolveGradeLabel(gradeKey, resolvedGradeNames[gradeKey])}
                                     </option>
                                   ))}
                                 </select>
                               </div>
-                              {slotSrc ? (
-                                <img
-                                  src={slotSrc}
-                                  alt={`Cover option ${index + 1} grade ${code}`}
-                                  className="h-56 w-full object-contain object-center"
-                                  style={{ imageRendering: 'crisp-edges' }}
-                                />
-                              ) : (
-                                <div
-                                  className="flex h-56 w-full items-center justify-center text-xs font-semibold text-slate-500"
-                                  style={{ backgroundColor: colour.fallbackHex || '#f8fafc' }}
-                                >
-                                  No PNG for {code}
-                                </div>
-                              )}
-                              {slotSrc && (
-                                <button
-                                  type="button"
-                                  className="absolute right-2 top-2 rounded-full bg-black/60 p-2 text-white shadow hover:bg-black/80"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setLightboxImage({ src: slotSrc, alt: `Cover option ${index + 1} grade ${code}` });
-                                  }}
-                                  aria-label="View full size"
-                                >
-                                  <Maximize2 className="h-4 w-4" />
-                                </button>
-                              )}
+                              <img
+                                src={thumb.src}
+                                alt={`${colour.label || colour.id} grade ${thumb.gradeCode}`}
+                                width={1000}
+                                height={1000}
+                                className="h-64 w-full object-contain object-center"
+                                style={{ imageRendering: 'crisp-edges' }}
+                              />
                             </div>
-                          );
-                        })}
+                          ))
+                        )}
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>

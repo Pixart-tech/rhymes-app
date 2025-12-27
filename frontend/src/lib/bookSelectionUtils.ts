@@ -31,8 +31,17 @@ export const buildFinalBookSelections = (
     const gradeLabel = gradeNames[normalizedKey] || className;
     const coverMeta = coverSelections[className] || null;
 
+    const hasActive = (selection: SelectionRecord): boolean => {
+      if (!selection.selectedOption) return false;
+      const coreActive = !!selection.selectedOption.coreId && !selection.skipCore;
+      const workActive = !!selection.selectedOption.workId && !selection.skipWork;
+      const addonActive = !!selection.selectedOption.addOnId && !selection.skipAddon;
+      return coreActive || workActive || addonActive;
+    };
+
     classSelections.forEach((selection) => {
       if (!selection.selectedOption) return;
+
       if (selection.skipCore && selection.skipWork && selection.skipAddon) return;
 
       const coreTitle =
@@ -48,72 +57,66 @@ export const buildFinalBookSelections = (
         selection.selectedOption.defaultAddonCoverTitle ||
         selection.selectedOption.label;
 
-      const displayTitle = !selection.skipCore && coreTitle
-        ? coreTitle
-        : !selection.skipWork && workTitle
-          ? workTitle
-          : !selection.skipAddon && addonTitle
-            ? addonTitle
-            : selection.selectedOption.label;
-
-      finalData.push({
+      const base = {
         class: gradeLabel,
         class_label: selection.className,
         subject: selection.selectedOption.jsonSubject || selection.subjectName,
-        grade_subject: `${gradeLabel} : ${displayTitle}`,
         type: selection.selectedOption.label,
-        core: selection.skipCore ? undefined : selection.selectedOption.coreId,
-        core_cover:
-          !selection.skipCore && selection.selectedOption.coreId
-            ? selection.selectedOption.coreCover
-            : undefined,
-        core_cover_title:
-          !selection.skipCore && selection.selectedOption.coreId
-            ? selection.customCoreTitle || selection.selectedOption.defaultCoreCoverTitle
-            : undefined,
-        core_spine:
-          !selection.skipCore && selection.selectedOption.coreId
-            ? selection.selectedOption.coreSpine
-            : undefined,
-        work: selection.skipWork ? undefined : selection.selectedOption.workId,
-        work_cover:
-          !selection.skipWork && selection.selectedOption.workId
-            ? selection.selectedOption.workCover
-            : undefined,
-        work_cover_title:
-          !selection.skipWork && selection.selectedOption.workId
-            ? selection.customWorkTitle || selection.selectedOption.defaultWorkCoverTitle
-            : undefined,
-        work_spine:
-          !selection.skipWork && selection.selectedOption.workId
-            ? selection.selectedOption.workSpine
-            : undefined,
-        addOn: selection.skipAddon ? undefined : selection.selectedOption.addOnId,
-        addon_cover:
-          !selection.skipAddon && selection.selectedOption.addOnId
-            ? selection.selectedOption.addOnCover
-            : undefined,
-        addon_cover_title:
-          !selection.skipAddon && selection.selectedOption.addOnId
-            ? selection.customAddonTitle || selection.selectedOption.defaultAddonCoverTitle
-            : undefined,
-        addon_spine:
-          !selection.skipAddon && selection.selectedOption.addOnId
-            ? selection.selectedOption.addOnSpine
-            : undefined,
         cover_theme_id: coverMeta?.themeId ?? null,
         cover_theme_label: coverMeta?.themeLabel ?? null,
         cover_colour_id: coverMeta?.colourId ?? null,
         cover_colour_label: coverMeta?.colourLabel ?? null,
         cover_status: coverMeta?.status ?? null
-      });
+      };
+
+      if (!selection.skipCore && selection.selectedOption.coreId) {
+        finalData.push({
+          ...base,
+          component: 'core',
+          grade_subject: `${gradeLabel} : ${coreTitle}`,
+          core: selection.selectedOption.coreId,
+          core_cover: selection.selectedOption.coreCover,
+          core_cover_title: selection.customCoreTitle || selection.selectedOption.defaultCoreCoverTitle,
+          core_spine: selection.selectedOption.coreSpine,
+          work: undefined,
+          addOn: undefined
+        });
+      }
+
+      if (!selection.skipWork && selection.selectedOption.workId) {
+        finalData.push({
+          ...base,
+          component: 'work',
+          grade_subject: `${gradeLabel} : ${workTitle}`,
+          core: undefined,
+          work: selection.selectedOption.workId,
+          work_cover: selection.selectedOption.workCover,
+          work_cover_title: selection.customWorkTitle || selection.selectedOption.defaultWorkCoverTitle,
+          work_spine: selection.selectedOption.workSpine,
+          addOn: undefined
+        });
+      }
+
+      if (!selection.skipAddon && selection.selectedOption.addOnId) {
+        finalData.push({
+          ...base,
+          component: 'addon',
+          grade_subject: `${gradeLabel} : ${addonTitle}`,
+          core: undefined,
+          work: undefined,
+          addOn: selection.selectedOption.addOnId,
+          addon_cover: selection.selectedOption.addOnCover,
+          addon_cover_title: selection.customAddonTitle || selection.selectedOption.defaultAddonCoverTitle,
+          addon_spine: selection.selectedOption.addOnSpine
+        });
+      }
     });
 
     if (!excludedAssessments.includes(className)) {
       const englishSelection =
-        classSelections.find((item) => item.subjectName === 'English')?.selectedOption || null;
+        classSelections.find((item) => item.subjectName === 'English' && hasActive(item))?.selectedOption || null;
       const mathsSelection =
-        classSelections.find((item) => item.subjectName === 'Maths')?.selectedOption || null;
+        classSelections.find((item) => item.subjectName === 'Maths' && hasActive(item))?.selectedOption || null;
       const assessment = getAssessmentForClass(
         className,
         englishSelection,
