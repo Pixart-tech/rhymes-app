@@ -52,7 +52,7 @@ if __package__ in {None, ""}:
     project_root = current_dir.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from backend.app import auth, config, rhymes, svg_processing, unc_path_utils  # type: ignore
+    from backend.app import auth, config, rhymes, school_profiles, svg_processing, unc_path_utils  # type: ignore
     from backend.app.routes import schools, workspace  # type: ignore
     from backend.app.firebase_service import (  # type: ignore
         db,
@@ -60,7 +60,7 @@ if __package__ in {None, ""}:
     )
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
-    from .app import auth, config, rhymes, svg_processing, unc_path_utils
+    from .app import auth, config, rhymes, school_profiles, svg_processing, unc_path_utils
     from .app.routes import schools, workspace  # type: ignore
     from .app.firebase_service import (
         db,
@@ -1202,12 +1202,7 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
     except HTTPException:
         pass
 
-    school_query = db.collection("schools").where("school_id", "==", school_id)
-    school_docs = list(school_query.stream())
-    if not school_docs:
-        raise HTTPException(status_code=404, detail="School not found")
-
-    raw_school_record = school_docs[0].to_dict() or {}
+    _, raw_school_record, _ = school_profiles.locate_school_record(db, school_id)
     school_record = _strip_binary_fields(raw_school_record)
 
     # Aggregate book selections from class documents

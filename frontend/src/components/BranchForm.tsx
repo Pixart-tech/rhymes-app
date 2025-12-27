@@ -13,7 +13,7 @@ export interface BranchFormValues {
   coordinator_name: string;
   coordinator_email: string;
   coordinator_phone: string;
-  address_line1: string;
+  address: string;
   city: string;
   state: string;
   pin: string;
@@ -24,7 +24,7 @@ const createDefaultBranchValues = (): BranchFormValues => ({
   coordinator_name: '',
   coordinator_email: '',
   coordinator_phone: '',
-  address_line1: '',
+  address: '',
   city: '',
   state: '',
   pin: ''
@@ -73,6 +73,7 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
               placeholder="Eg. Downtown Campus"
               value={values.branch_name}
               onChange={handleFieldChange('branch_name')}
+              minLength={2}
               required
             />
           </div>
@@ -84,6 +85,7 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
                 placeholder="Eg. Priya Rao"
                 value={values.coordinator_name}
                 onChange={handleFieldChange('coordinator_name')}
+                minLength={2}
                 required
               />
             </div>
@@ -101,24 +103,26 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
           </div>
           <div className="space-y-2">
             <Label htmlFor="coordinator_phone">Coordinator phone</Label>
-            <Input
-              id="coordinator_phone"
-              type="tel"
-              placeholder="+91 98765 43210"
-              value={values.coordinator_phone}
-              onChange={handleFieldChange('coordinator_phone')}
-              required
-            />
+              <Input
+                id="coordinator_phone"
+                type="tel"
+                placeholder="+91 98765 43210"
+                value={values.coordinator_phone}
+                onChange={handleFieldChange('coordinator_phone')}
+                minLength={5}
+                inputMode="tel"
+                required
+              />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="branch_address">Branch address</Label>
-            <Input
-              id="branch_address"
-              placeholder="Plot 123, Green Park"
-              value={values.address_line1}
-              onChange={handleFieldChange('address_line1')}
-              required
-            />
+            <Label htmlFor="branch_address">Address</Label>
+              <Input
+                id="branch_address"
+                placeholder="Plot 123, Green Park"
+                value={values.address}
+                onChange={handleFieldChange('address')}
+                required
+              />
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">

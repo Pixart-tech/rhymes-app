@@ -41,7 +41,6 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
     workspace_user = _build_workspace_user(user_record)
-
     if workspace_user.role != "super-admin" and workspace_user.email:
         normalized_email = workspace_user.email.strip().lower()
         if normalized_email:
@@ -84,6 +83,14 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
         record.setdefault("id", snapshot.id)
         record.setdefault("school_id", record.get("school_id") or snapshot.id)
         schools.append(school_profiles.build_school_from_record(record))
+        branch_entries = record.get("branches") or []
+        for branch_entry in branch_entries:
+            if not isinstance(branch_entry, dict):
+                continue
+            branch_record = dict(branch_entry)
+            branch_record.setdefault("id", branch_record.get("school_id") or branch_record.get("id"))
+            branch_record.setdefault("school_id", branch_record.get("school_id") or branch_record.get("id"))
+            schools.append(school_profiles.build_school_from_record(branch_record))
 
     return UserSessionResponse(user=workspace_user, schools=schools)
 

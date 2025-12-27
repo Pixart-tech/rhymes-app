@@ -156,7 +156,7 @@ async def update_school_profile(
 
     service_status_raw = raw_updates.pop("service_status", None)
     grades_raw = raw_updates.pop("grades", None)
-    address_fields = ("address_line1", "city", "state", "pin")
+    address_fields = ("address", "city", "state", "pin")
     address_overrides: Dict[str, Any] = {field: raw_updates.pop(field) for field in address_fields if field in raw_updates}
 
     updates: Dict[str, Any] = {}
@@ -169,6 +169,8 @@ async def update_school_profile(
     if address_overrides:
         cleaned_address = {field: _clean(address_overrides[field]) for field in address_overrides}
         updates.update(cleaned_address)
+        if cleaned_address.get("address") is not None:
+            updates["address_line1"] = cleaned_address["address"]
         merged_address = {
             field: cleaned_address[field] if field in cleaned_address else existing.get(field)
             for field in address_fields
@@ -229,12 +231,10 @@ def update_branch_status(
     if not uid:
         raise HTTPException(status_code=400, detail="User record is missing a user id")
 
-    doc_ref = db.collection("schools").document(school_id)
-    snapshot = doc_ref.get()
-    if not snapshot.exists:
-        raise HTTPException(status_code=404, detail="School not found")
+    parent_ref, record, is_branch = school_profiles.locate_school_record(db, school_id)
+    if not is_branch:
+        raise HTTPException(status_code=400, detail="Only branch profiles can have their status updated")
 
-    record = snapshot.to_dict() or {}
     parent_id = record.get("branch_parent_id")
     if not parent_id:
         raise HTTPException(status_code=400, detail="Only branch profiles can have their status updated")
@@ -253,8 +253,16 @@ def update_branch_status(
         "updated_at": now,
         "timestamp": now,
     }
-    doc_ref.update(updates)
     record.update(updates)
+    new_branch_summary = school_profiles.build_branch_summary_entry(record)
+    parent_doc_ref = parent_ref
+    parent_doc_ref.update(
+        {
+            f"branches.{school_id}": new_branch_summary,
+            "updated_at": now,
+            "timestamp": now,
+        }
+    )
 
     return school_profiles.build_school_from_record(record)
 
@@ -376,7 +384,24 @@ def get_all_schools_with_selections(
     if not school_docs:
         return PaginatedSchoolResponse(schools=[], total_count=total_count)
 
-    school_ids = [doc.get("school_id") for doc in school_docs if doc.get("school_id")]
+    expanded_docs: List[Dict[str, Any]] = []
+    for doc in school_docs:
+        if not doc.get("id") and doc.get("school_id"):
+            doc["id"] = doc["school_id"]
+        expanded_docs.append(doc)
+
+        branches = doc.get("branches") or {}
+        parent_id = doc.get("school_id") or doc.get("id")
+        for branch_id, branch_entry in branches.items():
+            if not isinstance(branch_entry, dict):
+                continue
+            branch_record = dict(branch_entry)
+            branch_record.setdefault("id", branch_id)
+            branch_record.setdefault("school_id", branch_id)
+            branch_record.setdefault("branch_parent_id", parent_id)
+            expanded_docs.append(branch_record)
+
+    school_ids = [doc.get("school_id") for doc in expanded_docs if doc.get("school_id")]
 
     selection_docs = []
     if school_ids:
@@ -417,13 +442,11 @@ def get_all_schools_with_selections(
 
     schools_with_details: List[SchoolWithSelections] = []
 
-    for doc in school_docs:
+    for doc in expanded_docs:
         school_id = doc.get("school_id")
         if not school_id:
             continue
 
-        if not doc.get("id"):
-            doc["id"] = school_id
 
         base_school = school_profiles.build_school_from_record(doc)
 

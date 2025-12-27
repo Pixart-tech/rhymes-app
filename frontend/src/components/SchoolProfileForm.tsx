@@ -25,13 +25,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 const getLogoPreview = (vals: SchoolFormValues) => vals.logo_url || '';
 const TOTAL_SECTIONS = 3;
 const DEFAULT_GRADE_LABELS: Record<GradeKey, string> = {
-  toddler: 'Toddler',
   playgroup: 'Playgroup',
   nursery: 'Nursery',
   lkg: 'LKG',
   ukg: 'UKG'
 };
-const GRADE_RENDER_ORDER: GradeKey[] = ['toddler', 'playgroup', 'nursery', 'lkg', 'ukg'];
+const GRADE_RENDER_ORDER: GradeKey[] = ['playgroup', 'nursery', 'lkg', 'ukg'];
 const formatGradeLabelTitle = (grade: GradeKey): string => {
   if (grade === 'lkg' || grade === 'ukg') {
     return grade.toUpperCase();
@@ -123,7 +122,7 @@ export const buildSchoolFormValuesFromProfile = (
     logo_file: null,
     email: profile?.email ?? '',
     phone: profile?.phone ?? '',
-    address_line1: profile?.address_line1 ?? '',
+    address: profile?.address ?? '',
     city: profile?.city ?? '',
     state: profile?.state ?? '',
     pin: profile?.pin ?? '',
@@ -143,7 +142,7 @@ export const buildSchoolFormData = (values: SchoolFormValues): FormData => {
   formData.append('school_name', values.school_name);
   formData.append('email', values.email);
   formData.append('phone', values.phone);
-  formData.append('address_line1', values.address_line1);
+  formData.append('address', values.address);
   formData.append('city', values.city);
   formData.append('state', values.state);
   formData.append('pin', values.pin);
@@ -307,12 +306,12 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
       setValues((prev) => ({ ...prev, [field]: value }));
     };
 
-  const handleAddressFieldChange =
-    (field: keyof Pick<SchoolFormValues, 'address_line1' | 'city' | 'state' | 'pin'>) =>
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const value = event.target.value;
-      setValues((prev) => ({ ...prev, [field]: value }));
-    };
+const handleAddressFieldChange =
+  (field: keyof Pick<SchoolFormValues, 'address' | 'city' | 'state' | 'pin'>) =>
+  (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    setValues((prev) => ({ ...prev, [field]: value }));
+  };
   const handleGradeLabelChange =
     (grade: GradeKey) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -507,7 +506,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
         school_name: values.school_name,
         email: values.email,
         phone: values.phone,
-        'address-line1': values.address_line1,
+        address: values.address,
         'address-city': values.city,
         'address-state': values.state,
         'address-pin': values.pin,
@@ -803,14 +802,14 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
                   </div>
                   <div className="space-y-3">
                     <div className="space-y-2">
-                      <Label htmlFor="address-line1">Address line 1</Label>
+                      <Label htmlFor="address">Address</Label>
                       <Input
-                        id="address-line1"
-                        value={values.address_line1}
-                        onChange={handleAddressFieldChange('address_line1')}
+                        id="address"
+                        value={values.address}
+                        onChange={handleAddressFieldChange('address')}
                         required
                         placeholder="Door no, Street"
-                        className={cn(invalidFields.has('address-line1') && 'border-red-500')}
+                        className={cn(invalidFields.has('address') && 'border-red-500')}
                       />
                     </div>
                     <div className="grid gap-4 md:grid-cols-3">

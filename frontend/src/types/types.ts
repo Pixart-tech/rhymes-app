@@ -51,7 +51,7 @@ export interface SchoolFormValues {
   logo_file?: File | null;
   email: string;
   phone: string;
-  address_line1: string;
+  address: string;
   city: string;
   state: string;
   pin: string;

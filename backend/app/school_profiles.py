@@ -22,8 +22,8 @@ SERVICE_TYPE_VALUES: Tuple[SchoolServiceType, ...] = (
 SERVICE_STATUS_VALUES = ("yes", "no")
 ServiceStatus = Literal["yes", "no"]
 ServiceStatusMap = Dict[SchoolServiceType, ServiceStatus]
-GradeKey = Literal["toddler", "playgroup", "nursery", "lkg", "ukg"]
-GRADE_KEYS: Tuple[GradeKey, ...] = ("toddler", "playgroup", "nursery", "lkg", "ukg")
+GradeKey = Literal["playgroup", "nursery", "lkg", "ukg"]
+GRADE_KEYS: Tuple[GradeKey, ...] = ("playgroup", "nursery", "lkg", "ukg")
 
 SCHOOL_ID_ALPHABET = string.ascii_uppercase + string.digits
 
@@ -158,6 +158,8 @@ class SchoolCreatePayload(BaseModel):
     phone: str = Field(..., min_length=5)
 
     tagline: Optional[str] = None
+    address: Optional[str] = None
+    address_line1: Optional[str] = None
     address_line1: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
@@ -226,7 +228,6 @@ class SchoolCreatePayload(BaseModel):
         email: EmailStr = Form(...),
         phone: str = Form(...),
         tagline: Optional[str] = Form(default=None),
-        address_line1: Optional[str] = Form(default=None),
         city: Optional[str] = Form(default=None),
         state: Optional[str] = Form(default=None),
         pin: Optional[str] = Form(default=None),
@@ -244,7 +245,6 @@ class SchoolCreatePayload(BaseModel):
             email=email,
             phone=phone,
             tagline=tagline,
-            address_line1=address_line1,
             city=city,
             state=state,
             pin=pin,
@@ -266,10 +266,26 @@ class BranchCreatePayload(BaseModel):
     coordinator_email: EmailStr
     coordinator_phone: str = Field(..., min_length=5)
 
-    address_line1: Optional[str] = None
+    address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     pin: Optional[str] = None
+
+
+def build_branch_summary_entry(branch_payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": branch_payload.get("school_id"),
+        "school_id": branch_payload.get("school_id"),
+        "branch_name": branch_payload.get("school_name"),
+        "coordinator_name": branch_payload.get("principal_name"),
+        "coordinator_email": branch_payload.get("principal_email"),
+        "coordinator_phone": branch_payload.get("principal_phone"),
+        "address": branch_payload.get("address_line1"),
+        "city": branch_payload.get("city"),
+        "state": branch_payload.get("state"),
+        "pin": branch_payload.get("pin"),
+        "status": branch_payload.get("status", BRANCH_STATUS_ACTIVE),
+    }
 
 
 class SchoolUpdatePayload(BaseModel):
@@ -278,7 +294,6 @@ class SchoolUpdatePayload(BaseModel):
     phone: Optional[str] = Field(default=None, min_length=5)
 
     tagline: Optional[str] = None
-    address_line1: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     pin: Optional[str] = None
@@ -532,6 +547,43 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
     )
 
 
+def locate_school_record(
+    db_client: firestore.Client,
+    school_id: str,
+) -> Tuple[firestore.DocumentReference, Dict[str, Any], bool]:
+    doc_ref = db_client.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if snapshot.exists:
+        record = snapshot.to_dict() or {}
+        record.setdefault("id", snapshot.id)
+        record.setdefault("school_id", record.get("school_id") or snapshot.id)
+        return doc_ref, record, False
+
+    branch_snapshot = (
+        db_client.collection("schools")
+        .where("branch_ids", "array_contains", school_id)
+        .limit(1)
+        .get()
+    )
+    if not branch_snapshot:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    parent_snapshot = branch_snapshot[0]
+    parent_record = parent_snapshot.to_dict() or {}
+    branches_map = parent_record.get("branches") or {}
+    branch_record = branches_map.get(school_id)
+    if not branch_record:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    branch_data = dict(branch_record)
+    branch_data.setdefault("id", school_id)
+    branch_data.setdefault("school_id", school_id)
+    branch_data.setdefault(
+        "branch_parent_id", parent_record.get("school_id") or parent_snapshot.id
+    )
+    return parent_snapshot.reference, branch_data, True
+
+
 def generate_school_id(db: firestore.Client, length: int = 5, attempts: int = 32) -> str:
     for _ in range(attempts):
         candidate = "".join(random.choices(SCHOOL_ID_ALPHABET, k=length))
@@ -577,7 +629,7 @@ def create_school_profile(
     if is_creator_super_admin:
         assignee_id, assignee_record = _find_user_by_email(db, owner_email_input)
 
-    address_line1 = _clean_optional_string(payload.address_line1)
+    address_line1 = _clean_optional_string(payload.address or payload.address_line1)
     city = _clean_optional_string(payload.city)
     state = _clean_optional_string(payload.state)
     pin = _clean_optional_string(payload.pin)
@@ -605,6 +657,8 @@ def create_school_profile(
         "service_type": services_from_status(service_status_map),
         "service_status": service_status_map,
         "grades": grade_map,
+        "branches": {},
+        "branch_ids": [],
         "id_card_fields": payload.id_card_fields if payload.id_card_fields is not None else [],
         "created_by_user_id": assignee_id,
         "created_by_email": owner_email_value or user_record.get("email"),
@@ -662,7 +716,7 @@ def create_branch_profile(
     branch_id = generate_school_id(db)
     now = datetime.utcnow()
 
-    address_line1 = _clean_optional_string(payload.address_line1)
+    address_line1 = _clean_optional_string(payload.address or payload.address_line1)
     city = _clean_optional_string(payload.city)
     state = _clean_optional_string(payload.state)
     pin = _clean_optional_string(payload.pin)
@@ -692,36 +746,23 @@ def create_branch_profile(
         "city": city,
         "state": state,
         "pin": pin,
-        "email": coordinator_email,
-        "phone": coordinator_phone,
-        "tagline": branch_tagline,
-        "website": branch_website,
         "principal_name": _clean_optional_string(payload.coordinator_name),
         "principal_email": coordinator_email,
         "principal_phone": coordinator_phone,
-        "service_type": branch_service_type,
-        "service_status": branch_service_status,
-        "grades": branch_grades,
-        "logo_blob": parent_logo_blob,
-        "logo_mime_type": parent_logo_mime_type,
         "status": BRANCH_STATUS_ACTIVE,
         "branch_parent_id": parent_school_id,
-        "created_by_user_id": user_id,
-        "created_by_email": user_record.get("email"),
-        "created_at": now,
-        "updated_at": now,
-        "timestamp": now,
     }
 
-    db.collection("schools").document(branch_id).set(branch_payload)
-    db.collection("users").document(user_id).update(
-        {"school_ids": firestore.ArrayUnion([branch_id]), "updated_at": now}
+    parent_doc_ref = db.collection("schools").document(parent_school_id)
+    branch_summary = build_branch_summary_entry(branch_payload)
+    parent_doc_ref.update(
+        {
+            f"branches.{branch_id}": branch_summary,
+            "branch_ids": firestore.ArrayUnion([branch_id]),
+            "updated_at": now,
+            "timestamp": now,
+        }
     )
-
-    existing_ids = set(user_record.get("school_ids", []))
-    existing_ids.add(branch_id)
-    user_record["school_ids"] = list(existing_ids)
-
     return build_school_from_record(branch_payload)
 
 
@@ -734,6 +775,8 @@ __all__ = [
     "build_school_from_record",
     "create_school_profile",
     "create_branch_profile",
+    "build_branch_summary_entry",
+    "locate_school_record",
     "extract_service_type",
     "normalize_service_types",
     "normalize_service_status",

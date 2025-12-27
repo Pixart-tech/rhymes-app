@@ -58,6 +58,45 @@ const SERVICE_LABELS: Record<SchoolServiceType, string> = {
   certificates: 'Certificates'
 };
 type AdminServiceFilter = 'all' | SchoolServiceType;
+const PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
+const BRANCH_NAME_MIN_LENGTH = 2;
+const COORDINATOR_NAME_MIN_LENGTH = 2;
+const COORDINATOR_PHONE_MIN_LENGTH = 5;
+const COORDINATOR_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const getAxiosDetailMessage = (error: unknown): string | null => {
+  if (!axios.isAxiosError(error)) {
+    return null;
+  }
+  const responseData = error.response?.data;
+  if (!responseData) {
+    return null;
+  }
+  if (typeof responseData === 'string') {
+    return responseData;
+  }
+  if (typeof responseData.detail === 'string') {
+    return responseData.detail;
+  }
+  if (Array.isArray(responseData.detail)) {
+    return responseData.detail
+      .map((entry) => {
+        if (typeof entry === 'string') {
+          return entry;
+        }
+        if (entry && typeof entry === 'object') {
+          return (entry as { msg?: string }).msg ?? JSON.stringify(entry);
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+  if (typeof responseData.message === 'string') {
+    return responseData.message;
+  }
+  return null;
+};
 
 const getLogoSrc = (school: SchoolProfile, resolvedLogos?: Record<string, string>): string | null => {
   if (resolvedLogos?.[school.school_id]) {
@@ -68,7 +107,7 @@ const getLogoSrc = (school: SchoolProfile, resolvedLogos?: Record<string, string
 
 const formatBranchAddress = (branch: SchoolProfile): string | null => {
   const segments = [
-    branch.address_line1?.trim(),
+    branch.address?.trim(),
     branch.city?.trim(),
     branch.state?.trim(),
     branch.pin?.trim()
@@ -661,6 +700,28 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         return;
       }
 
+      const branchName = values.branch_name.trim();
+      const coordinatorName = values.coordinator_name.trim();
+      const coordinatorEmail = values.coordinator_email.trim();
+      const coordinatorPhone = values.coordinator_phone.trim();
+
+      if (branchName.length < BRANCH_NAME_MIN_LENGTH) {
+        toast.error(`Branch name must be at least ${BRANCH_NAME_MIN_LENGTH} characters.`);
+        return;
+      }
+      if (coordinatorName.length < COORDINATOR_NAME_MIN_LENGTH) {
+        toast.error(`Coordinator name must be at least ${COORDINATOR_NAME_MIN_LENGTH} characters.`);
+        return;
+      }
+      if (!COORDINATOR_EMAIL_PATTERN.test(coordinatorEmail)) {
+        toast.error('Please provide a valid coordinator email address.');
+        return;
+      }
+      if (coordinatorPhone.length < COORDINATOR_PHONE_MIN_LENGTH) {
+        toast.error(`Coordinator phone must be at least ${COORDINATOR_PHONE_MIN_LENGTH} characters.`);
+        return;
+      }
+
       setBranchSubmitting(true);
       try {
         const token = await getIdToken();
@@ -670,11 +731,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         const cleanString = (value: string) => value.trim() || undefined;
         const payload = {
           parent_school_id: branchParent.school_id,
-          branch_name: values.branch_name.trim(),
-          coordinator_name: values.coordinator_name.trim(),
-          coordinator_email: values.coordinator_email.trim(),
-          coordinator_phone: values.coordinator_phone.trim(),
-          address_line1: cleanString(values.address_line1),
+          branch_name: branchName,
+          coordinator_name: coordinatorName,
+          coordinator_email: coordinatorEmail,
+          coordinator_phone: coordinatorPhone,
+          address: cleanString(values.address),
           city: cleanString(values.city),
           state: cleanString(values.state),
           pin: cleanString(values.pin)
@@ -683,23 +744,15 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
           headers: { Authorization: `Bearer ${token}` }
         });
         const createdBranch = response.data;
-        setSchools((prev) => [...prev, createdBranch]);
-        setWorkspaceUser((prev) => {
-          if (!prev) {
-            return prev;
-          }
-          if (prev.school_ids.includes(createdBranch.school_id)) {
-            return prev;
-          }
-          return { ...prev, school_ids: [...prev.school_ids, createdBranch.school_id] };
-        });
+        void fetchWorkspace({ force: true });
         toast.success('Branch created');
         setView('list');
         setBranchParent(null);
       } catch (error) {
         console.error('Failed to create branch', error);
-        if (axios.isAxiosError(error) && error.response?.status === 409) {
-          toast.error(error.response.data.detail);
+        const serverMessage = getAxiosDetailMessage(error);
+        if (serverMessage) {
+          toast.error(serverMessage);
         } else {
           toast.error('Unable to create branch. Please try again.');
         }
