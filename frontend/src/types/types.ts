@@ -21,7 +21,6 @@ export interface SchoolProfile {
   logo_url?: string | null;
   email?: string | null;
   phone?: string | null;
-  address_line1?: string | null;
   city?: string | null;
   state?: string | null;
   pin?: string | null;
@@ -40,8 +39,6 @@ export interface SchoolProfile {
   selection_locked_at?: string | null;
   selection_locked_by?: string | null;
   id_card_fields?: string[];
-  created_by_user_id?: string | null;
-  created_by_email?: string | null;
   zoho_customer_id?: string | null;
   timestamp?: string;
 }

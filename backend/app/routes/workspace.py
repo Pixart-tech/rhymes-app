@@ -10,7 +10,6 @@ from ..firebase_service import (
     DEFAULT_USER_ROLE,
     db,
     ensure_user_document,
-    firestore,
     verify_and_decode_token,
 )
 from ..schemas import (
@@ -41,36 +40,6 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
     workspace_user = _build_workspace_user(user_record)
-    if workspace_user.role != "super-admin" and workspace_user.email:
-        normalized_email = workspace_user.email.strip().lower()
-        if normalized_email:
-            school_snapshots = (
-                db.collection("schools").where("created_by_email", "==", normalized_email).get()
-            )
-            new_school_ids: List[str] = []
-            sync_timestamp = datetime.utcnow()
-
-            for snapshot in school_snapshots:
-                school_id = snapshot.id
-                if school_id in workspace_user.school_ids:
-                    continue
-
-                school_data = snapshot.to_dict() or {}
-                school_updates: Dict[str, Any] = {}
-                if school_data.get("created_by_user_id") != workspace_user.uid:
-                    school_updates["created_by_user_id"] = workspace_user.uid
-                if school_updates:
-                    school_updates["updated_at"] = sync_timestamp
-                    db.collection("schools").document(school_id).update(school_updates)
-
-                new_school_ids.append(school_id)
-
-            if new_school_ids:
-                db.collection("users").document(workspace_user.uid).update(
-                    {"school_ids": firestore.ArrayUnion(new_school_ids), "updated_at": sync_timestamp}
-                )
-                workspace_user.school_ids.extend(new_school_ids)
-
     schools: List[School] = []
     seen_branch_ids = set()
     branch_parent_ids: List[str] = []

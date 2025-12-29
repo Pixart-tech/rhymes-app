@@ -26,6 +26,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from './ui/card'
 import {
   AdminSchoolProfile,
   BranchStatus,
+  GradeKey,
   SchoolProfile,
   SchoolFormValues,
   SchoolServiceType,
@@ -73,6 +74,13 @@ const SERVICE_LABELS: Record<SchoolServiceType, string> = {
   id_cards: 'ID cards',
   report_cards: 'Report cards',
   certificates: 'Certificates'
+};
+const GRADE_KEYS_ORDER: GradeKey[] = ['playgroup', 'nursery', 'lkg', 'ukg'];
+const GRADE_LABELS: Record<GradeKey, string> = {
+  playgroup: 'Playgroup',
+  nursery: 'Nursery',
+  lkg: 'LKG',
+  ukg: 'UKG'
 };
 const DEFAULT_SERVICE_STATUS: ServiceStatusMap = {
   id_cards: 'no',
@@ -194,9 +202,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [addonsDialogSchool, setAddonsDialogSchool] = useState<AdminSchoolProfile | null>(null);
   const [addonsDialogServiceStatus, setAddonsDialogServiceStatus] = useState<ServiceStatusMap>(DEFAULT_SERVICE_STATUS);
   const [addonsDialogZohoId, setAddonsDialogZohoId] = useState('');
-  const zohoInputRef = useRef<HTMLInputElement | null>(null);
   const [addonsDialogEditingZohoId, setAddonsDialogEditingZohoId] = useState(false);
   const [addonsDialogSaving, setAddonsDialogSaving] = useState(false);
+  const [gradeDefaultValues, setGradeDefaultValues] = useState<Record<GradeKey, string>>(() =>
+    GRADE_KEYS_ORDER.reduce<Record<GradeKey, string>>((acc, grade) => {
+      acc[grade] = GRADE_LABELS[grade];
+      return acc;
+    }, {} as Record<GradeKey, string>)
+  );
   const workspaceFetchInFlight = useRef(false);
   const lastFetchedWorkspaceUserId = useRef<string | null>(null);
   const allSchoolsForLogos = useMemo(() => {
@@ -521,11 +534,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     [workspaceUser, user]
   );
 
-  const currentFormValues = useMemo(() => {
-    if (view === 'edit' && editingSchool) {
-      return buildFormValues(editingSchool);
+  const [schoolFormValues, setSchoolFormValues] = useState<SchoolFormValues>(() => buildFormValues());
+
+  useEffect(() => {
+    if (view === 'create' && !editingSchool) {
+      setSchoolFormValues(buildFormValues());
     }
-    return buildFormValues();
   }, [view, editingSchool, buildFormValues]);
   const filteredAdminSchools = useMemo(() => {
     if (adminSchools.length === 0) {
@@ -577,16 +591,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       [adminSchools]
     );
     const inactiveAdminSchoolsCount = Math.max(0, totalAdminSchoolsCount - activeAdminSchoolsCount);
-    const adminUserCount = useMemo(() => {
-    const userIds = new Set<string>();
-    adminSchools.forEach((school) => {
-      const identifier = school.created_by_user_id ?? school.created_by_email ?? '';
-      if (identifier) {
-        userIds.add(identifier);
-      }
-    });
-    return userIds.size;
-  }, [adminSchools]);
   const adminBranchChildren = useMemo(() => {
     const counts = new Map<string, number>();
     adminSchools.forEach((school) => {
@@ -712,8 +716,24 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     setAddonsDialogEditingZohoId(false);
   }, []);
 
+  useEffect(() => {
+    const nextValues: Record<GradeKey, string> = GRADE_KEYS_ORDER.reduce(
+      (accumulator, grade) => {
+        const gradeEntry = addonsDialogSchool?.grades?.[grade];
+        accumulator[grade] = gradeEntry?.label?.trim() || GRADE_LABELS[grade];
+        return accumulator;
+      },
+      {} as Record<GradeKey, string>
+    );
+    setGradeDefaultValues(nextValues);
+  }, [addonsDialogSchool]);
+
   const handleAddonsServiceChange = useCallback((service: SchoolServiceType, status: 'yes' | 'no') => {
     setAddonsDialogServiceStatus((prev) => ({ ...prev, [service]: status }));
+  }, []);
+
+  const handleGradeDefaultChange = useCallback((grade: GradeKey, value: string) => {
+    setGradeDefaultValues((prev) => ({ ...prev, [grade]: value }));
   }, []);
 
   const handleSaveAddonsServices = useCallback(async () => {
@@ -728,24 +748,25 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       }
       const formData = new FormData();
       formData.append('service_status', JSON.stringify(addonsDialogServiceStatus));
-      const inputZohoValue = zohoInputRef.current?.value ?? addonsDialogZohoId;
-      const submittedZohoId = inputZohoValue.trim() || addonsDialogSchool?.zoho_customer_id || '';
+      const submittedZohoId = addonsDialogZohoId.trim() || addonsDialogSchool?.zoho_customer_id || '';
       formData.append('zoho_customer_id', submittedZohoId);
-      await axios.put(`${API}/schools/${addonsDialogSchool.school_id}`, formData, {
+      const response = await axios.put<SchoolProfile>(`${API}/schools/${addonsDialogSchool.school_id}`, formData, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const updatedServiceType = SERVICE_KEYS.filter(
+      const serverSchool = response.data;
+      const updatedZohoId = serverSchool.zoho_customer_id ?? '';
+      const updatedServiceType = serverSchool.service_type ?? SERVICE_KEYS.filter(
         (service) => addonsDialogServiceStatus[service] === 'yes'
       );
-      const updatedSchool = {
+      const updatedSchool: AdminSchoolProfile = {
         ...addonsDialogSchool,
-        service_status: addonsDialogServiceStatus,
-        service_type: updatedServiceType
-        ,
-        zoho_customer_id: submittedZohoId || null
+        ...serverSchool,
+        service_status: serverSchool.service_status ?? addonsDialogServiceStatus,
+        service_type: updatedServiceType,
+        zoho_customer_id: updatedZohoId || null,
       };
       setAddonsDialogSchool(updatedSchool);
-      setAddonsDialogZohoId(submittedZohoId);
+      setAddonsDialogZohoId(updatedZohoId);
       setSchools((prev) =>
         prev.map((school) => (school.school_id === updatedSchool.school_id ? { ...school, ...updatedSchool } : school))
       );
@@ -761,6 +782,63 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       setAddonsDialogSaving(false);
     }
   }, [addonsDialogSchool, addonsDialogServiceStatus, getIdToken]);
+
+  const handleZohoInputDone = useCallback(async () => {
+    setAddonsDialogEditingZohoId(false);
+    if (!addonsDialogSchool) {
+      return;
+    }
+    const trimmed = addonsDialogZohoId.trim();
+    const previousId = addonsDialogSchool.zoho_customer_id ?? '';
+    if (!trimmed || trimmed === previousId) {
+      return;
+    }
+    setAddonsDialogSaving(true);
+    try {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error('Unable to fetch Firebase token');
+      }
+      const response = await axios.patch<SchoolProfile>(
+        `${API}/schools/${addonsDialogSchool.school_id}/zoho-customer-id`,
+        { zoho_customer_id: trimmed },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const serverSchool = response.data;
+      const updatedZohoId = serverSchool.zoho_customer_id ?? '';
+      const updatedServiceType = serverSchool.service_type ?? addonsDialogSchool.service_type ?? SERVICE_KEYS.filter(
+        (service) => addonsDialogServiceStatus[service] === 'yes'
+      );
+      const updatedSchool: AdminSchoolProfile = {
+        ...addonsDialogSchool,
+        ...serverSchool,
+        service_status: serverSchool.service_status ?? addonsDialogServiceStatus,
+        service_type: updatedServiceType,
+        zoho_customer_id: updatedZohoId || null,
+      };
+      setAddonsDialogSchool(updatedSchool);
+      setAddonsDialogZohoId(updatedZohoId);
+      setSchools((prev) =>
+        prev.map((school) => (school.school_id === updatedSchool.school_id ? { ...school, ...updatedSchool } : school))
+      );
+      setAdminSchools((prev) =>
+        prev.map((school) => (school.school_id === updatedSchool.school_id ? { ...school, ...updatedSchool } : school))
+      );
+      toast.success('Zoho customer ID saved');
+    } catch (error) {
+      console.error('Failed to update Zoho customer ID', error);
+      toast.error('Unable to save Zoho customer ID. Please try again.');
+    } finally {
+      setAddonsDialogSaving(false);
+    }
+  }, [
+    addonsDialogSchool,
+    addonsDialogServiceStatus,
+    addonsDialogZohoId,
+    getIdToken,
+    setAdminSchools,
+    setSchools,
+  ]);
 
   const handleApproveSelections = useCallback(
     async (school: SchoolProfile) => {
@@ -872,18 +950,20 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
 
   const handleEditSchool = useCallback(
     (school: SchoolProfile) => {
+      setSchoolFormValues(buildFormValues(school));
       setEditingSchool(school);
       setView('edit');
     },
-    [setView]
+    [buildFormValues]
   );
 
   const handleEditBranch = useCallback(
     (branch: SchoolProfile) => {
+      setSchoolFormValues(buildFormValues(branch));
       setEditingSchool(branch);
       setView('edit');
     },
-    [setView]
+    [buildFormValues]
   );
 
   const handleBranchStatusChange = useCallback(
@@ -1515,9 +1595,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                           Services
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          User
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                           Branches
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1585,14 +1662,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                               </div>
                             </td>
                             <td className="px-4 py-4 text-slate-700">
-                              <p className="font-semibold text-slate-900">
-                                {school.created_by_email ?? school.created_by_user_id ?? '—'}
-                              </p>
-                              <p className="text-xs uppercase tracking-wide text-slate-400">
-                                {school.created_by_email ? 'Email' : school.created_by_user_id ? 'User' : '—'}
-                              </p>
-                            </td>
-                            <td className="px-4 py-4 text-slate-700">
                               {school.branch_parent_id ? (
                                 <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
                                   Sub Branch of {school.branch_parent_id}
@@ -1644,12 +1713,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                   <DropdownMenuItem onClick={() => handleSchoolSelect(school)}>
                                     View
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setEditingSchool(school);
-                                      setView('edit');
-                                    }}
-                                  >
+                                  <DropdownMenuItem onClick={() => handleEditSchool(school)}>
                                     Edit
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
@@ -1856,7 +1920,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
           <div className="w-full max-w-4xl">
             <SchoolForm
               mode="create"
-              initialValues={currentFormValues}
+              initialValues={schoolFormValues}
               submitting={submitting}
               onSubmit={handleCreateSubmit}
               onCancel={isSuperAdmin || schools.length > 0 ? () => setView('list') : undefined}
@@ -1867,7 +1931,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
           <div className="w-full max-w-4xl">
             <SchoolForm
               mode="edit"
-              initialValues={currentFormValues}
+              initialValues={schoolFormValues}
               submitting={submitting}
               onSubmit={handleEditSubmit}
               onCancel={() => {
@@ -1972,10 +2036,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                       className="flex-1"
                       value={addonsDialogZohoId}
                       onChange={(event) => setAddonsDialogZohoId(event.target.value)}
-                      ref={zohoInputRef}
                       placeholder="Enter Zoho customer ID"
                     />
-                  <Button size="sm" variant="outline" onClick={() => setAddonsDialogEditingZohoId(false)}>
+                  <Button size="sm" variant="outline" onClick={() => { void handleZohoInputDone(); }}>
                     Done
                   </Button>
                 </div>
@@ -1991,6 +2054,42 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                   Add Zoho ID
                 </Button>
               )}
+            </div>
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500">Grade mapping</p>
+                <p className="text-[11px] text-slate-400">School named - default</p>
+              </div>
+              <div className="space-y-3 border border-slate-100 bg-slate-50/70 p-4">
+                {GRADE_KEYS_ORDER.filter((grade) => {
+                  const entry = addonsDialogSchool?.grades?.[grade];
+                  return Boolean(entry?.enabled && entry.label?.trim());
+                }).map((grade) => {
+                  const entry = addonsDialogSchool?.grades?.[grade];
+                  const currentLabel = entry?.label?.trim() || GRADE_LABELS[grade];
+                  return (
+                    <div key={grade} className="space-y-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs uppercase tracking-wide text-slate-500">{GRADE_LABELS[grade]}</span>
+                        <select
+                          className="max-w-[140px] rounded-full border bg-white px-3 py-[3px] text-[12px] uppercase tracking-wide"
+                          value={gradeDefaultValues[grade] ?? GRADE_LABELS[grade]}
+                          onChange={(event) => handleGradeDefaultChange(grade, event.target.value)}
+                        >
+                          {GRADE_KEYS_ORDER.map((optionGrade) => (
+                            <option key={optionGrade} value={GRADE_LABELS[optionGrade]}>
+                              {GRADE_LABELS[optionGrade]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <p className="text-[11px] text-slate-800">
+                        {GRADE_LABELS[grade]} - (school calls as {currentLabel})
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               {SERVICE_KEYS.map((service) => (

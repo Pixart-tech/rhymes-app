@@ -23,6 +23,7 @@ import tempfile
 import uuid
 import json
 import zipfile
+import imghdr
 from datetime import datetime
 from dataclasses import dataclass
 from functools import lru_cache
@@ -1096,6 +1097,21 @@ def _guess_file_extension(mime_type: Optional[str], default: str = ".bin") -> st
     return default
 
 
+def _detect_blob_mime_type(blob: bytes) -> str:
+    kind = imghdr.what(None, blob)
+    if not kind:
+        return "image/jpeg"
+    normalized = kind.lower()
+    if normalized == "jpg":
+        normalized = "jpeg"
+    mapped = mimetypes.types_map.get(f".{normalized}")
+    if mapped:
+        return mapped
+    if normalized == "jpeg":
+        return "image/jpeg"
+    return f"image/{normalized}"
+
+
 @api_router.get("/rhymes")
 async def get_all_rhymes():
     """Get all rhymes organized by pages"""
@@ -1314,7 +1330,7 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
 
         logo_blob = _coerce_to_bytes(raw_school_record.get("logo_blob"))
         if logo_blob:
-            logo_ext = _guess_file_extension(raw_school_record.get("logo_mime_type"), ".bin")
+            logo_ext = _guess_file_extension(_detect_blob_mime_type(logo_blob), ".jpg")
             zf.writestr(f"{school_id}_logo{logo_ext}", logo_blob)
 
         for idx in range(1, 5):
