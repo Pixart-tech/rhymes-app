@@ -42,6 +42,7 @@ export interface SchoolProfile {
   id_card_fields?: string[];
   created_by_user_id?: string | null;
   created_by_email?: string | null;
+  zoho_customer_id?: string | null;
   timestamp?: string;
 }
 

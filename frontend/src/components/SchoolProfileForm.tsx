@@ -23,7 +23,6 @@ import ImageCropperDialog from './ImageCropper';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 
 const getLogoPreview = (vals: SchoolFormValues) => vals.logo_url || '';
-const TOTAL_SECTIONS = 3;
 const DEFAULT_GRADE_LABELS: Record<GradeKey, string> = {
   playgroup: 'Playgroup',
   nursery: 'Nursery',
@@ -227,6 +226,7 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
   const [isCompressingLogo, setIsCompressingLogo] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [currentSection, setCurrentSection] = useState(1);
+  const totalSections = isSuperAdmin ? 3 : 2;
   const [linkPrincipalEmail, setLinkPrincipalEmail] = useState(
     Boolean(initialValues.email && initialValues.email === initialValues.principal_email)
   );
@@ -298,6 +298,12 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
     }
     setLogoPreviewUrl(values.logo_url ?? '');
   }, [values.logo_file, values.logo_url]);
+
+  useEffect(() => {
+    if (currentSection > totalSections) {
+      setCurrentSection(totalSections);
+    }
+  }, [currentSection, totalSections]);
 
     const handleInputChange =
     (field: keyof SchoolFormValues) =>
@@ -493,8 +499,8 @@ const handleAddressFieldChange =
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setInvalidFields(new Set());
-    if (!validateSection3()) {
-      setCurrentSection(TOTAL_SECTIONS);
+    if (isSuperAdmin && !validateSection3()) {
+      setCurrentSection(totalSections);
       return;
     }
     onSubmit({ values });
@@ -624,7 +630,7 @@ const handleAddressFieldChange =
     
     if (isValid) {
         setInvalidFields(new Set());
-        setCurrentSection((prev) => Math.min(prev + 1, TOTAL_SECTIONS));
+        setCurrentSection((prev) => Math.min(prev + 1, totalSections));
     }
   };
 
@@ -632,7 +638,7 @@ const handleAddressFieldChange =
     setInvalidFields(new Set());
     setCurrentSection((prev) => Math.max(prev - 1, 1));
   };
-  const progress = (currentSection / TOTAL_SECTIONS) * 100;
+  const progress = (currentSection / totalSections) * 100;
 
   return (
     <Card className="w-full max-w-3xl border-0 bg-white/80 backdrop-blur">
@@ -672,7 +678,7 @@ const handleAddressFieldChange =
         </div>
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm text-gray-600">
-            <span>Section {currentSection} of {TOTAL_SECTIONS}</span>
+            <span>Section {currentSection} of {totalSections}</span>
             <span>{Math.round(progress)}%</span>
           </div>
           <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
@@ -953,7 +959,7 @@ const handleAddressFieldChange =
               </div>
             )}
 
-            {currentSection === 3 && (
+            {isSuperAdmin && currentSection === totalSections && (
               <section className="space-y-4">
                 <div>
                   <Label className="text-base text-gray-800">What are you currently taking with us?</Label>
@@ -1128,12 +1134,12 @@ const handleAddressFieldChange =
                 type="button"
                 variant="outline"
                 onClick={handleNextSection}
-                disabled={currentSection === TOTAL_SECTIONS || isEmailChecking}
+                disabled={currentSection === totalSections || isEmailChecking}
               >
                 Next
               </Button>
             </div>
-            {currentSection === TOTAL_SECTIONS && (
+            {currentSection === totalSections && (
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Button type="submit" disabled={submitting || isCompressingLogo}>
                   {(submitting || isCompressingLogo) && <Loader2 className="h-4 w-4 animate-spin" />}

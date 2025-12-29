@@ -152,6 +152,38 @@ def compose_address(
     return ", ".join(segment for segment in segments if segment)
 
 
+ZOHO_DETAILS_COLLECTION = "zoho_details"
+
+
+def _zoho_details_doc_ref(db_client: firestore.Client, school_id: str):
+    return db_client.collection(ZOHO_DETAILS_COLLECTION).document(school_id)
+
+
+def get_zoho_customer_id(db_client: firestore.Client, school_id: str) -> Optional[str]:
+    if not school_id:
+        return None
+    doc_ref = _zoho_details_doc_ref(db_client, school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        return None
+    data = snapshot.to_dict() or {}
+    return data.get("customer_id")
+
+
+def set_zoho_customer_id(db_client: firestore.Client, school_id: str, customer_id: Optional[str]):
+    if not school_id:
+        return
+    doc_ref = _zoho_details_doc_ref(db_client, school_id)
+    doc_ref.set({"customer_id": customer_id or None}, merge=True)
+
+
+def add_branch_to_zoho_details(db_client: firestore.Client, school_id: str, branch_id: str):
+    if not school_id or not branch_id:
+        return
+    doc_ref = _zoho_details_doc_ref(db_client, school_id)
+    doc_ref.set({"branches": firestore.ArrayUnion([branch_id])}, merge=True)
+
+
 class SchoolCreatePayload(BaseModel):
     school_name: str = Field(..., min_length=2)
     email: EmailStr
@@ -310,6 +342,7 @@ class SchoolUpdatePayload(BaseModel):
     service_status: Optional[Dict[SchoolServiceType, ServiceStatus]] = None
     grades: Optional[Dict[GradeKey, Dict[str, Any]]] = None
     id_card_fields: Optional[List[str]] = None
+    zoho_customer_id: Optional[str] = None
 
     @field_validator("service_type", mode="before")
     @classmethod
@@ -377,6 +410,7 @@ class SchoolUpdatePayload(BaseModel):
         principal_name: Optional[str] = Form(default=None),
         principal_email: Optional[EmailStr] = Form(default=None),
         principal_phone: Optional[str] = Form(default=None),
+        zoho_customer_id: Optional[str] = Form(default=None),
         service_type: Optional[Any] = Form(default=None),
         service_status: Optional[Any] = Form(default=None),
         grades: Optional[Any] = Form(default=None),
@@ -546,6 +580,7 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         created_by_user_id=record.get("created_by_user_id"),
         created_by_email=record.get("created_by_email"),
         id_card_fields=record.get("id_card_fields"),
+        zoho_customer_id=record.get("zoho_customer_id"),
         created_at=record.get("created_at") or record.get("timestamp") or now,
         updated_at=record.get("updated_at") or record.get("timestamp") or now,
         timestamp=record.get("timestamp") or record.get("updated_at") or now,
@@ -638,7 +673,8 @@ def create_school_profile(
     city = _clean_optional_string(payload.city)
     state = _clean_optional_string(payload.state)
     pin = _clean_optional_string(payload.pin)
-    service_status_map = normalize_service_status(payload.service_status)
+    service_status_input = payload.service_status if is_creator_super_admin else None
+    service_status_map = normalize_service_status(service_status_input)
     grade_map = normalize_grades(payload.grades)
 
     school_payload = {
@@ -679,6 +715,8 @@ def create_school_profile(
                 school_payload[f"school_image_{idx}_mime"] = mime
 
     db.collection("schools").document(school_id).set(school_payload)
+    set_zoho_customer_id(db, school_id, None)
+    school_payload["zoho_customer_id"] = None
     if assignee_id:
         db.collection("users").document(assignee_id).update(
             {"school_ids": firestore.ArrayUnion([school_id]), "updated_at": now}
@@ -768,6 +806,7 @@ def create_branch_profile(
             "timestamp": now,
         }
     )
+    add_branch_to_zoho_details(db, parent_school_id, branch_id)
     return build_school_from_record(branch_payload)
 
 
@@ -791,4 +830,7 @@ __all__ = [
     "BranchStatus",
     "BRANCH_STATUS_ACTIVE",
     "BRANCH_STATUS_INACTIVE",
+    "get_zoho_customer_id",
+    "set_zoho_customer_id",
+    "add_branch_to_zoho_details",
 ]

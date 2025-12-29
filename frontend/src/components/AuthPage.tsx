@@ -29,6 +29,7 @@ import {
   SchoolProfile,
   SchoolFormValues,
   SchoolServiceType,
+  ServiceStatusMap,
   WorkspaceUserUpdatePayload
 } from '../types/types';
 import BranchForm, { type BranchFormValues } from './BranchForm';
@@ -72,6 +73,11 @@ const SERVICE_LABELS: Record<SchoolServiceType, string> = {
   id_cards: 'ID cards',
   report_cards: 'Report cards',
   certificates: 'Certificates'
+};
+const DEFAULT_SERVICE_STATUS: ServiceStatusMap = {
+  id_cards: 'no',
+  report_cards: 'no',
+  certificates: 'no'
 };
 type AdminServiceFilter = 'all' | SchoolServiceType;
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
@@ -185,6 +191,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [adminSearch, setAdminSearch] = useState('');
   const [serviceFilter, setServiceFilter] = useState<AdminServiceFilter>('all');
   const [approvingSchoolId, setApprovingSchoolId] = useState<string | null>(null);
+  const [addonsDialogSchool, setAddonsDialogSchool] = useState<AdminSchoolProfile | null>(null);
+  const [addonsDialogServiceStatus, setAddonsDialogServiceStatus] = useState<ServiceStatusMap>(DEFAULT_SERVICE_STATUS);
+  const [addonsDialogZohoId, setAddonsDialogZohoId] = useState('');
+  const zohoInputRef = useRef<HTMLInputElement | null>(null);
+  const [addonsDialogEditingZohoId, setAddonsDialogEditingZohoId] = useState(false);
+  const [addonsDialogSaving, setAddonsDialogSaving] = useState(false);
   const workspaceFetchInFlight = useRef(false);
   const lastFetchedWorkspaceUserId = useRef<string | null>(null);
   const allSchoolsForLogos = useMemo(() => {
@@ -651,6 +663,15 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     onAuth({ school, user: workspaceUser });
   };
 
+  const buildDialogServiceStatus = useCallback(
+    (school?: AdminSchoolProfile | null): ServiceStatusMap => ({
+      id_cards: school?.service_status?.id_cards ?? DEFAULT_SERVICE_STATUS.id_cards,
+      report_cards: school?.service_status?.report_cards ?? DEFAULT_SERVICE_STATUS.report_cards,
+      certificates: school?.service_status?.certificates ?? DEFAULT_SERVICE_STATUS.certificates
+    }),
+    []
+  );
+
   const handleDownloadBinder = useCallback(
     async (school: SchoolProfile) => {
       try {
@@ -676,6 +697,70 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     },
     [getIdToken]
   );
+
+  const handleOpenAddonsDialog = useCallback((school: AdminSchoolProfile) => {
+    setAddonsDialogSchool(school);
+    setAddonsDialogServiceStatus(buildDialogServiceStatus(school));
+    setAddonsDialogZohoId(school.zoho_customer_id ?? '');
+    setAddonsDialogEditingZohoId(!school.zoho_customer_id);
+  }, [buildDialogServiceStatus]);
+
+  const handleCloseAddonsDialog = useCallback(() => {
+    setAddonsDialogSchool(null);
+    setAddonsDialogServiceStatus(DEFAULT_SERVICE_STATUS);
+    setAddonsDialogZohoId('');
+    setAddonsDialogEditingZohoId(false);
+  }, []);
+
+  const handleAddonsServiceChange = useCallback((service: SchoolServiceType, status: 'yes' | 'no') => {
+    setAddonsDialogServiceStatus((prev) => ({ ...prev, [service]: status }));
+  }, []);
+
+  const handleSaveAddonsServices = useCallback(async () => {
+    if (!addonsDialogSchool) {
+      return;
+    }
+    setAddonsDialogSaving(true);
+    try {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error('Unable to fetch Firebase token');
+      }
+      const formData = new FormData();
+      formData.append('service_status', JSON.stringify(addonsDialogServiceStatus));
+      const inputZohoValue = zohoInputRef.current?.value ?? addonsDialogZohoId;
+      const submittedZohoId = inputZohoValue.trim() || addonsDialogSchool?.zoho_customer_id || '';
+      formData.append('zoho_customer_id', submittedZohoId);
+      await axios.put(`${API}/schools/${addonsDialogSchool.school_id}`, formData, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const updatedServiceType = SERVICE_KEYS.filter(
+        (service) => addonsDialogServiceStatus[service] === 'yes'
+      );
+      const updatedSchool = {
+        ...addonsDialogSchool,
+        service_status: addonsDialogServiceStatus,
+        service_type: updatedServiceType
+        ,
+        zoho_customer_id: submittedZohoId || null
+      };
+      setAddonsDialogSchool(updatedSchool);
+      setAddonsDialogZohoId(submittedZohoId);
+      setSchools((prev) =>
+        prev.map((school) => (school.school_id === updatedSchool.school_id ? { ...school, ...updatedSchool } : school))
+      );
+      setAdminSchools((prev) =>
+        prev.map((school) => (school.school_id === updatedSchool.school_id ? { ...school, ...updatedSchool } : school))
+      );
+      toast.success('Service options updated');
+      setAddonsDialogEditingZohoId(false);
+    } catch (error) {
+      console.error('Failed to update service options', error);
+      toast.error('Unable to update service options. Please try again.');
+    } finally {
+      setAddonsDialogSaving(false);
+    }
+  }, [addonsDialogSchool, addonsDialogServiceStatus, getIdToken]);
 
   const handleApproveSelections = useCallback(
     async (school: SchoolProfile) => {
@@ -888,13 +973,16 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       if (!workspaceUser) {
         return;
       }
-    const serviceStatusAnswered = Object.values(values.service_status).every(
-      (status) => status === 'yes' || status === 'no'
-    );
-    if (!serviceStatusAnswered) {
-      toast.error('Please confirm for each service whether you are taking it.');
-      return;
-    }
+      const isSuperAdminUser = workspaceUser.role === 'super-admin';
+      if (isSuperAdminUser) {
+        const serviceStatusAnswered = Object.values(values.service_status).every(
+          (status) => status === 'yes' || status === 'no'
+        );
+        if (!serviceStatusAnswered) {
+          toast.error('Please confirm for each service whether you are taking it.');
+          return;
+        }
+      }
       setSubmitting(true);
       try {
         const token = await getIdToken();
@@ -940,12 +1028,15 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       if (!editingSchool) {
         return;
       }
-      const hasSelectedService = Object.values(values.service_status).some(
-        (status) => status === 'yes'
-      );
-      if (!hasSelectedService) {
-        toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
-        return;
+      const isSuperAdminUser = workspaceUser?.role === 'super-admin';
+      if (isSuperAdminUser) {
+        const hasSelectedService = Object.values(values.service_status).some(
+          (status) => status === 'yes'
+        );
+        if (!hasSelectedService) {
+          toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
+          return;
+        }
       }
       setSubmitting(true);
       try {
@@ -1597,6 +1688,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                       Delete
                                     </DropdownMenuItem>
                                   )}
+                                  <DropdownMenuItem onClick={() => handleOpenAddonsDialog(school)}>
+                                    Addons
+                                  </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDownloadBinder(school)}>
                                     Binder JSON
                                   </DropdownMenuItem>
@@ -1766,6 +1860,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
               submitting={submitting}
               onSubmit={handleCreateSubmit}
               onCancel={isSuperAdmin || schools.length > 0 ? () => setView('list') : undefined}
+              isSuperAdmin={isSuperAdmin}
             />
           </div>
         ) : isEditView && editingSchool ? (
@@ -1779,6 +1874,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                 setEditingSchool(null);
                 setView('list');
               }}
+              isSuperAdmin={isSuperAdmin}
             />
           </div>
         ) : isBranchView && branchParent ? (
@@ -1845,6 +1941,106 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(addonsDialogSchool)}
+        onOpenChange={(open) => {
+          if (!open) {
+            handleCloseAddonsDialog();
+          }
+        }}
+        className="z-50"
+      >
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Addons · {addonsDialogSchool?.school_name ?? 'school'}</DialogTitle>
+            <p className="text-sm text-slate-500">
+              Review the optional services and add-ons currently associated with this school. Use the View action to open the workspace and make changes.
+            </p>
+          </DialogHeader>
+          <div className="space-y-4 text-sm text-slate-600">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Service options</p>
+              <p className="text-xs text-slate-500">Opt in or out per service directly from here.</p>
+            </div>
+            <div className="space-y-3">
+              <p className="text-xs uppercase tracking-wide text-slate-400">ZOHO customer id</p>
+                {addonsDialogEditingZohoId ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      className="flex-1"
+                      value={addonsDialogZohoId}
+                      onChange={(event) => setAddonsDialogZohoId(event.target.value)}
+                      ref={zohoInputRef}
+                      placeholder="Enter Zoho customer ID"
+                    />
+                  <Button size="sm" variant="outline" onClick={() => setAddonsDialogEditingZohoId(false)}>
+                    Done
+                  </Button>
+                </div>
+              ) : addonsDialogZohoId ? (
+                <div className="flex items-center gap-2 text-sm text-slate-700">
+                  <span className="font-semibold">{addonsDialogZohoId}</span>
+                  <Button variant="ghost" size="sm" className="p-0" onClick={() => setAddonsDialogEditingZohoId(true)}>
+                    <Edit3 className="h-4 w-4 text-slate-500" />
+                  </Button>
+                </div>
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => setAddonsDialogEditingZohoId(true)}>
+                  Add Zoho ID
+                </Button>
+              )}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {SERVICE_KEYS.map((service) => (
+                <div key={service} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-400">{SERVICE_LABELS[service]}</p>
+                  <div className="mt-3 flex items-center gap-3 text-sm text-slate-700">
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name={`${service}-addons`}
+                        value="yes"
+                        checked={addonsDialogServiceStatus[service] === 'yes'}
+                        onChange={() => handleAddonsServiceChange(service, 'yes')}
+                      />
+                      <span className="font-semibold">Yes</span>
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name={`${service}-addons`}
+                        value="no"
+                        checked={addonsDialogServiceStatus[service] === 'no'}
+                        onChange={() => handleAddonsServiceChange(service, 'no')}
+                      />
+                      <span>No</span>
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-3">
+            <Button variant="outline" onClick={handleCloseAddonsDialog}>
+              Close
+            </Button>
+            <Button variant="outline" onClick={handleSaveAddonsServices} disabled={addonsDialogSaving}>
+              {addonsDialogSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+            <Button
+              onClick={() => {
+                if (!addonsDialogSchool) return;
+                handleSchoolSelect(addonsDialogSchool);
+                handleCloseAddonsDialog();
+              }}
+              disabled={!addonsDialogSchool}
+            >
+              Open workspace
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

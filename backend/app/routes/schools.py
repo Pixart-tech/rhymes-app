@@ -118,6 +118,7 @@ async def update_school_profile(
     user_record = ensure_user_document(decoded_token)
     uid = user_record["uid"]
     role = user_record.get("role", DEFAULT_USER_ROLE)
+    allow_service_updates = role == "super-admin"
 
     doc_ref = db.collection("schools").document(school_id)
     snapshot = doc_ref.get()
@@ -127,12 +128,14 @@ async def update_school_profile(
     existing = snapshot.to_dict() or {}
     if existing.get("created_by_user_id") != uid and role != "super-admin":
         raise HTTPException(status_code=403, detail="You do not have permission to edit this school")
+    main_school_id = existing.get("branch_parent_id") or existing.get("school_id") or school_id
 
     raw_updates = payload.dict(exclude_unset=True)
     email_provided = "email" in raw_updates
     principal_email_provided = "principal_email" in raw_updates
     raw_email_value = raw_updates.pop("email", None) if email_provided else None
     raw_principal_value = raw_updates.pop("principal_email", None) if principal_email_provided else None
+    zoho_customer_id = raw_updates.pop("zoho_customer_id", None)
     normalized_email = None
     normalized_principal_email = None
     if email_provided:
@@ -154,17 +157,18 @@ async def update_school_profile(
     if total_image_bytes > 2 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Total school images must be 2MB or less")
 
-    service_status_raw = raw_updates.pop("service_status", None)
+    raw_service_status = raw_updates.pop("service_status", None)
+    raw_service_type = raw_updates.pop("service_type", None)
     grades_raw = raw_updates.pop("grades", None)
+    if not allow_service_updates:
+        raw_service_status = None
+        raw_service_type = None
     address_fields = ("address", "city", "state", "pin")
     address_overrides: Dict[str, Any] = {field: raw_updates.pop(field) for field in address_fields if field in raw_updates}
 
     updates: Dict[str, Any] = {}
     for key, value in raw_updates.items():
-        if key == "service_type":
-            updates[key] = school_profiles.normalize_service_types(value)
-        else:
-            updates[key] = _clean(value)
+        updates[key] = _clean(value)
 
     if address_overrides:
         cleaned_address = {field: _clean(address_overrides[field]) for field in address_overrides}
@@ -176,15 +180,24 @@ async def update_school_profile(
             for field in address_fields
         }
 
-    if service_status_raw is not None:
-        normalized_status = school_profiles.normalize_service_status(service_status_raw)
-        updates["service_status"] = normalized_status
-        updates["service_type"] = school_profiles.services_from_status(normalized_status)
-    elif "service_type" in updates:
-        updates["service_status"] = {
-            service: ("yes" if service in updates["service_type"] else "no")
-            for service in school_profiles.SERVICE_TYPE_VALUES
-        }
+    if zoho_customer_id is not None:
+        school_profiles.set_zoho_customer_id(db, main_school_id, zoho_customer_id)
+
+    if allow_service_updates:
+        if raw_service_status is not None:
+            normalized_status = school_profiles.normalize_service_status(raw_service_status)
+            updates["service_status"] = normalized_status
+            updates["service_type"] = school_profiles.services_from_status(normalized_status)
+        elif raw_service_type is not None:
+            normalized_type = school_profiles.normalize_service_types(raw_service_type)
+            status_map = {
+                service: ("yes" if service in normalized_type else "no")
+                for service in school_profiles.SERVICE_TYPE_VALUES
+            }
+            updates["service_type"] = normalized_type
+            updates["service_status"] = status_map
+        if zoho_customer_id is not None:
+            school_profiles.set_zoho_customer_id(db, main_school_id, zoho_customer_id)
 
     if grades_raw is not None:
         updates["grades"] = school_profiles.normalize_grades(grades_raw)
@@ -206,6 +219,7 @@ async def update_school_profile(
     if not updates:
         existing.setdefault("id", snapshot.id)
         existing.setdefault("school_id", snapshot.id)
+        existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
         return school_profiles.build_school_from_record(existing)
 
     now = datetime.utcnow()
@@ -215,6 +229,7 @@ async def update_school_profile(
     existing.update(updates)
     existing.setdefault("id", snapshot.id)
     existing.setdefault("school_id", snapshot.id)
+    existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
 
     return school_profiles.build_school_from_record(existing)
 
@@ -446,6 +461,8 @@ def get_all_schools_with_selections(
         school_id = doc.get("school_id")
         if not school_id:
             continue
+        zoho_main_id = doc.get("branch_parent_id") or school_id
+        doc["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, zoho_main_id)
 
 
         base_school = school_profiles.build_school_from_record(doc)

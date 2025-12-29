@@ -84,6 +84,9 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
         record = snapshot.to_dict() or {}
         record.setdefault("id", snapshot.id)
         record.setdefault("school_id", record.get("school_id") or snapshot.id)
+        zoho_school_id = record.get("branch_parent_id") or record.get("school_id")
+        if zoho_school_id:
+            record["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, zoho_school_id)
         schools.append(school_profiles.build_school_from_record(record))
         branch_parent_id = record.get("school_id") or record.get("id")
         branch_parent_ids.append(branch_parent_id)
@@ -98,6 +101,7 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
             branch_record.setdefault("school_id", branch_record.get("school_id") or branch_record.get("id"))
             branch_parent_id = record.get("school_id") or record.get("id")
             branch_record.setdefault("branch_parent_id", branch_parent_id)
+            branch_record["zoho_customer_id"] = record.get("zoho_customer_id")
             seen_branch_ids.add(branch_record["school_id"])
             schools.append(school_profiles.build_school_from_record(branch_record))
     for parent_id in set(branch_parent_ids):
@@ -111,6 +115,7 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
                 continue
             branch_parent_id = parent_id
             branch_data.setdefault("branch_parent_id", branch_parent_id)
+            branch_data["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, branch_parent_id)
             branch = school_profiles.build_school_from_record(branch_data)
             schools.append(branch)
             seen_branch_ids.add(branch_id)
