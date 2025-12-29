@@ -51,6 +51,22 @@ import {
 
 const API = API_BASE_URL || '/api';
 
+const normalizeSchoolId = (value?: string | null) => {
+  if (!value) {
+    return '';
+  }
+  return value.trim().toLowerCase();
+};
+
+const matchesParentId = (branchParentId: string | undefined | null, parent?: SchoolProfile | null) => {
+  if (!parent || !branchParentId) {
+    return false;
+  }
+  const normalizedParentId = normalizeSchoolId(parent.school_id) || normalizeSchoolId(parent.id);
+  const normalizedBranchId = normalizeSchoolId(branchParentId);
+  return Boolean(normalizedParentId && normalizedBranchId && normalizedParentId === normalizedBranchId);
+};
+
 const SERVICE_KEYS: SchoolServiceType[] = ['id_cards', 'report_cards', 'certificates'];
 const SERVICE_LABELS: Record<SchoolServiceType, string> = {
   id_cards: 'ID cards',
@@ -184,18 +200,19 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     const rootSchools: SchoolProfile[] = [];
     const branchMap = new Map<string, SchoolProfile[]>();
     schools.forEach((school) => {
-      if (school.branch_parent_id) {
-        const current = branchMap.get(school.branch_parent_id) ?? [];
+      const parentKey = normalizeSchoolId(school.branch_parent_id);
+      if (parentKey) {
+        const current = branchMap.get(parentKey) ?? [];
         current.push(school);
-        branchMap.set(school.branch_parent_id, current);
+        branchMap.set(parentKey, current);
       } else {
         rootSchools.push(school);
       }
     });
-    const rootIds = new Set(rootSchools.map((school) => school.school_id));
+    const rootIds = new Set(rootSchools.map((school) => normalizeSchoolId(school.school_id)));
     const orphanBranches: SchoolProfile[] = [];
-    branchMap.forEach((list, parentId) => {
-      if (!rootIds.has(parentId)) {
+    branchMap.forEach((list, parentKey) => {
+      if (parentKey && !rootIds.has(parentKey)) {
         orphanBranches.push(...list);
       }
     });
@@ -985,11 +1002,22 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const isBranchView = view === 'branch' && Boolean(branchParent);
 
   const renderUserDashboard = () => {
-    const { rootSchools, branchMap, orphanBranches } = branchStructure;
+    const { rootSchools, orphanBranches } = branchStructure;
     const hasSchools = schools.length > 0;
     const hasRootSchools = rootSchools.length > 0;
-    const primarySchool = hasRootSchools ? rootSchools[0] : null;
-    const primaryBranches = primarySchool ? branchMap.get(primarySchool.school_id) ?? [] : [];
+    const preferredSchoolId = normalizeSchoolId(workspaceUser?.school_ids?.[0]);
+    let primarySchool: SchoolProfile | null = null;
+    if (preferredSchoolId) {
+      primarySchool = rootSchools.find(
+        (school) => normalizeSchoolId(school.school_id) === preferredSchoolId
+      ) ?? null;
+    }
+    if (!primarySchool && hasRootSchools) {
+      primarySchool = rootSchools[0];
+    }
+    const primaryBranches = primarySchool
+      ? schools.filter((school) => matchesParentId(school.branch_parent_id, primarySchool))
+      : [];
 
     return (
       <div className="space-y-6">
@@ -1476,7 +1504,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                             <td className="px-4 py-4 text-slate-700">
                               {school.branch_parent_id ? (
                                 <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                                  Child of {school.branch_parent_id}
+                                  Sub Branch of {school.branch_parent_id}
                                 </span>
                               ) : (
                                 <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800">

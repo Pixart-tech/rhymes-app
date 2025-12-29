@@ -72,6 +72,8 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
                 workspace_user.school_ids.extend(new_school_ids)
 
     schools: List[School] = []
+    seen_branch_ids = set()
+    branch_parent_ids: List[str] = []
     for school_id in workspace_user.school_ids:
         if not school_id:
             continue
@@ -83,14 +85,35 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
         record.setdefault("id", snapshot.id)
         record.setdefault("school_id", record.get("school_id") or snapshot.id)
         schools.append(school_profiles.build_school_from_record(record))
-        branch_entries = record.get("branches") or []
+        branch_parent_id = record.get("school_id") or record.get("id")
+        branch_parent_ids.append(branch_parent_id)
+        seen_branch_ids.add(branch_parent_id)
+        raw_branches = record.get("branches") or {}
+        branch_entries = list(raw_branches.values()) if isinstance(raw_branches, dict) else list(raw_branches)
         for branch_entry in branch_entries:
             if not isinstance(branch_entry, dict):
                 continue
             branch_record = dict(branch_entry)
             branch_record.setdefault("id", branch_record.get("school_id") or branch_record.get("id"))
             branch_record.setdefault("school_id", branch_record.get("school_id") or branch_record.get("id"))
+            branch_parent_id = record.get("school_id") or record.get("id")
+            branch_record.setdefault("branch_parent_id", branch_parent_id)
+            seen_branch_ids.add(branch_record["school_id"])
             schools.append(school_profiles.build_school_from_record(branch_record))
+    for parent_id in set(branch_parent_ids):
+        branch_docs_query = (
+            db.collection("schools").where("branch_parent_id", "==", parent_id).stream()
+        )
+        for branch_doc in branch_docs_query:
+            branch_data = branch_doc.to_dict() or {}
+            branch_id = branch_data.get("school_id") or branch_doc.id
+            if branch_id in seen_branch_ids:
+                continue
+            branch_parent_id = parent_id
+            branch_data.setdefault("branch_parent_id", branch_parent_id)
+            branch = school_profiles.build_school_from_record(branch_data)
+            schools.append(branch)
+            seen_branch_ids.add(branch_id)
 
     return UserSessionResponse(user=workspace_user, schools=schools)
 

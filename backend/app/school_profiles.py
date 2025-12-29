@@ -276,14 +276,19 @@ def build_branch_summary_entry(branch_payload: Dict[str, Any]) -> Dict[str, Any]
     return {
         "id": branch_payload.get("school_id"),
         "school_id": branch_payload.get("school_id"),
+        "school_name": branch_payload.get("school_name"),
         "branch_name": branch_payload.get("school_name"),
         "coordinator_name": branch_payload.get("principal_name"),
         "coordinator_email": branch_payload.get("principal_email"),
         "coordinator_phone": branch_payload.get("principal_phone"),
+        "principal_name": branch_payload.get("principal_name"),
+        "principal_email": branch_payload.get("principal_email"),
+        "principal_phone": branch_payload.get("principal_phone"),
         "address": branch_payload.get("address_line1"),
         "city": branch_payload.get("city"),
         "state": branch_payload.get("state"),
         "pin": branch_payload.get("pin"),
+        "branch_parent_id": branch_payload.get("branch_parent_id"),
         "status": branch_payload.get("status", BRANCH_STATUS_ACTIVE),
     }
 
