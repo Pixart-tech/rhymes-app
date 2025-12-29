@@ -5,7 +5,7 @@ import imghdr
 import mimetypes
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from .. import school_profiles
@@ -32,6 +32,13 @@ def _clean(value: Optional[str]) -> Optional[str]:
         stripped = value.strip()
         return stripped or None
     return value
+
+
+def _parse_boolean_flag(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    normalized = value.strip().lower()
+    return normalized in {"1", "true", "yes", "on"}
 
 
 def _guess_image_extension(mime_type: Optional[str]) -> str:
@@ -129,12 +136,14 @@ async def update_school_profile(
     school_image_3: Optional[UploadFile] = File(None),
     school_image_4: Optional[UploadFile] = File(None),
     authorization: Optional[str] = Header(None),
+    update_zoho_details: Optional[str] = Form(default=None),
 ):
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
     uid = user_record["uid"]
     role = user_record.get("role", DEFAULT_USER_ROLE)
     allow_service_updates = role == "super-admin"
+    should_update_zoho_details = _parse_boolean_flag(update_zoho_details)
 
     doc_ref = db.collection("schools").document(school_id)
     snapshot = doc_ref.get()
@@ -235,13 +244,15 @@ async def update_school_profile(
     if principal_email_provided:
         updates["principal_email"] = normalized_principal_email
 
-    contact_fields_updated = any(field in updates for field in school_profiles.ZOHO_DETAILS_CONTACT_FIELDS)
+    contact_fields_updated = should_update_zoho_details and any(
+        field in updates for field in school_profiles.ZOHO_DETAILS_CONTACT_FIELDS
+    )
 
     if not updates:
         existing.setdefault("id", snapshot.id)
         existing.setdefault("school_id", snapshot.id)
         existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
-        if isinstance(grade_default_labels, dict):
+        if should_update_zoho_details and isinstance(grade_default_labels, dict):
             school_profiles.set_zoho_grade_mapping(
                 db,
                 main_school_id,
@@ -260,7 +271,7 @@ async def update_school_profile(
     existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
     if contact_fields_updated:
         school_profiles.update_zoho_details_from_school(db, main_school_id, existing)
-    if isinstance(grade_default_labels, dict):
+    if should_update_zoho_details and isinstance(grade_default_labels, dict):
         school_profiles.set_zoho_grade_mapping(
             db,
             main_school_id,

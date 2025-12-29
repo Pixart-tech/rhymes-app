@@ -770,6 +770,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       formData.append('zoho_customer_id', submittedZohoId);
       formData.append('grade_default_labels', JSON.stringify(gradeDefaultValues));
       formData.append('grade_unique_values', JSON.stringify(gradeUniqueValues));
+      formData.append('update_zoho_details', 'true');
       const response = await axios.put<SchoolProfile>(`${API}/schools/${addonsDialogSchool.school_id}`, formData, {
         headers: { Authorization: `Bearer ${token}` }
       });
