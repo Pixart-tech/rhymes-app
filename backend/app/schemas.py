@@ -58,7 +58,3 @@ class GradeStatus(BaseModel):
 class PaginatedSchoolResponse(BaseModel):
     schools: List[SchoolWithSelections]
     total_count: int
-
-
-class ZohoCustomerIdPayload(BaseModel):
-    zoho_customer_id: Optional[str] = None

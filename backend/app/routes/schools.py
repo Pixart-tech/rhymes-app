@@ -21,7 +21,6 @@ from ..schemas import (
     PaginatedSchoolResponse,
     RhymeSelectionDetail,
     SchoolWithSelections,
-    ZohoCustomerIdPayload,
 )
 
 
@@ -154,6 +153,8 @@ async def update_school_profile(
     raw_email_value = raw_updates.pop("email", None) if email_provided else None
     raw_principal_value = raw_updates.pop("principal_email", None) if principal_email_provided else None
     raw_zoho_customer_id = raw_updates.pop("zoho_customer_id", None)
+    grade_default_labels_raw = raw_updates.pop("grade_default_labels", None)
+    grade_unique_values_raw = raw_updates.pop("grade_unique_values", None)
     cleaned_zoho_customer_id = _clean(raw_zoho_customer_id)
     normalized_email = None
     normalized_principal_email = None
@@ -218,6 +219,9 @@ async def update_school_profile(
     if grades_raw is not None:
         updates["grades"] = school_profiles.normalize_grades(grades_raw)
 
+    grade_default_labels = _parse_json_field(grade_default_labels_raw)
+    grade_unique_values = _parse_json_field(grade_unique_values_raw)
+
     if logo_blob is not None:
         updates["logo_blob"] = logo_blob
     if school_image_blobs:
@@ -237,6 +241,13 @@ async def update_school_profile(
         existing.setdefault("id", snapshot.id)
         existing.setdefault("school_id", snapshot.id)
         existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
+        if isinstance(grade_default_labels, dict):
+            school_profiles.set_zoho_grade_mapping(
+                db,
+                main_school_id,
+                grade_default_labels,
+                grade_unique_values if isinstance(grade_unique_values, dict) else None,
+            )
         return school_profiles.build_school_from_record(existing)
 
     now = datetime.utcnow()
@@ -249,41 +260,13 @@ async def update_school_profile(
     existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
     if contact_fields_updated:
         school_profiles.update_zoho_details_from_school(db, main_school_id, existing)
-
-    return school_profiles.build_school_from_record(existing)
-
-
-@router.patch("/schools/{school_id}/zoho-customer-id", response_model=school_profiles.School)
-def update_school_zoho_customer_id(
-    school_id: str,
-    payload: ZohoCustomerIdPayload,
-    authorization: Optional[str] = Header(None),
-):
-    decoded_token = verify_and_decode_token(authorization)
-    user_record = ensure_user_document(decoded_token)
-    role = user_record.get("role", DEFAULT_USER_ROLE)
-
-    doc_ref = db.collection("schools").document(school_id)
-    snapshot = doc_ref.get()
-    if not snapshot.exists:
-        raise HTTPException(status_code=404, detail="School not found")
-
-    existing = snapshot.to_dict() or {}
-    user_school_ids = set(user_record.get("school_ids", []))
-    if role != "super-admin" and school_id not in user_school_ids:
-        raise HTTPException(status_code=403, detail="You do not have permission to edit this school")
-    main_school_id = existing.get("branch_parent_id") or existing.get("school_id") or school_id
-
-    cleaned_zoho_customer_id = _clean(payload.zoho_customer_id)
-    if payload.zoho_customer_id is not None:
-        school_profiles.set_zoho_customer_id(db, main_school_id, cleaned_zoho_customer_id)
-
-    now = datetime.utcnow()
-    doc_ref.update({"updated_at": now, "timestamp": now})
-    existing.update({"updated_at": now, "timestamp": now})
-    existing.setdefault("id", snapshot.id)
-    existing.setdefault("school_id", snapshot.id)
-    existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
+    if isinstance(grade_default_labels, dict):
+        school_profiles.set_zoho_grade_mapping(
+            db,
+            main_school_id,
+            grade_default_labels,
+            grade_unique_values if isinstance(grade_unique_values, dict) else None,
+        )
 
     return school_profiles.build_school_from_record(existing)
 

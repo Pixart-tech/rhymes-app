@@ -25,6 +25,8 @@ ServiceStatusMap = Dict[SchoolServiceType, ServiceStatus]
 GradeKey = Literal["playgroup", "nursery", "lkg", "ukg"]
 GRADE_KEYS: Tuple[GradeKey, ...] = ("playgroup", "nursery", "lkg", "ukg")
 
+FORM_UNSET = object()
+
 SCHOOL_ID_ALPHABET = string.ascii_uppercase + string.digits
 
 BranchStatus = Literal["active", "inactive"]
@@ -213,6 +215,21 @@ def update_zoho_details_from_school(db_client: firestore.Client, school_id: str,
     payload = _build_zoho_details_contact_payload(record)
     if not payload:
         return
+    doc_ref = _zoho_details_doc_ref(db_client, school_id)
+    doc_ref.set(payload, merge=True)
+
+
+def set_zoho_grade_mapping(
+    db_client: firestore.Client,
+    school_id: str,
+    grade_labels: Optional[Dict[str, str]],
+    grade_unique_values: Optional[Dict[str, str]],
+):
+    if not school_id or not grade_labels:
+        return
+    payload: Dict[str, Any] = {"grade_labels": grade_labels}
+    if grade_unique_values:
+        payload["grade_unique_values"] = grade_unique_values
     doc_ref = _zoho_details_doc_ref(db_client, school_id)
     doc_ref.set(payload, merge=True)
 
@@ -428,43 +445,47 @@ class SchoolUpdatePayload(BaseModel):
     @classmethod
     def as_form(
         cls,
-        school_name: Optional[str] = Form(default=None),
-        email: Optional[EmailStr] = Form(default=None),
-        phone: Optional[str] = Form(default=None),
-        address: Optional[str] = Form(default=None),
-        tagline: Optional[str] = Form(default=None),
-        city: Optional[str] = Form(default=None),
-        state: Optional[str] = Form(default=None),
-        pin: Optional[str] = Form(default=None),
-        website: Optional[str] = Form(default=None),
-        principal_name: Optional[str] = Form(default=None),
-        principal_email: Optional[EmailStr] = Form(default=None),
-        principal_phone: Optional[str] = Form(default=None),
-        zoho_customer_id: Optional[str] = Form(default=None),
-        service_type: Optional[Any] = Form(default=None),
-        service_status: Optional[Any] = Form(default=None),
-        grades: Optional[Any] = Form(default=None),
-        id_card_fields: Optional[Any] = Form(default=None),
-        ) -> "SchoolUpdatePayload":
-        return cls(
-            school_name=school_name,
-            email=email,
-            phone=phone,
-            address=address,
-            tagline=tagline,
-            city=city,
-            state=state,
-            pin=pin,
-            website=website,
-            principal_name=principal_name,
-            principal_email=principal_email,
-            principal_phone=principal_phone,
-            zoho_customer_id=zoho_customer_id,
-            service_type=service_type,
-            service_status=service_status,
-            grades=grades,
-            id_card_fields=id_card_fields,
-        )
+        school_name: Optional[str] = Form(default=FORM_UNSET),
+        email: Optional[EmailStr] = Form(default=FORM_UNSET),
+        phone: Optional[str] = Form(default=FORM_UNSET),
+        address: Optional[str] = Form(default=FORM_UNSET),
+        tagline: Optional[str] = Form(default=FORM_UNSET),
+        city: Optional[str] = Form(default=FORM_UNSET),
+        state: Optional[str] = Form(default=FORM_UNSET),
+        pin: Optional[str] = Form(default=FORM_UNSET),
+        website: Optional[str] = Form(default=FORM_UNSET),
+        principal_name: Optional[str] = Form(default=FORM_UNSET),
+        principal_email: Optional[EmailStr] = Form(default=FORM_UNSET),
+        principal_phone: Optional[str] = Form(default=FORM_UNSET),
+        zoho_customer_id: Optional[str] = Form(default=FORM_UNSET),
+        service_type: Optional[Any] = Form(default=FORM_UNSET),
+        service_status: Optional[Any] = Form(default=FORM_UNSET),
+        grades: Optional[Any] = Form(default=FORM_UNSET),
+        id_card_fields: Optional[Any] = Form(default=FORM_UNSET),
+    ) -> "SchoolUpdatePayload":
+        field_values: Dict[str, Any] = {
+            "school_name": school_name,
+            "email": email,
+            "phone": phone,
+            "address": address,
+            "tagline": tagline,
+            "city": city,
+            "state": state,
+            "pin": pin,
+            "website": website,
+            "principal_name": principal_name,
+            "principal_email": principal_email,
+            "principal_phone": principal_phone,
+            "zoho_customer_id": zoho_customer_id,
+            "service_type": service_type,
+            "service_status": service_status,
+            "grades": grades,
+            "id_card_fields": id_card_fields,
+        }
+        provided_values = {
+            key: value for key, value in field_values.items() if value is not FORM_UNSET
+        }
+        return cls(**provided_values)
 
 
 def _clean_optional_string(value: Optional[str]) -> Optional[str]:
@@ -734,10 +755,8 @@ def create_school_profile(
                 school_payload[f"school_image_{idx}"] = blob
                 school_payload[f"school_image_{idx}_mime"] = mime
 
-    db.collection("schools").document(school_id).set(school_payload)
-    update_zoho_details_from_school(db, school_id, school_payload)
-    set_zoho_customer_id(db, school_id, None)
     school_payload["zoho_customer_id"] = None
+    db.collection("schools").document(school_id).set(school_payload)
     if assignee_id:
         db.collection("users").document(assignee_id).update(
             {"school_ids": firestore.ArrayUnion([school_id]), "updated_at": now}
@@ -852,5 +871,6 @@ __all__ = [
     "get_zoho_customer_id",
     "set_zoho_customer_id",
     "add_branch_to_zoho_details",
+    "set_zoho_grade_mapping",
     "update_zoho_details_from_school",
 ]

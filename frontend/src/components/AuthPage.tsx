@@ -82,6 +82,12 @@ const GRADE_LABELS: Record<GradeKey, string> = {
   lkg: 'LKG',
   ukg: 'UKG'
 };
+const GRADE_UNIQUE_CODES: Record<string, string> = {
+  Playgroup: '494949',
+  Nursery: '494950',
+  LKG: '494951',
+  UKG: '494952'
+};
 const DEFAULT_SERVICE_STATUS: ServiceStatusMap = {
   id_cards: 'no',
   report_cards: 'no',
@@ -210,6 +216,13 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       return acc;
     }, {} as Record<GradeKey, string>)
   );
+  const [gradeUniqueValues, setGradeUniqueValues] = useState<Record<GradeKey, string>>(() =>
+    GRADE_KEYS_ORDER.reduce<Record<GradeKey, string>>((acc, grade) => {
+      acc[grade] = GRADE_UNIQUE_CODES[GRADE_LABELS[grade]] || '';
+      return acc;
+    }, {} as Record<GradeKey, string>)
+  );
+
   const workspaceFetchInFlight = useRef(false);
   const lastFetchedWorkspaceUserId = useRef<string | null>(null);
   const allSchoolsForLogos = useMemo(() => {
@@ -717,15 +730,18 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   }, []);
 
   useEffect(() => {
-    const nextValues: Record<GradeKey, string> = GRADE_KEYS_ORDER.reduce(
-      (accumulator, grade) => {
-        const gradeEntry = addonsDialogSchool?.grades?.[grade];
-        accumulator[grade] = gradeEntry?.label?.trim() || GRADE_LABELS[grade];
-        return accumulator;
-      },
-      {} as Record<GradeKey, string>
-    );
+    const nextValues = GRADE_KEYS_ORDER.reduce<Record<GradeKey, string>>((accumulator, grade) => {
+      const gradeEntry = addonsDialogSchool?.grades?.[grade];
+      accumulator[grade] = gradeEntry?.label?.trim() || GRADE_LABELS[grade];
+      return accumulator;
+    }, {} as Record<GradeKey, string>);
+    const nextUniqueValues = GRADE_KEYS_ORDER.reduce<Record<GradeKey, string>>((accumulator, grade) => {
+      const labelValue = nextValues[grade] || GRADE_LABELS[grade];
+      accumulator[grade] = GRADE_UNIQUE_CODES[labelValue] || '';
+      return accumulator;
+    }, {} as Record<GradeKey, string>);
     setGradeDefaultValues(nextValues);
+    setGradeUniqueValues(nextUniqueValues);
   }, [addonsDialogSchool]);
 
   const handleAddonsServiceChange = useCallback((service: SchoolServiceType, status: 'yes' | 'no') => {
@@ -734,6 +750,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
 
   const handleGradeDefaultChange = useCallback((grade: GradeKey, value: string) => {
     setGradeDefaultValues((prev) => ({ ...prev, [grade]: value }));
+    const matchingCode = GRADE_UNIQUE_CODES[value] || '';
+    setGradeUniqueValues((prev) => ({ ...prev, [grade]: matchingCode }));
   }, []);
 
   const handleSaveAddonsServices = useCallback(async () => {
@@ -750,6 +768,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       formData.append('service_status', JSON.stringify(addonsDialogServiceStatus));
       const submittedZohoId = addonsDialogZohoId.trim() || addonsDialogSchool?.zoho_customer_id || '';
       formData.append('zoho_customer_id', submittedZohoId);
+      formData.append('grade_default_labels', JSON.stringify(gradeDefaultValues));
+      formData.append('grade_unique_values', JSON.stringify(gradeUniqueValues));
       const response = await axios.put<SchoolProfile>(`${API}/schools/${addonsDialogSchool.school_id}`, formData, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -793,52 +813,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     if (!trimmed || trimmed === previousId) {
       return;
     }
-    setAddonsDialogSaving(true);
-    try {
-      const token = await getIdToken();
-      if (!token) {
-        throw new Error('Unable to fetch Firebase token');
-      }
-      const response = await axios.patch<SchoolProfile>(
-        `${API}/schools/${addonsDialogSchool.school_id}/zoho-customer-id`,
-        { zoho_customer_id: trimmed },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const serverSchool = response.data;
-      const updatedZohoId = serverSchool.zoho_customer_id ?? '';
-      const updatedServiceType = serverSchool.service_type ?? addonsDialogSchool.service_type ?? SERVICE_KEYS.filter(
-        (service) => addonsDialogServiceStatus[service] === 'yes'
-      );
-      const updatedSchool: AdminSchoolProfile = {
-        ...addonsDialogSchool,
-        ...serverSchool,
-        service_status: serverSchool.service_status ?? addonsDialogServiceStatus,
-        service_type: updatedServiceType,
-        zoho_customer_id: updatedZohoId || null,
-      };
-      setAddonsDialogSchool(updatedSchool);
-      setAddonsDialogZohoId(updatedZohoId);
-      setSchools((prev) =>
-        prev.map((school) => (school.school_id === updatedSchool.school_id ? { ...school, ...updatedSchool } : school))
-      );
-      setAdminSchools((prev) =>
-        prev.map((school) => (school.school_id === updatedSchool.school_id ? { ...school, ...updatedSchool } : school))
-      );
-      toast.success('Zoho customer ID saved');
-    } catch (error) {
-      console.error('Failed to update Zoho customer ID', error);
-      toast.error('Unable to save Zoho customer ID. Please try again.');
-    } finally {
-      setAddonsDialogSaving(false);
-    }
-  }, [
-    addonsDialogSchool,
-    addonsDialogServiceStatus,
-    addonsDialogZohoId,
-    getIdToken,
-    setAdminSchools,
-    setSchools,
-  ]);
+    await handleSaveAddonsServices();
+  }, [addonsDialogSchool, addonsDialogZohoId, handleSaveAddonsServices]);
 
   const handleApproveSelections = useCallback(
     async (school: SchoolProfile) => {
@@ -2061,18 +2037,20 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                 <p className="text-[11px] text-slate-400">School named - default</p>
               </div>
               <div className="space-y-3 border border-slate-100 bg-slate-50/70 p-4">
-                {GRADE_KEYS_ORDER.filter((grade) => {
-                  const entry = addonsDialogSchool?.grades?.[grade];
-                  return Boolean(entry?.enabled && entry.label?.trim());
-                }).map((grade) => {
+                <div className="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  <span className="flex-1 text-left">School calls</span>
+                  <span className="flex-1 text-center">Default</span>
+                  <span className="flex-1 text-right">Unique values</span>
+                </div>
+                {GRADE_KEYS_ORDER.filter((grade) => addonsDialogSchool?.grades?.[grade]?.enabled).map((grade) => {
                   const entry = addonsDialogSchool?.grades?.[grade];
                   const currentLabel = entry?.label?.trim() || GRADE_LABELS[grade];
                   return (
                     <div key={grade} className="space-y-1">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-xs uppercase tracking-wide text-slate-500">{GRADE_LABELS[grade]}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="flex-1 text-xs text-slate-800">{currentLabel}</span>
                         <select
-                          className="max-w-[140px] rounded-full border bg-white px-3 py-[3px] text-[12px] uppercase tracking-wide"
+                          className="flex-1 rounded-full border bg-white px-3 py-[3px] text-[12px] uppercase tracking-wide"
                           value={gradeDefaultValues[grade] ?? GRADE_LABELS[grade]}
                           onChange={(event) => handleGradeDefaultChange(grade, event.target.value)}
                         >
@@ -2082,10 +2060,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                             </option>
                           ))}
                         </select>
+                        <input
+                          className="w-[70px] rounded-full border px-2 py-[2px] text-[11px]"
+                          value={gradeUniqueValues[grade] ?? ''}
+                          readOnly
+                        />
                       </div>
-                      <p className="text-[11px] text-slate-800">
-                        {GRADE_LABELS[grade]} - (school calls as {currentLabel})
-                      </p>
                     </div>
                   );
                 })}

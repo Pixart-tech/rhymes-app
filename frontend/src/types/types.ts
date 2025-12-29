@@ -16,6 +16,7 @@ export type GradeMap = Record<GradeKey, GradeSetting>;
 export type BranchStatus = 'active' | 'inactive';
 
 export interface SchoolProfile {
+  address: any;
   school_id: string;
   school_name: string;
   logo_url?: string | null;
