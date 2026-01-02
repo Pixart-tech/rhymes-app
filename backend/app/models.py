@@ -13,7 +13,6 @@ class School(BaseModel):
     logo_url: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
-    address_line1: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     pin: Optional[str] = None
@@ -32,9 +31,8 @@ class School(BaseModel):
     selections_approved: bool = Field(default=False)
     selection_locked_at: Optional[datetime] = None
     selection_locked_by: Optional[str] = None
-    created_by_user_id: Optional[str] = None
-    created_by_email: Optional[str] = None
     id_card_fields: Optional[List[str]] = None
+    zoho_customer_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     timestamp: datetime = Field(default_factory=datetime.utcnow)

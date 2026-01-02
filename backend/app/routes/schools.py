@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+import imghdr
 import mimetypes
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from .. import school_profiles
@@ -33,6 +34,13 @@ def _clean(value: Optional[str]) -> Optional[str]:
     return value
 
 
+def _parse_boolean_flag(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    normalized = value.strip().lower()
+    return normalized in {"1", "true", "yes", "on"}
+
+
 def _guess_image_extension(mime_type: Optional[str]) -> str:
     """Return a friendly image extension with a default .jpg fallback."""
     if not mime_type:
@@ -56,6 +64,21 @@ async def _read_upload_file(upload_file: Optional[UploadFile]) -> Tuple[Optional
     return contents, upload_file.content_type or "application/octet-stream"
 
 
+def _determine_image_media_type(blob: bytes) -> str:
+    kind = imghdr.what(None, blob)
+    if not kind:
+        return "image/jpeg"
+    normalized = kind.lower()
+    if normalized == "jpg":
+        normalized = "jpeg"
+    mapped = mimetypes.types_map.get(f".{normalized}")
+    if mapped:
+        return mapped
+    if normalized == "jpeg":
+        return "image/jpeg"
+    return f"image/{normalized}"
+
+
 @router.post("/schools", response_model=school_profiles.School)
 async def create_school_profile(
     payload: school_profiles.SchoolCreatePayload = Depends(school_profiles.SchoolCreatePayload.as_form),
@@ -68,7 +91,7 @@ async def create_school_profile(
 ):
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
-    logo_blob, logo_mime_type = await _read_upload_file(logo_file)
+    logo_blob, _ = await _read_upload_file(logo_file)
     school_image_blobs = []
     total_image_bytes = 0
     for upload in (school_image_1, school_image_2, school_image_3, school_image_4):
@@ -78,8 +101,20 @@ async def create_school_profile(
         school_image_blobs.append((blob, mime))
     if total_image_bytes > 2 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Total school images must be 2MB or less")
-    return school_profiles.create_school_profile(db, payload, user_record, logo_blob, logo_mime_type, school_image_blobs)
+    return school_profiles.create_school_profile(db, payload, user_record, logo_blob, school_image_blobs)
 
+
+@router.get("/schools/email-availability")
+async def check_school_email_availability(
+    email: str,
+    authorization: Optional[str] = Header(None),
+):
+    verify_and_decode_token(authorization)
+    normalized_email = school_profiles._normalize_email(email)
+    if not normalized_email:
+        raise HTTPException(status_code=400, detail="Please provide a valid email address.")
+    school_profiles._ensure_unique_email(db, normalized_email, "school email")
+    return {"available": True}
 
 @router.post("/branches", response_model=school_profiles.School)
 def create_branch_profile(
@@ -101,11 +136,14 @@ async def update_school_profile(
     school_image_3: Optional[UploadFile] = File(None),
     school_image_4: Optional[UploadFile] = File(None),
     authorization: Optional[str] = Header(None),
+    update_zoho_details: Optional[str] = Form(default=None),
 ):
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
     uid = user_record["uid"]
     role = user_record.get("role", DEFAULT_USER_ROLE)
+    allow_service_updates = role == "super-admin"
+    should_update_zoho_details = _parse_boolean_flag(update_zoho_details)
 
     doc_ref = db.collection("schools").document(school_id)
     snapshot = doc_ref.get()
@@ -113,14 +151,20 @@ async def update_school_profile(
         raise HTTPException(status_code=404, detail="School not found")
 
     existing = snapshot.to_dict() or {}
-    if existing.get("created_by_user_id") != uid and role != "super-admin":
+    user_school_ids = set(user_record.get("school_ids", []))
+    if role != "super-admin" and school_id not in user_school_ids:
         raise HTTPException(status_code=403, detail="You do not have permission to edit this school")
+    main_school_id = existing.get("branch_parent_id") or existing.get("school_id") or school_id
 
     raw_updates = payload.dict(exclude_unset=True)
     email_provided = "email" in raw_updates
     principal_email_provided = "principal_email" in raw_updates
     raw_email_value = raw_updates.pop("email", None) if email_provided else None
     raw_principal_value = raw_updates.pop("principal_email", None) if principal_email_provided else None
+    raw_zoho_customer_id = raw_updates.pop("zoho_customer_id", None)
+    grade_default_labels_raw = raw_updates.pop("grade_default_labels", None)
+    grade_unique_values_raw = raw_updates.pop("grade_unique_values", None)
+    cleaned_zoho_customer_id = _clean(raw_zoho_customer_id)
     normalized_email = None
     normalized_principal_email = None
     if email_provided:
@@ -131,7 +175,7 @@ async def update_school_profile(
         normalized_principal_email = school_profiles._ensure_unique_email(
             db, raw_principal_value, "principal email", exclude_school_id=school_id
         )
-    logo_blob, logo_mime_type = await _read_upload_file(logo_file)
+    logo_blob, _ = await _read_upload_file(logo_file)
     school_image_blobs = []
     total_image_bytes = 0
     for upload in (school_image_1, school_image_2, school_image_3, school_image_4):
@@ -142,17 +186,18 @@ async def update_school_profile(
     if total_image_bytes > 2 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Total school images must be 2MB or less")
 
-    service_status_raw = raw_updates.pop("service_status", None)
+    raw_service_status = raw_updates.pop("service_status", None)
+    raw_service_type = raw_updates.pop("service_type", None)
     grades_raw = raw_updates.pop("grades", None)
-    address_fields = ("address_line1", "city", "state", "pin")
+    if not allow_service_updates:
+        raw_service_status = None
+        raw_service_type = None
+    address_fields = ("address", "city", "state", "pin")
     address_overrides: Dict[str, Any] = {field: raw_updates.pop(field) for field in address_fields if field in raw_updates}
 
     updates: Dict[str, Any] = {}
     for key, value in raw_updates.items():
-        if key == "service_type":
-            updates[key] = school_profiles.normalize_service_types(value)
-        else:
-            updates[key] = _clean(value)
+        updates[key] = _clean(value)
 
     if address_overrides:
         cleaned_address = {field: _clean(address_overrides[field]) for field in address_overrides}
@@ -162,22 +207,32 @@ async def update_school_profile(
             for field in address_fields
         }
 
-    if service_status_raw is not None:
-        normalized_status = school_profiles.normalize_service_status(service_status_raw)
-        updates["service_status"] = normalized_status
-        updates["service_type"] = school_profiles.services_from_status(normalized_status)
-    elif "service_type" in updates:
-        updates["service_status"] = {
-            service: ("yes" if service in updates["service_type"] else "no")
-            for service in school_profiles.SERVICE_TYPE_VALUES
-        }
+    if raw_zoho_customer_id is not None:
+        school_profiles.set_zoho_customer_id(db, main_school_id, cleaned_zoho_customer_id)
+        updates["zoho_customer_id"] = cleaned_zoho_customer_id
+
+    if allow_service_updates:
+        if raw_service_status is not None:
+            normalized_status = school_profiles.normalize_service_status(raw_service_status)
+            updates["service_status"] = normalized_status
+            updates["service_type"] = school_profiles.services_from_status(normalized_status)
+        elif raw_service_type is not None:
+            normalized_type = school_profiles.normalize_service_types(raw_service_type)
+            status_map = {
+                service: ("yes" if service in normalized_type else "no")
+                for service in school_profiles.SERVICE_TYPE_VALUES
+            }
+            updates["service_type"] = normalized_type
+            updates["service_status"] = status_map
 
     if grades_raw is not None:
         updates["grades"] = school_profiles.normalize_grades(grades_raw)
 
+    grade_default_labels = _parse_json_field(grade_default_labels_raw)
+    grade_unique_values = _parse_json_field(grade_unique_values_raw)
+
     if logo_blob is not None:
         updates["logo_blob"] = logo_blob
-        updates["logo_mime_type"] = logo_mime_type
     if school_image_blobs:
         for idx, (blob, mime) in enumerate(school_image_blobs, start=1):
             if blob:
@@ -189,9 +244,21 @@ async def update_school_profile(
     if principal_email_provided:
         updates["principal_email"] = normalized_principal_email
 
+    contact_fields_updated = should_update_zoho_details and any(
+        field in updates for field in school_profiles.ZOHO_DETAILS_CONTACT_FIELDS
+    )
+
     if not updates:
         existing.setdefault("id", snapshot.id)
         existing.setdefault("school_id", snapshot.id)
+        existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
+        if should_update_zoho_details and isinstance(grade_default_labels, dict):
+            school_profiles.set_zoho_grade_mapping(
+                db,
+                main_school_id,
+                grade_default_labels,
+                grade_unique_values if isinstance(grade_unique_values, dict) else None,
+            )
         return school_profiles.build_school_from_record(existing)
 
     now = datetime.utcnow()
@@ -201,6 +268,16 @@ async def update_school_profile(
     existing.update(updates)
     existing.setdefault("id", snapshot.id)
     existing.setdefault("school_id", snapshot.id)
+    existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
+    if contact_fields_updated:
+        school_profiles.update_zoho_details_from_school(db, main_school_id, existing)
+    if should_update_zoho_details and isinstance(grade_default_labels, dict):
+        school_profiles.set_zoho_grade_mapping(
+            db,
+            main_school_id,
+            grade_default_labels,
+            grade_unique_values if isinstance(grade_unique_values, dict) else None,
+        )
 
     return school_profiles.build_school_from_record(existing)
 
@@ -217,18 +294,16 @@ def update_branch_status(
     if not uid:
         raise HTTPException(status_code=400, detail="User record is missing a user id")
 
-    doc_ref = db.collection("schools").document(school_id)
-    snapshot = doc_ref.get()
-    if not snapshot.exists:
-        raise HTTPException(status_code=404, detail="School not found")
+    parent_ref, record, is_branch = school_profiles.locate_school_record(db, school_id)
+    if not is_branch:
+        raise HTTPException(status_code=400, detail="Only branch profiles can have their status updated")
 
-    record = snapshot.to_dict() or {}
     parent_id = record.get("branch_parent_id")
     if not parent_id:
         raise HTTPException(status_code=400, detail="Only branch profiles can have their status updated")
 
     role = user_record.get("role", DEFAULT_USER_ROLE)
-    if role != "super-admin" and record.get("created_by_user_id") != uid:
+    if role != "super-admin":
         raise HTTPException(status_code=403, detail="You do not have permission to update this branch")
 
     branch_status: school_profiles.BranchStatus = payload.status
@@ -241,8 +316,16 @@ def update_branch_status(
         "updated_at": now,
         "timestamp": now,
     }
-    doc_ref.update(updates)
     record.update(updates)
+    new_branch_summary = school_profiles.build_branch_summary_entry(record)
+    parent_doc_ref = parent_ref
+    parent_doc_ref.update(
+        {
+            f"branches.{school_id}": new_branch_summary,
+            "updated_at": now,
+            "timestamp": now,
+        }
+    )
 
     return school_profiles.build_school_from_record(record)
 
@@ -302,7 +385,7 @@ def get_school_logo(school_id: str):
     if not isinstance(logo_blob, (bytes, bytearray)):
         raise HTTPException(status_code=404, detail="Logo not found")
 
-    media_type = record.get("logo_mime_type") or "image/jpeg"
+    media_type = _determine_image_media_type(logo_blob)
     headers = {"Cache-Control": "no-store"}
     return Response(content=bytes(logo_blob), media_type=media_type, headers=headers)
 
@@ -364,7 +447,24 @@ def get_all_schools_with_selections(
     if not school_docs:
         return PaginatedSchoolResponse(schools=[], total_count=total_count)
 
-    school_ids = [doc.get("school_id") for doc in school_docs if doc.get("school_id")]
+    expanded_docs: List[Dict[str, Any]] = []
+    for doc in school_docs:
+        if not doc.get("id") and doc.get("school_id"):
+            doc["id"] = doc["school_id"]
+        expanded_docs.append(doc)
+
+        branches = doc.get("branches") or {}
+        parent_id = doc.get("school_id") or doc.get("id")
+        for branch_id, branch_entry in branches.items():
+            if not isinstance(branch_entry, dict):
+                continue
+            branch_record = dict(branch_entry)
+            branch_record.setdefault("id", branch_id)
+            branch_record.setdefault("school_id", branch_id)
+            branch_record.setdefault("branch_parent_id", parent_id)
+            expanded_docs.append(branch_record)
+
+    school_ids = [doc.get("school_id") for doc in expanded_docs if doc.get("school_id")]
 
     selection_docs = []
     if school_ids:
@@ -405,13 +505,13 @@ def get_all_schools_with_selections(
 
     schools_with_details: List[SchoolWithSelections] = []
 
-    for doc in school_docs:
+    for doc in expanded_docs:
         school_id = doc.get("school_id")
         if not school_id:
             continue
+        zoho_main_id = doc.get("branch_parent_id") or school_id
+        doc["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, zoho_main_id)
 
-        if not doc.get("id"):
-            doc["id"] = school_id
 
         base_school = school_profiles.build_school_from_record(doc)
 

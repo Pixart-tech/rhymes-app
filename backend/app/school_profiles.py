@@ -22,8 +22,10 @@ SERVICE_TYPE_VALUES: Tuple[SchoolServiceType, ...] = (
 SERVICE_STATUS_VALUES = ("yes", "no")
 ServiceStatus = Literal["yes", "no"]
 ServiceStatusMap = Dict[SchoolServiceType, ServiceStatus]
-GradeKey = Literal["toddler", "playgroup", "nursery", "lkg", "ukg"]
-GRADE_KEYS: Tuple[GradeKey, ...] = ("toddler", "playgroup", "nursery", "lkg", "ukg")
+GradeKey = Literal["playgroup", "nursery", "lkg", "ukg"]
+GRADE_KEYS: Tuple[GradeKey, ...] = ("playgroup", "nursery", "lkg", "ukg")
+
+FORM_UNSET = object()
 
 SCHOOL_ID_ALPHABET = string.ascii_uppercase + string.digits
 
@@ -152,13 +154,93 @@ def compose_address(
     return ", ".join(segment for segment in segments if segment)
 
 
+ZOHO_DETAILS_COLLECTION = "zoho_details"
+ZOHO_DETAILS_CONTACT_FIELDS: Tuple[str, ...] = (
+    "school_name",
+    "email",
+    "phone",
+    "website",
+    "principal_name",
+    "principal_email",
+    "principal_phone",
+)
+
+
+def _zoho_details_doc_ref(db_client: firestore.Client, school_id: str):
+    return db_client.collection(ZOHO_DETAILS_COLLECTION).document(school_id)
+
+
+def get_zoho_customer_id(db_client: firestore.Client, school_id: str) -> Optional[str]:
+    if not school_id:
+        return None
+    doc_ref = _zoho_details_doc_ref(db_client, school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        return None
+    data = snapshot.to_dict() or {}
+    return data.get("customer_id")
+
+
+def set_zoho_customer_id(db_client: firestore.Client, school_id: str, customer_id: Optional[str]):
+    if not school_id:
+        return
+    doc_ref = _zoho_details_doc_ref(db_client, school_id)
+    doc_ref.set({"customer_id": customer_id or None}, merge=True)
+    db_client.collection("schools").document(school_id).set(
+        {"zoho_customer_id": customer_id or None}, merge=True
+    )
+
+
+def add_branch_to_zoho_details(db_client: firestore.Client, school_id: str, branch_id: str):
+    if not school_id or not branch_id:
+        return
+    doc_ref = _zoho_details_doc_ref(db_client, school_id)
+    doc_ref.set({"branches": firestore.ArrayUnion([branch_id])}, merge=True)
+
+
+def _build_zoho_details_contact_payload(record: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    payload: Dict[str, str] = {}
+    school_name = _clean_optional_string(record.get("school_name"))
+    if school_name:
+        payload["school_name"] = school_name
+    email = _normalize_email(record.get("email"))
+    if email:
+        payload["email"] = email
+    return payload
+
+
+def update_zoho_details_from_school(db_client: firestore.Client, school_id: str, record: Dict[str, Any]):
+    if not school_id:
+        return
+    payload = _build_zoho_details_contact_payload(record)
+    if not payload:
+        return
+    doc_ref = _zoho_details_doc_ref(db_client, school_id)
+    doc_ref.set(payload, merge=True)
+
+
+def set_zoho_grade_mapping(
+    db_client: firestore.Client,
+    school_id: str,
+    grade_labels: Optional[Dict[str, str]],
+    grade_unique_values: Optional[Dict[str, str]],
+):
+    if not school_id or not grade_labels:
+        return
+    payload: Dict[str, Any] = {"grade_labels": grade_labels}
+    if grade_unique_values:
+        payload["grade_unique_values"] = grade_unique_values
+    doc_ref = _zoho_details_doc_ref(db_client, school_id)
+    doc_ref.set(payload, merge=True)
+
+
 class SchoolCreatePayload(BaseModel):
     school_name: str = Field(..., min_length=2)
     email: EmailStr
     phone: str = Field(..., min_length=5)
 
     tagline: Optional[str] = None
-    address_line1: Optional[str] = None
+    address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     pin: Optional[str] = None
@@ -226,7 +308,6 @@ class SchoolCreatePayload(BaseModel):
         email: EmailStr = Form(...),
         phone: str = Form(...),
         tagline: Optional[str] = Form(default=None),
-        address_line1: Optional[str] = Form(default=None),
         city: Optional[str] = Form(default=None),
         state: Optional[str] = Form(default=None),
         pin: Optional[str] = Form(default=None),
@@ -244,7 +325,6 @@ class SchoolCreatePayload(BaseModel):
             email=email,
             phone=phone,
             tagline=tagline,
-            address_line1=address_line1,
             city=city,
             state=state,
             pin=pin,
@@ -266,10 +346,31 @@ class BranchCreatePayload(BaseModel):
     coordinator_email: EmailStr
     coordinator_phone: str = Field(..., min_length=5)
 
-    address_line1: Optional[str] = None
+    address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     pin: Optional[str] = None
+
+
+def build_branch_summary_entry(branch_payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": branch_payload.get("school_id"),
+        "school_id": branch_payload.get("school_id"),
+        "school_name": branch_payload.get("school_name"),
+        "branch_name": branch_payload.get("school_name"),
+        "coordinator_name": branch_payload.get("principal_name"),
+        "coordinator_email": branch_payload.get("principal_email"),
+        "coordinator_phone": branch_payload.get("principal_phone"),
+        "principal_name": branch_payload.get("principal_name"),
+        "principal_email": branch_payload.get("principal_email"),
+        "principal_phone": branch_payload.get("principal_phone"),
+        "address": branch_payload.get("address"),
+        "city": branch_payload.get("city"),
+        "state": branch_payload.get("state"),
+        "pin": branch_payload.get("pin"),
+        "branch_parent_id": branch_payload.get("branch_parent_id"),
+        "status": branch_payload.get("status", BRANCH_STATUS_ACTIVE),
+    }
 
 
 class SchoolUpdatePayload(BaseModel):
@@ -278,7 +379,6 @@ class SchoolUpdatePayload(BaseModel):
     phone: Optional[str] = Field(default=None, min_length=5)
 
     tagline: Optional[str] = None
-    address_line1: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     pin: Optional[str] = None
@@ -290,6 +390,7 @@ class SchoolUpdatePayload(BaseModel):
     service_status: Optional[Dict[SchoolServiceType, ServiceStatus]] = None
     grades: Optional[Dict[GradeKey, Dict[str, Any]]] = None
     id_card_fields: Optional[List[str]] = None
+    zoho_customer_id: Optional[str] = None
 
     @field_validator("service_type", mode="before")
     @classmethod
@@ -344,43 +445,47 @@ class SchoolUpdatePayload(BaseModel):
     @classmethod
     def as_form(
         cls,
-        school_name: Optional[str] = Form(default=None),
-        email: Optional[EmailStr] = Form(default=None),
-        phone: Optional[str] = Form(default=None),
-        address: Optional[str] = Form(default=None),
-        tagline: Optional[str] = Form(default=None),
-        address_line1: Optional[str] = Form(default=None),
-        city: Optional[str] = Form(default=None),
-        state: Optional[str] = Form(default=None),
-        pin: Optional[str] = Form(default=None),
-        website: Optional[str] = Form(default=None),
-        principal_name: Optional[str] = Form(default=None),
-        principal_email: Optional[EmailStr] = Form(default=None),
-        principal_phone: Optional[str] = Form(default=None),
-        service_type: Optional[Any] = Form(default=None),
-        service_status: Optional[Any] = Form(default=None),
-        grades: Optional[Any] = Form(default=None),
-        id_card_fields: Optional[Any] = Form(default=None),
+        school_name: Optional[str] = Form(default=FORM_UNSET),
+        email: Optional[EmailStr] = Form(default=FORM_UNSET),
+        phone: Optional[str] = Form(default=FORM_UNSET),
+        address: Optional[str] = Form(default=FORM_UNSET),
+        tagline: Optional[str] = Form(default=FORM_UNSET),
+        city: Optional[str] = Form(default=FORM_UNSET),
+        state: Optional[str] = Form(default=FORM_UNSET),
+        pin: Optional[str] = Form(default=FORM_UNSET),
+        website: Optional[str] = Form(default=FORM_UNSET),
+        principal_name: Optional[str] = Form(default=FORM_UNSET),
+        principal_email: Optional[EmailStr] = Form(default=FORM_UNSET),
+        principal_phone: Optional[str] = Form(default=FORM_UNSET),
+        zoho_customer_id: Optional[str] = Form(default=FORM_UNSET),
+        service_type: Optional[Any] = Form(default=FORM_UNSET),
+        service_status: Optional[Any] = Form(default=FORM_UNSET),
+        grades: Optional[Any] = Form(default=FORM_UNSET),
+        id_card_fields: Optional[Any] = Form(default=FORM_UNSET),
     ) -> "SchoolUpdatePayload":
-        return cls(
-            school_name=school_name,
-            email=email,
-            phone=phone,
-            address=address,
-            tagline=tagline,
-            address_line1=address_line1,
-            city=city,
-            state=state,
-            pin=pin,
-            website=website,
-            principal_name=principal_name,
-            principal_email=principal_email,
-            principal_phone=principal_phone,
-            service_type=service_type,
-            service_status=service_status,
-            grades=grades,
-            id_card_fields=id_card_fields,
-        )
+        field_values: Dict[str, Any] = {
+            "school_name": school_name,
+            "email": email,
+            "phone": phone,
+            "address": address,
+            "tagline": tagline,
+            "city": city,
+            "state": state,
+            "pin": pin,
+            "website": website,
+            "principal_name": principal_name,
+            "principal_email": principal_email,
+            "principal_phone": principal_phone,
+            "zoho_customer_id": zoho_customer_id,
+            "service_type": service_type,
+            "service_status": service_status,
+            "grades": grades,
+            "id_card_fields": id_card_fields,
+        }
+        provided_values = {
+            key: value for key, value in field_values.items() if value is not FORM_UNSET
+        }
+        return cls(**provided_values)
 
 
 def _clean_optional_string(value: Optional[str]) -> Optional[str]:
@@ -505,7 +610,6 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         email=record.get("email"),
         phone=record.get("phone"),
         address=record.get("address"),
-        address_line1=record.get("address_line1"),
         city=record.get("city"),
         state=record.get("state"),
         pin=record.get("pin"),
@@ -523,13 +627,49 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         selections_approved=bool(record.get("selections_approved")),
         selection_locked_at=record.get("selection_locked_at"),
         selection_locked_by=record.get("selection_locked_by"),
-        created_by_user_id=record.get("created_by_user_id"),
-        created_by_email=record.get("created_by_email"),
         id_card_fields=record.get("id_card_fields"),
+        zoho_customer_id=record.get("zoho_customer_id"),
         created_at=record.get("created_at") or record.get("timestamp") or now,
         updated_at=record.get("updated_at") or record.get("timestamp") or now,
         timestamp=record.get("timestamp") or record.get("updated_at") or now,
     )
+
+
+def locate_school_record(
+    db_client: firestore.Client,
+    school_id: str,
+) -> Tuple[firestore.DocumentReference, Dict[str, Any], bool]:
+    doc_ref = db_client.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if snapshot.exists:
+        record = snapshot.to_dict() or {}
+        record.setdefault("id", snapshot.id)
+        record.setdefault("school_id", record.get("school_id") or snapshot.id)
+        return doc_ref, record, False
+
+    branch_snapshot = (
+        db_client.collection("schools")
+        .where("branch_ids", "array_contains", school_id)
+        .limit(1)
+        .get()
+    )
+    if not branch_snapshot:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    parent_snapshot = branch_snapshot[0]
+    parent_record = parent_snapshot.to_dict() or {}
+    branches_map = parent_record.get("branches") or {}
+    branch_record = branches_map.get(school_id)
+    if not branch_record:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    branch_data = dict(branch_record)
+    branch_data.setdefault("id", school_id)
+    branch_data.setdefault("school_id", school_id)
+    branch_data.setdefault(
+        "branch_parent_id", parent_record.get("school_id") or parent_snapshot.id
+    )
+    return parent_snapshot.reference, branch_data, True
 
 
 def generate_school_id(db: firestore.Client, length: int = 5, attempts: int = 32) -> str:
@@ -546,7 +686,6 @@ def create_school_profile(
     payload: SchoolCreatePayload,
     user_record: Dict[str, Any],
     logo_blob: Optional[bytes] = None,
-    logo_mime_type: Optional[str] = None,
     school_image_blobs: Optional[List[Tuple[Optional[bytes], Optional[str]]]] = None,
 ) -> School:
     user_id = user_record.get("uid")
@@ -569,7 +708,6 @@ def create_school_profile(
     now = datetime.utcnow()
 
     owner_email_input = _clean_optional_string(str(payload.email) if payload.email else None)
-    owner_email_value = normalized_school_email or user_record.get("email")
     is_creator_super_admin = user_record.get("role") == "super-admin"
     assignee_id: Optional[str] = user_id
     assignee_record: Optional[Dict[str, Any]] = user_record
@@ -577,23 +715,21 @@ def create_school_profile(
     if is_creator_super_admin:
         assignee_id, assignee_record = _find_user_by_email(db, owner_email_input)
 
-    address_line1 = _clean_optional_string(payload.address_line1)
+    address_line = _clean_optional_string(payload.address)
     city = _clean_optional_string(payload.city)
     state = _clean_optional_string(payload.state)
     pin = _clean_optional_string(payload.pin)
-    service_status_map = normalize_service_status(payload.service_status)
+    service_status_input = payload.service_status if is_creator_super_admin else None
+    service_status_map = normalize_service_status(service_status_input)
     grade_map = normalize_grades(payload.grades)
 
     school_payload = {
-        "id": school_id,
         "school_id": school_id,
         "school_name": payload.school_name.strip(),
         "logo_blob": logo_blob,
-        "logo_mime_type": logo_mime_type,
         "email": normalized_school_email,
         "phone": _clean_optional_string(payload.phone),
-        "address": compose_address(address_line1, city, state, pin),
-        "address_line1": address_line1,
+        "address": compose_address(address_line, city, state, pin),
         "city": city,
         "state": state,
         "pin": pin,
@@ -605,9 +741,9 @@ def create_school_profile(
         "service_type": services_from_status(service_status_map),
         "service_status": service_status_map,
         "grades": grade_map,
+        "branches": {},
+        "branch_ids": [],
         "id_card_fields": payload.id_card_fields if payload.id_card_fields is not None else [],
-        "created_by_user_id": assignee_id,
-        "created_by_email": owner_email_value or user_record.get("email"),
         "created_at": now,
         "updated_at": now,
         "timestamp": now,
@@ -619,6 +755,7 @@ def create_school_profile(
                 school_payload[f"school_image_{idx}"] = blob
                 school_payload[f"school_image_{idx}_mime"] = mime
 
+    school_payload["zoho_customer_id"] = None
     db.collection("schools").document(school_id).set(school_payload)
     if assignee_id:
         db.collection("users").document(assignee_id).update(
@@ -662,7 +799,7 @@ def create_branch_profile(
     branch_id = generate_school_id(db)
     now = datetime.utcnow()
 
-    address_line1 = _clean_optional_string(payload.address_line1)
+    address_line = _clean_optional_string(payload.address)
     city = _clean_optional_string(payload.city)
     state = _clean_optional_string(payload.state)
     pin = _clean_optional_string(payload.pin)
@@ -679,7 +816,6 @@ def create_branch_profile(
     branch_tagline = _clean_optional_string(parent_record.get("tagline"))
     branch_website = _clean_optional_string(parent_record.get("website"))
     parent_logo_blob = parent_record.get("logo_blob")
-    parent_logo_mime_type = parent_record.get("logo_mime_type")
     coordinator_email = normalized_branch_email
     coordinator_phone = _clean_optional_string(payload.coordinator_phone)
 
@@ -687,41 +823,28 @@ def create_branch_profile(
         "id": branch_id,
         "school_id": branch_id,
         "school_name": branch_display_name,
-        "address": compose_address(address_line1, city, state, pin),
-        "address_line1": address_line1,
+        "address": compose_address(address_line, city, state, pin),
         "city": city,
         "state": state,
         "pin": pin,
-        "email": coordinator_email,
-        "phone": coordinator_phone,
-        "tagline": branch_tagline,
-        "website": branch_website,
         "principal_name": _clean_optional_string(payload.coordinator_name),
         "principal_email": coordinator_email,
         "principal_phone": coordinator_phone,
-        "service_type": branch_service_type,
-        "service_status": branch_service_status,
-        "grades": branch_grades,
-        "logo_blob": parent_logo_blob,
-        "logo_mime_type": parent_logo_mime_type,
         "status": BRANCH_STATUS_ACTIVE,
         "branch_parent_id": parent_school_id,
-        "created_by_user_id": user_id,
-        "created_by_email": user_record.get("email"),
-        "created_at": now,
-        "updated_at": now,
-        "timestamp": now,
     }
 
-    db.collection("schools").document(branch_id).set(branch_payload)
-    db.collection("users").document(user_id).update(
-        {"school_ids": firestore.ArrayUnion([branch_id]), "updated_at": now}
+    parent_doc_ref = db.collection("schools").document(parent_school_id)
+    branch_summary = build_branch_summary_entry(branch_payload)
+    parent_doc_ref.update(
+        {
+            f"branches.{branch_id}": branch_summary,
+            "branch_ids": firestore.ArrayUnion([branch_id]),
+            "updated_at": now,
+            "timestamp": now,
+        }
     )
-
-    existing_ids = set(user_record.get("school_ids", []))
-    existing_ids.add(branch_id)
-    user_record["school_ids"] = list(existing_ids)
-
+    add_branch_to_zoho_details(db, parent_school_id, branch_id)
     return build_school_from_record(branch_payload)
 
 
@@ -734,6 +857,8 @@ __all__ = [
     "build_school_from_record",
     "create_school_profile",
     "create_branch_profile",
+    "build_branch_summary_entry",
+    "locate_school_record",
     "extract_service_type",
     "normalize_service_types",
     "normalize_service_status",
@@ -743,4 +868,9 @@ __all__ = [
     "BranchStatus",
     "BRANCH_STATUS_ACTIVE",
     "BRANCH_STATUS_INACTIVE",
+    "get_zoho_customer_id",
+    "set_zoho_customer_id",
+    "add_branch_to_zoho_details",
+    "set_zoho_grade_mapping",
+    "update_zoho_details_from_school",
 ]

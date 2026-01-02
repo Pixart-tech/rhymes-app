@@ -699,10 +699,10 @@ const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout
                   )}
                 </div>
                 <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="cover-details-address-line-1">Address line 1</Label>
+                  <Label htmlFor="cover-details-address-line-1">Address</Label>
                   <Input
                     id="cover-details-address-line-1"
-                    placeholder="Address line 1"
+                    placeholder="Address"
                     value={formState.addressLine1}
                     onChange={handleChange('addressLine1')}
                   />
