@@ -1,5 +1,44 @@
-import { getAssessmentForClass } from '../constants/constants';
-import { AssessmentVariant, CoverSelectionMeta, FinalOutputItem, SelectionRecord } from '../types/types';
+import { getAssessmentForClass, SCHOOL_DATA } from '../constants/constants';
+import { AssessmentVariant, BookOption, CoverSelectionMeta, FinalOutputItem, SelectionRecord } from '../types/types';
+
+// Ensure we always emit the latest cover/spine data from constants, even if a saved
+// selection was created before codes changed.
+const canonicalOptionIndex: Record<string, BookOption> = (() => {
+  const index: Record<string, BookOption> = {};
+  SCHOOL_DATA.forEach((cls) => {
+    cls.subjects.forEach((subject) => {
+      subject.options.forEach((opt) => {
+        if (opt.coreId) index[`core:${opt.coreId}`] = opt;
+        if (opt.workId) index[`work:${opt.workId}`] = opt;
+        if (opt.addOnId) index[`addon:${opt.addOnId}`] = opt;
+      });
+    });
+  });
+  return index;
+})();
+
+const mergeWithCanonicalOption = (option: BookOption | null): BookOption | null => {
+  if (!option) return null;
+  const canonical =
+    (option.coreId && canonicalOptionIndex[`core:${option.coreId}`]) ||
+    (option.workId && canonicalOptionIndex[`work:${option.workId}`]) ||
+    (option.addOnId && canonicalOptionIndex[`addon:${option.addOnId}`]);
+
+  if (!canonical) return option;
+
+  return {
+    ...option,
+    coreCover: canonical.coreCover ?? option.coreCover,
+    coreSpine: canonical.coreSpine ?? option.coreSpine,
+    defaultCoreCoverTitle: canonical.defaultCoreCoverTitle ?? option.defaultCoreCoverTitle,
+    workCover: canonical.workCover ?? option.workCover,
+    workSpine: canonical.workSpine ?? option.workSpine,
+    defaultWorkCoverTitle: canonical.defaultWorkCoverTitle ?? option.defaultWorkCoverTitle,
+    addOnCover: canonical.addOnCover ?? option.addOnCover,
+    addOnSpine: canonical.addOnSpine ?? option.addOnSpine,
+    defaultAddonCoverTitle: canonical.defaultAddonCoverTitle ?? option.defaultAddonCoverTitle,
+  };
+};
 
 /**
  * Build the flattened book selection payload used for JSON downloads and persistence.
@@ -25,7 +64,10 @@ export const buildFinalBookSelections = (
   const finalData: FinalOutputItem[] = [];
 
   Object.keys(selectionsByClass).forEach((className) => {
-    const classSelections = selectionsByClass[className];
+    const classSelections = selectionsByClass[className].map((selection) => ({
+      ...selection,
+      selectedOption: mergeWithCanonicalOption(selection.selectedOption),
+    }));
     const gradeKey = className.toLowerCase();
     const normalizedKey = gradeKey === 'playgroup' ? 'pg' : gradeKey;
     const gradeLabel = gradeNames[normalizedKey] || className;

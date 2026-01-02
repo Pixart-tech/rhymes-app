@@ -171,6 +171,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const API = API_BASE_URL || '/api';
   const isAdmin = (user?.role === 'super-admin') || isPersistedAdmin;
   const [savedClassSignatures, setSavedClassSignatures] = useState<Record<string, string>>({});
+  const [savedExcludedAssessments, setSavedExcludedAssessments] = useState<string[]>([]);
   const configuredClasses = useMemo(() => new Set(selections.map((s) => s.className)), [selections]);
   const configuredOrCompletedClasses = useMemo(() => {
     const combined = new Set<string>();
@@ -732,9 +733,45 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       (className) => !(className in currentSignatures)
     );
 
+    const normalizeClassKey = (value: string) => (value || '').trim().toLowerCase();
+    const savedSignatureMap: Record<string, string> = {};
+    Object.entries(savedClassSignatures).forEach(([key, signature]) => {
+      savedSignatureMap[normalizeClassKey(key)] = signature;
+    });
+
+    const dirtyClassKeys = new Set<string>();
+    Object.entries(currentSignatures).forEach(([className, signature]) => {
+      const normalized = normalizeClassKey(className);
+      if (savedSignatureMap[normalized] !== signature) {
+        dirtyClassKeys.add(normalized);
+      }
+    });
+
+    const savedExcludedSet = new Set(savedExcludedAssessments.map(normalizeClassKey));
+    const currentExcludedSet = new Set(excludedAssessments.map(normalizeClassKey));
+    savedExcludedSet.forEach((cls) => {
+      if (!currentExcludedSet.has(cls)) {
+        dirtyClassKeys.add(cls);
+      }
+    });
+    currentExcludedSet.forEach((cls) => {
+      if (!savedExcludedSet.has(cls)) {
+        dirtyClassKeys.add(cls);
+      }
+    });
+
+    const filteredSelections = finalSelections.filter((item) =>
+      dirtyClassKeys.has(normalizeClassKey(item.class_label || item.class || ''))
+    );
+
+    if (filteredSelections.length === 0 && removedClasses.length === 0) {
+      toast.info('No changes to save.');
+      return true;
+    }
+
     const payload = {
       school_id: resolvedSchoolId,
-      selections: finalSelections,
+      selections: filteredSelections,
       excluded_assessments: excludedAssessments,
       grade_names: latestGradeNames,
       source: 'wizard',
@@ -747,6 +784,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       await axios.post(`${API}/book-selections`, payload, { headers });
       toast.success('Book selections saved successfully');
       setSavedClassSignatures(currentSignatures);
+      setSavedExcludedAssessments(excludedAssessments);
       lastSavedSelectionSignature.current = selectionSignature;
       return true;
     } catch (error) {
@@ -905,6 +943,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
       setSelections(nextSelections);
       setExcludedAssessments(Array.from(nextExcluded));
+      setSavedExcludedAssessments(Array.from(nextExcluded));
       setSavedClassSignatures(nextSignatures);
       setCompletedClasses((prev) => {
         const merged = new Set(prev);
@@ -963,6 +1002,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           classData={currentClassData}
           selections={selections}
           onUpdateSelections={handleUpdateSelection}
+          showCodes={isAdmin}
           assessmentDetails={getCurrentAssessmentDetails()}
           customAssessmentTitle={customAssessmentTitles[currentClassData.name]}
           onUpdateAssessmentTitle={(title) => handleUpdateAssessmentTitle(currentClassData.name, title)}
@@ -999,6 +1039,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             excludedAssessments={excludedAssessments}
             assessmentVariants={assessmentVariants}
             readOnly={readOnlySummary}
+            isAdmin={isAdmin}
             onUpdateSelections={handleUpdateSelection}
             onExcludeAssessment={handleExcludeAssessment}
             onRestoreAssessment={handleRestoreAssessment}
@@ -1264,7 +1305,8 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {SCHOOL_DATA.map((cls, index) => {
             const isConfigured = configuredOrCompletedClasses.has(cls.name);
-            const bookCount = isConfigured ? calculateBookCount(cls.name) : 0;
+            const classHasSelections = selections.some((s) => s.className === cls.name);
+            const bookCount = classHasSelections ? calculateBookCount(cls.name) : 0;
             const theme = getTheme(cls.name);
             const gradeLabel = getGradeLabelForClass(cls.name);
             const readOnlyForClass = isClassReadOnly(cls.name);
@@ -1275,7 +1317,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
                     key={cls.name}
                     className={`relative p-4 rounded-xl border-2 ${theme.cardBg} ${theme.cardBorder}`}
                 >
-                    {isConfigured && (
+                    {classHasSelections && (
                         <div className="absolute top-2 right-2 text-green-600 bg-green-100 rounded-full p-1">
                             <Check size={14} strokeWidth={3} />
                         </div>
@@ -1286,7 +1328,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
                             {gradeLabel}
                         </h3>
                         
-                        {isConfigured && (
+                        {classHasSelections && (
                             <div className="inline-flex items-center gap-1 px-2 py-1 bg-white/60 rounded-full border border-green-200 text-green-800 text-xs font-medium mt-2">
                                 <Book size={12} />
                                 <span>{bookCount} Books</span>
@@ -1295,7 +1337,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
                     </div>
                     
                     <div className="mt-4 flex gap-2">
-                         {isConfigured ? (
+                         {classHasSelections ? (
                              <>
                                 <button 
                                     type="button"

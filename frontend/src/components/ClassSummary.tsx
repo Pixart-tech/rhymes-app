@@ -12,6 +12,7 @@ interface ClassSummaryProps {
   excludedAssessments: string[];
   assessmentVariants: Record<string, AssessmentVariant>;
   readOnly?: boolean;
+  isAdmin?: boolean;
   onUpdateSelections: (newSelections: SelectionRecord[]) => void;
   onExcludeAssessment: (className: string) => void;
   onRestoreAssessment: (className: string) => void;
@@ -36,7 +37,7 @@ interface PhysicalBookItem {
 }
 
 const ClassSummary: React.FC<ClassSummaryProps> = ({ 
-    classData, selections, excludedAssessments, assessmentVariants, readOnly = false,
+    classData, selections, excludedAssessments, assessmentVariants, readOnly = false, isAdmin = false,
     onUpdateSelections, onExcludeAssessment, onRestoreAssessment, onAssessmentVariantChange, onAddManualSubject,
     onConfirm, onBack 
 }) => {
@@ -497,7 +498,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
           )}
 
           {/* Add Manual Subject Section */}
-          {!readOnly && (
+          {!readOnly && isAdmin && (
             <div className="mt-6 border-t border-slate-200 pt-6">
                 {!isAddingManual ? (
                     <button

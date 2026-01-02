@@ -16,6 +16,33 @@ EXCEL_PATH = ROOT_DIR / "BOOK CODES 2025-26.xlsx"
 
 SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
+# Fallback subjects if the Excel file or pandas is unavailable.
+FALLBACK_SUBJECT_ROWS: List[dict] = [
+    {"class": "PG", "subject": "English", "type": None},
+    {"class": "PG", "subject": "Maths", "type": None},
+    {"class": "PG", "subject": "EVS", "type": None},
+    {"class": "PG", "subject": "Rhymes and stories", "type": None},
+    {"class": "PG", "subject": "Art & craft", "type": None},
+    {"class": "PG", "subject": "Pattern", "type": None},
+    {"class": "Nursery", "subject": "English", "type": None},
+    {"class": "Nursery", "subject": "Maths", "type": None},
+    {"class": "Nursery", "subject": "EVS", "type": None},
+    {"class": "Nursery", "subject": "Rhymes & stories", "type": None},
+    {"class": "Nursery", "subject": "Art & craft", "type": None},
+    {"class": "LKG", "subject": "English", "type": None},
+    {"class": "LKG", "subject": "Maths", "type": None},
+    {"class": "LKG", "subject": "EVS", "type": None},
+    {"class": "LKG", "subject": "Art & craft", "type": None},
+    {"class": "LKG", "subject": "Rhymes & stories", "type": None},
+    {"class": "LKG", "subject": "Languages", "type": "Language"},
+    {"class": "UKG", "subject": "English", "type": None},
+    {"class": "UKG", "subject": "Maths", "type": None},
+    {"class": "UKG", "subject": "EVS", "type": None},
+    {"class": "UKG", "subject": "Rhymes & stories", "type": None},
+    {"class": "UKG", "subject": "Art & craft", "type": None},
+    {"class": "UKG", "subject": "Languages", "type": "Language"},
+]
+
 
 def _sanitize(value: str, fallback: str) -> str:
     cleaned = SAFE_COMPONENT_RE.sub("_", (value or "").strip())
@@ -30,15 +57,21 @@ def _load_subject_rows(path: Path) -> Tuple[List[dict], Optional[str]]:
     try:
         import pandas as pd
     except ImportError:
-        return [], "pandas is not installed. Run `pip install -r backend/requirements.txt`."
+        return (
+            FALLBACK_SUBJECT_ROWS,
+            "pandas is not installed. Using fallback subjects; install requirements for Excel-driven list.",
+        )
 
     if not path.exists():
-        return [], f"Excel file not found at {path}"
+        return (
+            FALLBACK_SUBJECT_ROWS,
+            f"Excel file not found at {path}. Using fallback subjects.",
+        )
 
     try:
         df = pd.read_excel(path)
     except Exception as exc:  # pragma: no cover - defensive
-        return [], f"Unable to read Excel file: {exc}"
+        return FALLBACK_SUBJECT_ROWS, f"Unable to read Excel file: {exc}"
 
     columns = [str(col) for col in df.columns]
 
@@ -53,7 +86,10 @@ def _load_subject_rows(path: Path) -> Tuple[List[dict], Optional[str]]:
     type_col = find_col("type")
 
     if not class_col or not subject_col:
-        return [], f"Missing class/subject columns in Excel. Found columns: {columns}"
+        return (
+            FALLBACK_SUBJECT_ROWS,
+            f"Missing class/subject columns in Excel. Found columns: {columns}. Using fallback subjects.",
+        )
 
     rows: List[dict] = []
     for _, row in df.iterrows():
@@ -72,7 +108,7 @@ def _load_subject_rows(path: Path) -> Tuple[List[dict], Optional[str]]:
             }
         )
 
-    return rows, None
+    return rows or FALLBACK_SUBJECT_ROWS, None
 
 
 SUBJECT_PDF_DIR.mkdir(parents=True, exist_ok=True)
@@ -208,7 +244,7 @@ async def index():
       <script>
         const rows = {subjects_json};
         const classes = Array.from(new Set(rows.map(r => r.class))).sort((a,b)=>a.localeCompare(b));
-        const subjectsByClass = {};
+        const subjectsByClass = {{}};
         rows.forEach(r => {{
           const key = r.class;
           if (!subjectsByClass[key]) subjectsByClass[key] = new Set();
