@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 import imghdr
 import mimetypes
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from .. import school_profiles
+from pydantic import BaseModel, field_validator
+
+SchoolServiceType = school_profiles.SchoolServiceType
+ServiceStatus = school_profiles.ServiceStatus
+
+logger = logging.getLogger(__name__)
 from ..firebase_service import (
     DEFAULT_USER_ROLE,
     db,
@@ -22,6 +29,110 @@ from ..schemas import (
     RhymeSelectionDetail,
     SchoolWithSelections,
 )
+
+
+class SchoolAddonsPayload(BaseModel):
+    service_status: Optional[Dict[SchoolServiceType, ServiceStatus]] = None
+    service_type: Optional[List[SchoolServiceType]] = None
+    grade_default_labels: Optional[Dict[str, str]] = None
+    grade_unique_values: Optional[Dict[str, str]] = None
+    zoho_customer_id: Optional[str] = None
+    update_zoho_details: Optional[bool] = None
+
+    @field_validator("service_status", mode="before")
+    @classmethod
+    def _coerce_service_status(cls, value: Any) -> Optional[Dict[SchoolServiceType, ServiceStatus]]:
+        if value is None or value == "":
+            return None
+        parsed = school_profiles._parse_json_field(value)
+        if not isinstance(parsed, dict):
+            raise ValueError("Invalid service status payload")
+        normalized: Dict[SchoolServiceType, ServiceStatus] = {}
+        for key, entry in parsed.items():
+            if key in school_profiles.SERVICE_TYPE_VALUES and isinstance(entry, str):
+                status = entry.lower()
+                if status in school_profiles.SERVICE_STATUS_VALUES:
+                    normalized[key] = status  # type: ignore[assignment]
+        return normalized or None
+
+    @field_validator("service_type", mode="before")
+    @classmethod
+    def _coerce_service_type(cls, value: Any) -> Optional[List[SchoolServiceType]]:
+        if value is None or value == "":
+            return None
+        return school_profiles.normalize_service_types(value if isinstance(value, list) else [value])  # type: ignore[arg-type]
+
+    @field_validator("grade_default_labels", mode="before")
+    @classmethod
+    def _coerce_grade_default_labels(cls, value: Any) -> Optional[Dict[str, str]]:
+        parsed = school_profiles._parse_json_field(value) if isinstance(value, str) else value
+        if parsed is None:
+            return None
+        if isinstance(parsed, dict):
+            normalized: Dict[str, str] = {}
+            for key, entry in parsed.items():
+                if isinstance(entry, str):
+                    trimmed = entry.strip()
+                    if trimmed:
+                        normalized[key] = trimmed
+            return normalized or None
+        return None
+
+    @field_validator("grade_unique_values", mode="before")
+    @classmethod
+    def _coerce_grade_unique_values(cls, value: Any) -> Optional[Dict[str, str]]:
+        parsed = school_profiles._parse_json_field(value) if isinstance(value, str) else value
+        if parsed is None:
+            return None
+        if isinstance(parsed, dict):
+            normalized: Dict[str, str] = {}
+            for key, entry in parsed.items():
+                if isinstance(entry, str):
+                    trimmed = entry.strip()
+                    if trimmed:
+                        normalized[key] = trimmed
+            return normalized or None
+        return None
+
+    @field_validator("zoho_customer_id", mode="before")
+    @classmethod
+    def _normalize_zoho_customer_id(cls, value: Any) -> Optional[str]:
+        extracted = school_profiles._extract_string_value(
+            value,
+            ("zoho_customer_id", "customer_id", "id", "value"),
+        )
+        if extracted:
+            return extracted
+        if isinstance(value, str):
+            trimmed = value.strip()
+            return trimmed or None
+        return None
+
+    @classmethod
+    async def as_form(
+        cls,
+        request: Request,
+        service_status: Optional[Any] = Form(default=school_profiles.FORM_UNSET),
+        service_type: Optional[Any] = Form(default=school_profiles.FORM_UNSET),
+        grade_default_labels: Optional[Any] = Form(default=school_profiles.FORM_UNSET),
+        grade_unique_values: Optional[Any] = Form(default=school_profiles.FORM_UNSET),
+        zoho_customer_id: Optional[str] = Form(default=school_profiles.FORM_UNSET),
+        update_zoho_details: Optional[str] = Form(default=school_profiles.FORM_UNSET),
+    ) -> "SchoolAddonsPayload":
+        if school_profiles._is_json_content_type(request):
+            return cls(**(await school_profiles._json_payload(request)))
+        field_values: Dict[str, Any] = {
+            "service_status": service_status,
+            "service_type": service_type,
+            "grade_default_labels": grade_default_labels,
+            "grade_unique_values": grade_unique_values,
+            "zoho_customer_id": zoho_customer_id,
+            "update_zoho_details": update_zoho_details,
+        }
+        provided = {key: value for key, value in field_values.items() if value is not school_profiles.FORM_UNSET}
+        if "update_zoho_details" in provided:
+            provided["update_zoho_details"] = _parse_boolean_flag(str(provided["update_zoho_details"]))
+        return cls(**provided)
 
 
 router = APIRouter()
@@ -39,6 +150,29 @@ def _parse_boolean_flag(value: Optional[str]) -> bool:
         return False
     normalized = value.strip().lower()
     return normalized in {"1", "true", "yes", "on"}
+
+
+def _sync_zoho_metadata(
+    db_client: firestore.Client,
+    school_id: str,
+    should_update: bool,
+    grade_labels: Optional[Dict[str, str]],
+    grade_unique_values: Optional[Dict[str, str]],
+    service_type: Optional[List[str]],
+    customer_id: Optional[str],
+) -> None:
+    if should_update and grade_labels:
+        school_profiles.set_zoho_grade_mapping(
+            db_client,
+            school_id,
+            grade_labels,
+            grade_unique_values,
+        )
+        if service_type:
+            school_profiles.set_zoho_service_type(db_client, school_id, service_type)
+    if customer_id:
+        school_profiles.set_zoho_customer_id(db_client, school_id, customer_id)
+        logger.info("Updated Zoho customer id for %s -> %s", school_id, customer_id)
 
 
 def _guess_image_extension(mime_type: Optional[str]) -> str:
@@ -192,24 +326,27 @@ async def update_school_profile(
     if not allow_service_updates:
         raw_service_status = None
         raw_service_type = None
-    address_fields = ("address", "city", "state", "pin")
+    address_fields = ("address")
     address_overrides: Dict[str, Any] = {field: raw_updates.pop(field) for field in address_fields if field in raw_updates}
 
     updates: Dict[str, Any] = {}
     for key, value in raw_updates.items():
-        updates[key] = _clean(value)
+        cleaned_value = _clean(value)
+        if cleaned_value is None:
+            continue
+        updates[key] = cleaned_value
 
     if address_overrides:
-        cleaned_address = {field: _clean(address_overrides[field]) for field in address_overrides}
+        cleaned_address = {}
+        for field, field_value in address_overrides.items():
+            cleaned_field = _clean(field_value)
+            if cleaned_field is None:
+                continue
+            cleaned_address[field] = cleaned_field
         updates.update(cleaned_address)
-        merged_address = {
-            field: cleaned_address[field] if field in cleaned_address else existing.get(field)
-            for field in address_fields
-        }
 
-    if raw_zoho_customer_id is not None:
+    if raw_zoho_customer_id is not None and cleaned_zoho_customer_id:
         school_profiles.set_zoho_customer_id(db, main_school_id, cleaned_zoho_customer_id)
-        updates["zoho_customer_id"] = cleaned_zoho_customer_id
 
     if allow_service_updates:
         if raw_service_status is not None:
@@ -228,8 +365,8 @@ async def update_school_profile(
     if grades_raw is not None:
         updates["grades"] = school_profiles.normalize_grades(grades_raw)
 
-    grade_default_labels = _parse_json_field(grade_default_labels_raw)
-    grade_unique_values = _parse_json_field(grade_unique_values_raw)
+    grade_default_labels = school_profiles._parse_json_field(grade_default_labels_raw)
+    grade_unique_values = school_profiles._parse_json_field(grade_unique_values_raw)
 
     if logo_blob is not None:
         updates["logo_blob"] = logo_blob
@@ -244,21 +381,19 @@ async def update_school_profile(
     if principal_email_provided:
         updates["principal_email"] = normalized_principal_email
 
-    contact_fields_updated = should_update_zoho_details and any(
-        field in updates for field in school_profiles.ZOHO_DETAILS_CONTACT_FIELDS
-    )
-
     if not updates:
         existing.setdefault("id", snapshot.id)
         existing.setdefault("school_id", snapshot.id)
         existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
-        if should_update_zoho_details and isinstance(grade_default_labels, dict):
-            school_profiles.set_zoho_grade_mapping(
-                db,
-                main_school_id,
-                grade_default_labels,
-                grade_unique_values if isinstance(grade_unique_values, dict) else None,
-            )
+        _sync_zoho_metadata(
+            db,
+            main_school_id,
+            should_update_zoho_details,
+            grade_default_labels if isinstance(grade_default_labels, dict) else None,
+            grade_unique_values if isinstance(grade_unique_values, dict) else None,
+            existing.get("service_type"),
+            cleaned_zoho_customer_id,
+        )
         return school_profiles.build_school_from_record(existing)
 
     now = datetime.utcnow()
@@ -269,17 +404,111 @@ async def update_school_profile(
     existing.setdefault("id", snapshot.id)
     existing.setdefault("school_id", snapshot.id)
     existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
-    if contact_fields_updated:
-        school_profiles.update_zoho_details_from_school(db, main_school_id, existing)
-    if should_update_zoho_details and isinstance(grade_default_labels, dict):
-        school_profiles.set_zoho_grade_mapping(
-            db,
-            main_school_id,
-            grade_default_labels,
-            grade_unique_values if isinstance(grade_unique_values, dict) else None,
-        )
+    _sync_zoho_metadata(
+        db,
+        main_school_id,
+        should_update_zoho_details,
+        grade_default_labels if isinstance(grade_default_labels, dict) else None,
+        grade_unique_values if isinstance(grade_unique_values, dict) else None,
+        existing.get("service_type"),
+        cleaned_zoho_customer_id,
+    )
 
     return school_profiles.build_school_from_record(existing)
+
+
+@router.patch("/schools/{school_id}/addons", response_model=school_profiles.School)
+async def update_school_addons(
+    school_id: str,
+    payload: SchoolAddonsPayload = Depends(SchoolAddonsPayload.as_form),
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = verify_and_decode_token(authorization)
+    user_record = ensure_user_document(decoded_token)
+    role = user_record.get("role", DEFAULT_USER_ROLE)
+    uid = user_record.get("uid")
+    if not uid:
+        raise HTTPException(status_code=400, detail="User record is missing a user id")
+
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    existing = snapshot.to_dict() or {}
+    user_school_ids = set(user_record.get("school_ids", []))
+    if role != "super-admin" and school_id not in user_school_ids:
+        raise HTTPException(status_code=403, detail="You do not have permission to edit this school")
+    main_school_id = existing.get("branch_parent_id") or existing.get("school_id") or school_id
+
+    updates: Dict[str, Any] = {}
+    service_type_value: Optional[List[str]] = existing.get("service_type")
+
+    if payload.service_status is not None:
+        updates["service_status"] = payload.service_status
+        normalized_type = school_profiles.services_from_status(payload.service_status)
+        updates["service_type"] = normalized_type
+        service_type_value = normalized_type
+    elif payload.service_type is not None:
+        normalized_type = school_profiles.normalize_service_types(payload.service_type)
+        updates["service_type"] = normalized_type
+        status_map = {
+            service: ("yes" if service in normalized_type else "no")
+            for service in school_profiles.SERVICE_TYPE_VALUES
+        }
+        updates["service_status"] = status_map
+        service_type_value = normalized_type
+
+    now = datetime.utcnow()
+    if updates:
+        updates["updated_at"] = now
+        updates["timestamp"] = now
+        doc_ref.update(updates)
+        existing.update(updates)
+
+    should_update_zoho = bool(payload.update_zoho_details) or bool(payload.zoho_customer_id) or bool(
+        payload.grade_default_labels
+    ) or bool(payload.grade_unique_values)
+    _sync_zoho_metadata(
+        db,
+        main_school_id,
+        should_update_zoho,
+        payload.grade_default_labels,
+        payload.grade_unique_values,
+        service_type_value,
+        payload.zoho_customer_id,
+    )
+
+    existing.setdefault("id", snapshot.id)
+    existing.setdefault("school_id", snapshot.id)
+    existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
+    return school_profiles.build_school_from_record(existing)
+
+
+@router.get("/schools/{school_id}/zoho-details")
+def get_school_zoho_details(
+    school_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = verify_and_decode_token(authorization)
+    user_record = ensure_user_document(decoded_token)
+    role = user_record.get("role", DEFAULT_USER_ROLE)
+
+    doc_ref, record, _ = school_profiles.locate_school_record(db, school_id)
+    user_school_ids = set(user_record.get("school_ids", []))
+    if role != "super-admin" and school_id not in user_school_ids:
+        raise HTTPException(status_code=403, detail="You do not have permission to view this school's addons")
+
+    main_school_id = record.get("branch_parent_id") or record.get("school_id") or school_id
+    zoho_doc = school_profiles._zoho_details_doc_ref(db, main_school_id).get()
+    details = zoho_doc.to_dict() if zoho_doc.exists else {}
+
+    return {
+        "grade_labels": details.get("grade_labels") or {},
+        "grade_unique_values": details.get("grade_unique_values") or {},
+        "service_type": details.get("service_type") or [],
+        "customer_id": details.get("customer_id"),
+    }
 
 
 @router.patch("/schools/{school_id}/status", response_model=school_profiles.School)

@@ -75,8 +75,9 @@ const SERVICE_LABELS: Record<SchoolServiceType, string> = {
   report_cards: 'Report cards',
   certificates: 'Certificates'
 };
-const GRADE_KEYS_ORDER: GradeKey[] = ['playgroup', 'nursery', 'lkg', 'ukg'];
+const GRADE_KEYS_ORDER: GradeKey[] = ['None', 'playgroup', 'nursery', 'lkg', 'ukg'];
 const GRADE_LABELS: Record<GradeKey, string> = {
+  None: 'None',
   playgroup: 'Playgroup',
   nursery: 'Nursery',
   lkg: 'LKG',
@@ -222,6 +223,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       return acc;
     }, {} as Record<GradeKey, string>)
   );
+  const [gradeDefaultsLoadedFor, setGradeDefaultsLoadedFor] = useState<string | null>(null);
 
   const workspaceFetchInFlight = useRef(false);
   const lastFetchedWorkspaceUserId = useRef<string | null>(null);
@@ -730,6 +732,13 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   }, []);
 
   useEffect(() => {
+    if (!addonsDialogSchool) {
+      setGradeDefaultsLoadedFor(null);
+      return;
+    }
+    if (gradeDefaultsLoadedFor === addonsDialogSchool.school_id) {
+      return;
+    }
     const nextValues = GRADE_KEYS_ORDER.reduce<Record<GradeKey, string>>((accumulator, grade) => {
       const gradeEntry = addonsDialogSchool?.grades?.[grade];
       accumulator[grade] = gradeEntry?.label?.trim() || GRADE_LABELS[grade];
@@ -742,7 +751,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     }, {} as Record<GradeKey, string>);
     setGradeDefaultValues(nextValues);
     setGradeUniqueValues(nextUniqueValues);
-  }, [addonsDialogSchool]);
+    setGradeDefaultsLoadedFor(addonsDialogSchool.school_id);
+  }, [addonsDialogSchool, gradeDefaultsLoadedFor]);
 
   const handleAddonsServiceChange = useCallback((service: SchoolServiceType, status: 'yes' | 'no') => {
     setAddonsDialogServiceStatus((prev) => ({ ...prev, [service]: status }));
@@ -771,7 +781,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       formData.append('grade_default_labels', JSON.stringify(gradeDefaultValues));
       formData.append('grade_unique_values', JSON.stringify(gradeUniqueValues));
       formData.append('update_zoho_details', 'true');
-      const response = await axios.put<SchoolProfile>(`${API}/schools/${addonsDialogSchool.school_id}`, formData, {
+      const response = await axios.patch<SchoolProfile>(`${API}/schools/${addonsDialogSchool.school_id}/addons`, formData, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const serverSchool = response.data;
@@ -796,13 +806,21 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       );
       toast.success('Service options updated');
       setAddonsDialogEditingZohoId(false);
+      setGradeDefaultsLoadedFor(null);
     } catch (error) {
       console.error('Failed to update service options', error);
       toast.error('Unable to update service options. Please try again.');
     } finally {
       setAddonsDialogSaving(false);
     }
-  }, [addonsDialogSchool, addonsDialogServiceStatus, getIdToken]);
+  }, [
+    addonsDialogSchool,
+    addonsDialogServiceStatus,
+    addonsDialogZohoId,
+    gradeDefaultValues,
+    gradeUniqueValues,
+    getIdToken,
+  ]);
 
   const handleZohoInputDone = useCallback(async () => {
     setAddonsDialogEditingZohoId(false);
