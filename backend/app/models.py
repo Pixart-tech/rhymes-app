@@ -25,6 +25,8 @@ class School(BaseModel):
     service_type: Optional[List[str]] = None
     service_status: Optional[Dict[str, str]] = None
     grades: Optional[Dict[str, Dict[str, Any]]] = None
+    grade_default_labels: Optional[Dict[str, str]] = None
+    grade_unique_values: Optional[Dict[str, str]] = None
     school_image_urls: List[str] = Field(default_factory=list)
     branch_parent_id: Optional[str] = None
     status: str = Field(default="active")

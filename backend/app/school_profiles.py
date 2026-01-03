@@ -799,6 +799,8 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         service_type=extract_service_type(record.get("service_type")),
         service_status=normalize_service_status(record.get("service_status")),
         grades=normalize_grades(grades_from_record),
+        grade_default_labels=record.get("grade_default_labels"),
+        grade_unique_values=record.get("grade_unique_values"),
         branch_parent_id=record.get("branch_parent_id"),
         status=record.get("status") or BRANCH_STATUS_ACTIVE,
         selection_status=record.get("selection_status"),

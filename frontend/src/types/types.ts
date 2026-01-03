@@ -33,6 +33,8 @@ export interface SchoolProfile {
   website?: string | null;
   service_status?: ServiceStatusMap;
   grades?: GradeMap;
+  grade_default_labels?: Record<string, string>;
+  grade_unique_values?: Record<string, string>;
   service_type?: SchoolServiceType[];
   status?: BranchStatus;
   selection_status?: 'pending' | 'approved' | 'rejected';
