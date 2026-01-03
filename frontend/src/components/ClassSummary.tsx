@@ -72,6 +72,14 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   const classSelections = selections.filter(s => s.className === classData.name);
   const theme = CLASS_THEMES[classData.name] || DEFAULT_THEME;
   const currentAssessmentVariant = assessmentVariants[classData.name] || 'WITH_MARKS';
+  const hasCoreSubjects = useMemo(() => {
+    const lower = (value: string) => value?.toString().trim().toLowerCase();
+    return classSelections.some(
+      (s) =>
+        hasActiveBook(s) &&
+        ['english', 'maths', 'evs'].includes(lower(s.subjectName))
+    );
+  }, [classSelections]);
 
   // Drop Handlers
 
@@ -285,40 +293,48 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
     });
 
-    // 2. Assessment
-    const englishSelection = classSelections.find(s => s.subjectName === "English" && hasActiveBook(s))?.selectedOption || null;
-    const mathsSelection = classSelections.find(s => s.subjectName === "Maths" && hasActiveBook(s))?.selectedOption || null;
-    const assessment = getAssessmentForClass(classData.name, englishSelection, mathsSelection, currentAssessmentVariant);
+    // 2. Assessment (only when core subjects are present)
+    if (hasCoreSubjects) {
+      const lower = (value: string) => value?.toString().trim().toLowerCase();
+      const englishSelection = classSelections.find(
+        (s) => lower(s.subjectName) === "english" && hasActiveBook(s)
+      )?.selectedOption || null;
+      const mathsSelection = classSelections.find(
+        (s) => lower(s.subjectName) === "maths" && hasActiveBook(s)
+      )?.selectedOption || null;
+      const assessment = getAssessmentForClass(classData.name, englishSelection, mathsSelection, currentAssessmentVariant);
 
-    if (assessment) {
-        if (!excludedAssessments.includes(classData.name)) {
-            list.push({
-                id: 'assessment',
-                title: `${assessment.label} (Assessment)`,
-                type: 'Assessment',
-                subjectName: 'General',
-                className: classData.name,
-                canDrop: canMutate,
-                onDrop: canMutate ? handleDropAssessment : undefined,
-                link: assessment.link
-            });
-        } else {
-            // Excluded state for undo
-            list.push({
-                id: 'assessment-dropped',
-                title: `${assessment.label} (Assessment)`,
-                type: 'Assessment',
-                subjectName: 'General',
-                className: classData.name,
-                canDrop: false,
-                isExcluded: true,
-                onRestore: canMutate ? handleRestoreAssessment : undefined
-            });
+      if (assessment) {
+          if (!excludedAssessments.includes(classData.name)) {
+              list.push({
+                  id: 'assessment',
+                  title: `${assessment.label} (Assessment)`,
+                  type: 'Assessment',
+                  subjectName: 'General',
+                  className: classData.name,
+                  canDrop: canMutate,
+                  onDrop: canMutate ? handleDropAssessment : undefined,
+                  link: assessment.link
+              });
+          } else {
+              // Excluded state for undo
+              list.push({
+                  id: 'assessment-dropped',
+                  title: `${assessment.label} (Assessment)`,
+                  type: 'Assessment',
+                  subjectName: 'General',
+                  className: classData.name,
+                  canDrop: false,
+                  isExcluded: true,
+              onRestore: canMutate ? handleRestoreAssessment : undefined
+          });
         }
+      }
     }
 
-    return list;
-  }, [selections, classData, excludedAssessments, currentAssessmentVariant, readOnly]);
+    // If no core subjects remain, strip any assessment entries defensively
+    return hasCoreSubjects ? list : list.filter((item) => item.type !== 'Assessment');
+  }, [selections, classData, excludedAssessments, currentAssessmentVariant, readOnly, hasCoreSubjects]);
 
   return (
     <div className="max-w-4xl mx-auto w-full p-4 md:p-6 pb-24">
