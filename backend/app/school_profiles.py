@@ -211,29 +211,6 @@ def _gather_grade_entries(parsed: Optional[Any]) -> Dict[GradeKey, Dict[str, Any
     return entries
 
 
-def compose_address(
-    line1: Optional[str],
-    city: Optional[str],
-    state: Optional[str],
-    pin: Optional[str],
-) -> str:
-    segments: List[str] = []
-    if line1:
-        segments.append(line1.strip())
-    if city:
-        segments.append(city.strip())
-    if state or pin:
-        state_segment = state.strip() if state else ""
-        pin_segment = pin.strip() if pin else ""
-        if state_segment and pin_segment:
-            segments.append(f"{state_segment} - {pin_segment}")
-        elif state_segment:
-            segments.append(state_segment)
-        elif pin_segment:
-            segments.append(pin_segment)
-    return ", ".join(segment for segment in segments if segment)
-
-
 ZOHO_DETAILS_COLLECTION = "zoho_details"
 
 
@@ -470,6 +447,7 @@ class SchoolUpdatePayload(BaseModel):
     phone: Optional[str] = Field(default=None, min_length=5)
 
     tagline: Optional[str] = None
+    address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     pin: Optional[str] = None
@@ -485,7 +463,7 @@ class SchoolUpdatePayload(BaseModel):
     id_card_fields: Optional[List[str]] = None
     zoho_customer_id: Optional[str] = None
 
-    @field_validator("school_name", "tagline", "city", "state", "pin", "website", mode="before")
+    @field_validator("school_name", "tagline", "address", "city", "state", "pin", "website", mode="before")
     @classmethod
     def _normalize_optional_str_fields(cls, value: Any, info: FieldValidationInfo) -> Optional[str]:
         return _coerce_optional_string(value, (info.field_name, "value"))
@@ -915,7 +893,7 @@ def create_school_profile(
     if is_creator_super_admin:
         assignee_id, assignee_record = _find_user_by_email(db, owner_email_input)
 
-    address_line = _clean_optional_string(payload.address)
+    address = _clean_optional_string(payload.address)
     city = _clean_optional_string(payload.city)
     state = _clean_optional_string(payload.state)
     pin = _clean_optional_string(payload.pin)
@@ -929,7 +907,7 @@ def create_school_profile(
         "logo_blob": logo_blob,
         "email": normalized_school_email,
         "phone": _clean_optional_string(payload.phone),
-        "address": compose_address(address_line, city, state, pin),
+        "address": address,
         "city": city,
         "state": state,
         "pin": pin,
@@ -999,7 +977,7 @@ def create_branch_profile(
     branch_id = generate_school_id(db)
     now = datetime.utcnow()
 
-    address_line = _clean_optional_string(payload.address)
+    address = _clean_optional_string(payload.address)
     city = _clean_optional_string(payload.city)
     state = _clean_optional_string(payload.state)
     pin = _clean_optional_string(payload.pin)
@@ -1023,7 +1001,7 @@ def create_branch_profile(
         "id": branch_id,
         "school_id": branch_id,
         "school_name": branch_display_name,
-        "address": compose_address(address_line, city, state, pin),
+        "address": address,
         "city": city,
         "state": state,
         "pin": pin,
@@ -1063,7 +1041,6 @@ __all__ = [
     "normalize_service_status",
     "services_from_status",
     "normalize_grades",
-    "compose_address",
     "BranchStatus",
     "BRANCH_STATUS_ACTIVE",
     "BRANCH_STATUS_INACTIVE",

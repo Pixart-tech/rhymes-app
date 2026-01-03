@@ -326,7 +326,7 @@ async def update_school_profile(
     if not allow_service_updates:
         raw_service_status = None
         raw_service_type = None
-    address_fields = ("address", "city", "state", "pin")
+    address_fields = ("address")
     address_overrides: Dict[str, Any] = {field: raw_updates.pop(field) for field in address_fields if field in raw_updates}
 
     updates: Dict[str, Any] = {}
@@ -344,10 +344,6 @@ async def update_school_profile(
                 continue
             cleaned_address[field] = cleaned_field
         updates.update(cleaned_address)
-        merged_address = {
-            field: cleaned_address[field] if field in cleaned_address else existing.get(field)
-            for field in address_fields
-        }
 
     if raw_zoho_customer_id is not None and cleaned_zoho_customer_id:
         school_profiles.set_zoho_customer_id(db, main_school_id, cleaned_zoho_customer_id)
@@ -487,6 +483,32 @@ async def update_school_addons(
     existing.setdefault("school_id", snapshot.id)
     existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
     return school_profiles.build_school_from_record(existing)
+
+
+@router.get("/schools/{school_id}/zoho-details")
+def get_school_zoho_details(
+    school_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = verify_and_decode_token(authorization)
+    user_record = ensure_user_document(decoded_token)
+    role = user_record.get("role", DEFAULT_USER_ROLE)
+
+    doc_ref, record, _ = school_profiles.locate_school_record(db, school_id)
+    user_school_ids = set(user_record.get("school_ids", []))
+    if role != "super-admin" and school_id not in user_school_ids:
+        raise HTTPException(status_code=403, detail="You do not have permission to view this school's addons")
+
+    main_school_id = record.get("branch_parent_id") or record.get("school_id") or school_id
+    zoho_doc = school_profiles._zoho_details_doc_ref(db, main_school_id).get()
+    details = zoho_doc.to_dict() if zoho_doc.exists else {}
+
+    return {
+        "grade_labels": details.get("grade_labels") or {},
+        "grade_unique_values": details.get("grade_unique_values") or {},
+        "service_type": details.get("service_type") or [],
+        "customer_id": details.get("customer_id"),
+    }
 
 
 @router.patch("/schools/{school_id}/status", response_model=school_profiles.School)

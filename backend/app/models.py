@@ -13,6 +13,7 @@ class School(BaseModel):
     logo_url: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     pin: Optional[str] = None
