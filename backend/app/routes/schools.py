@@ -384,7 +384,6 @@ async def update_school_profile(
     if not updates:
         existing.setdefault("id", snapshot.id)
         existing.setdefault("school_id", snapshot.id)
-        existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
         _sync_zoho_metadata(
             db,
             main_school_id,
@@ -394,6 +393,11 @@ async def update_school_profile(
             existing.get("service_type"),
             cleaned_zoho_customer_id,
         )
+        zoho_doc = school_profiles._zoho_details_doc_ref(db, main_school_id).get()
+        zoho_details = zoho_doc.to_dict() if zoho_doc.exists else {}
+        existing["zoho_customer_id"] = zoho_details.get("customer_id")
+        existing["grade_default_labels"] = zoho_details.get("grade_labels")
+        existing["grade_unique_values"] = zoho_details.get("grade_unique_values")
         return school_profiles.build_school_from_record(existing)
 
     now = datetime.utcnow()
@@ -403,7 +407,6 @@ async def update_school_profile(
     existing.update(updates)
     existing.setdefault("id", snapshot.id)
     existing.setdefault("school_id", snapshot.id)
-    existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
     _sync_zoho_metadata(
         db,
         main_school_id,
@@ -413,6 +416,11 @@ async def update_school_profile(
         existing.get("service_type"),
         cleaned_zoho_customer_id,
     )
+    zoho_doc = school_profiles._zoho_details_doc_ref(db, main_school_id).get()
+    zoho_details = zoho_doc.to_dict() if zoho_doc.exists else {}
+    existing["zoho_customer_id"] = zoho_details.get("customer_id")
+    existing["grade_default_labels"] = zoho_details.get("grade_labels")
+    existing["grade_unique_values"] = zoho_details.get("grade_unique_values")
 
     return school_profiles.build_school_from_record(existing)
 
@@ -481,7 +489,11 @@ async def update_school_addons(
 
     existing.setdefault("id", snapshot.id)
     existing.setdefault("school_id", snapshot.id)
-    existing["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, main_school_id)
+    zoho_doc = school_profiles._zoho_details_doc_ref(db, main_school_id).get()
+    zoho_details = zoho_doc.to_dict() if zoho_doc.exists else {}
+    existing["zoho_customer_id"] = zoho_details.get("customer_id")
+    existing["grade_default_labels"] = zoho_details.get("grade_labels")
+    existing["grade_unique_values"] = zoho_details.get("grade_unique_values")
     return school_profiles.build_school_from_record(existing)
 
 
@@ -739,7 +751,11 @@ def get_all_schools_with_selections(
         if not school_id:
             continue
         zoho_main_id = doc.get("branch_parent_id") or school_id
-        doc["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, zoho_main_id)
+        zoho_doc = school_profiles._zoho_details_doc_ref(db, zoho_main_id).get()
+        zoho_details = zoho_doc.to_dict() if zoho_doc.exists else {}
+        doc["zoho_customer_id"] = zoho_details.get("customer_id")
+        doc["grade_default_labels"] = zoho_details.get("grade_labels")
+        doc["grade_unique_values"] = zoho_details.get("grade_unique_values")
 
 
         base_school = school_profiles.build_school_from_record(doc)

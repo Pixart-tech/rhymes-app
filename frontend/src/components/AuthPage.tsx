@@ -27,6 +27,7 @@ import {
   AdminSchoolProfile,
   BranchStatus,
   GradeKey,
+  GradeMap,
   SchoolProfile,
   SchoolFormValues,
   SchoolServiceType,
@@ -89,6 +90,22 @@ const GRADE_UNIQUE_CODES: Record<string, string> = {
   LKG: '494951',
   UKG: '494952'
 };
+const GRADE_CODE_TO_LABEL: Record<string, string> = Object.entries(GRADE_UNIQUE_CODES).reduce<
+  Record<string, string>
+>((accumulator, [label, code]) => {
+  accumulator[code] = label;
+  return accumulator;
+}, {});
+const resolveLabelFromUniqueCode = (value?: string | null | undefined): string | null => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return GRADE_CODE_TO_LABEL[trimmed] ?? null;
+};
 const DEFAULT_SERVICE_STATUS: ServiceStatusMap = {
   id_cards: 'no',
   report_cards: 'no',
@@ -100,6 +117,21 @@ const BRANCH_NAME_MIN_LENGTH = 2;
 const COORDINATOR_NAME_MIN_LENGTH = 2;
 const COORDINATOR_PHONE_MIN_LENGTH = 5;
 const COORDINATOR_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const buildGradeUniqueValuesFromDefaults = (
+  defaults: Record<GradeKey, string>,
+  overrides?: Record<string, string | null | undefined>
+): Record<GradeKey, string> =>
+  GRADE_KEYS_ORDER.reduce<Record<GradeKey, string>>((accumulator, grade) => {
+    const rawOverride = overrides?.[grade];
+    const trimmedOverride = typeof rawOverride === 'string' ? rawOverride.trim() : '';
+    if (trimmedOverride) {
+      accumulator[grade] = trimmedOverride;
+    } else {
+      const fallbackLabel = defaults[grade] || GRADE_LABELS[grade];
+      accumulator[grade] = GRADE_UNIQUE_CODES[fallbackLabel] || '';
+    }
+    return accumulator;
+  }, {} as Record<GradeKey, string>);
 
 const getAxiosDetailMessage = (error: unknown): string | null => {
   if (!axios.isAxiosError(error)) {
@@ -740,13 +772,15 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       return;
     }
     const nextValues = GRADE_KEYS_ORDER.reduce<Record<GradeKey, string>>((accumulator, grade) => {
-      const gradeEntry = addonsDialogSchool?.grades?.[grade];
-      accumulator[grade] = gradeEntry?.label?.trim() || GRADE_LABELS[grade];
+      const uniqueValue = addonsDialogSchool.grade_unique_values?.[grade];
+      const labelFromCode = resolveLabelFromUniqueCode(uniqueValue);
+      const gradeEntryLabel = addonsDialogSchool.grades?.[grade]?.label?.trim();
+      accumulator[grade] = labelFromCode || gradeEntryLabel || GRADE_LABELS[grade];
       return accumulator;
     }, {} as Record<GradeKey, string>);
     const nextUniqueValues = GRADE_KEYS_ORDER.reduce<Record<GradeKey, string>>((accumulator, grade) => {
-      const labelValue = nextValues[grade] || GRADE_LABELS[grade];
-      accumulator[grade] = GRADE_UNIQUE_CODES[labelValue] || '';
+      const uniqueValue = addonsDialogSchool.grade_unique_values?.[grade];
+      accumulator[grade] = uniqueValue ?? '';
       return accumulator;
     }, {} as Record<GradeKey, string>);
     setGradeDefaultValues(nextValues);
