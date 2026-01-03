@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -15,6 +15,7 @@ interface HomePageProps {
 const HomePage: React.FC<HomePageProps> = ({ onBackToMode, school, onStartBookSelection }) => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const [hasBookSelections, setHasBookSelections] = useState(false);
   const persistedSchool = useMemo<SchoolProfile | null>(() => {
     const persistedState = loadPersistedAppState() as { school?: SchoolProfile | null } | null;
     return persistedState?.school ?? null;
@@ -25,24 +26,30 @@ const HomePage: React.FC<HomePageProps> = ({ onBackToMode, school, onStartBookSe
     }
     navigate('/');
   };
-  const handleStartBookSelection = () => {
+  const resolvedSchoolId = school?.school_id ?? persistedSchool?.school_id ?? user?.schoolId ?? null;
+  useEffect(() => {
+    if (!resolvedSchoolId) {
+      setHasBookSelections(false);
+      return;
+    }
+    const grades = ['nursery', 'lkg', 'ukg', 'playgroup'];
+    const found = grades.some((gradeId) => {
+      const state = loadBookWorkflowState(resolvedSchoolId, gradeId);
+      return Array.isArray(state?.selectedBooks) && state.selectedBooks.length > 0;
+    });
+    setHasBookSelections(found);
+  }, [resolvedSchoolId]);
+
+  const handleStartBookSelection = useCallback(async () => {
     if (typeof onStartBookSelection === 'function') {
       console.log('Starting book selection via callback');
       onStartBookSelection();
     } else {
       navigate('/wizard');
     }
-  };
-  const resolvedSchoolId = school?.school_id ?? persistedSchool?.school_id ?? user?.schoolId ?? null;
-  const hasBookSelections = useMemo(() => {
-    if (!resolvedSchoolId) return false;
-    const grades = ['nursery', 'lkg', 'ukg', 'playgroup'];
-    return grades.some((gradeId) => {
-      const state = loadBookWorkflowState(resolvedSchoolId, gradeId);
-      return Array.isArray(state?.selectedBooks) && state.selectedBooks.length > 0;
-    });
-  }, [resolvedSchoolId]);
-  const primaryCtaLabel = hasBookSelections ? 'View selections' : 'Start Book Selection';
+  }, [navigate, onStartBookSelection]);
+
+  const primaryCtaLabel = hasBookSelections ? 'View Selections' : 'Start Book Selection';
 
   if (loading) {
     return <div className="text-center p-12">Loading...</div>;

@@ -59,11 +59,11 @@ const resolveCoverUrl = (theme) => {
   if (!normalizedId) return '';
 
   if (typeof versionId === 'string' && /^V\d+/.test(versionId)) {
-    // New cover library format keeps C1-C4 under /covers/Vx/
-    return normalizeAssetUrl(`/public/cover-library/covers/${versionId}/C1.png`);
+    // Library format keeps C1-C4 under /colours/Vx/
+    return normalizeAssetUrl(`/public/cover-library/colours/${versionId}/C1.png`);
   }
 
-  return normalizeAssetUrl(`/public/cover-library/themes/${normalizedId}/cover.png`);
+  return normalizeAssetUrl(`/public/cover-library/colours/${normalizedId}/C1.png`);
 };
 
 const normalizeLibraryPayload = (library) => {
@@ -198,7 +198,7 @@ const CoverPageWorkflow = ({
   coverDefaults,
   isReadOnly = false,
 }) => {
-  const { getIdToken, user } = useAuth();
+  const { getIdToken, user, loading: authLoading } = useAuth();
   const persistedApp = loadPersistedAppState?.();
   const persistedIsAdmin = persistedApp?.workspaceUser?.role === 'super-admin';
   const isAdmin = user?.role === 'super-admin' || persistedIsAdmin;
@@ -254,6 +254,11 @@ const CoverPageWorkflow = ({
     return schoolId ? `cover-summary-${schoolId}` : null;
   }, [isAdmin, school?.school_id]);
   const [clientThemeAnchor] = useState('');
+  const [approvalCovers, setApprovalCovers] = useState([]);
+  const [approvalLoading, setApprovalLoading] = useState(false);
+  const [approvalError, setApprovalError] = useState('');
+  const fetchInFlightRef = useRef(false);
+  const [serverVersion, setServerVersion] = useState(0);
 
   const getThemeLabel = useCallback(
     (themeId, fallbackLabel) => {
@@ -270,8 +275,8 @@ const CoverPageWorkflow = ({
       const cached = baselineByGrade?.[gradeKey] || {};
       const baselineTheme = normalizeThemeId(
         cached.theme ||
-          entry?.client_theme ||
-          entry?.client_theme_id ||
+          entry?.theme ||
+          entry?.theme_id ||
           entry?.clientTheme
       );
       const baselineColour = normalizeColourId(
@@ -286,20 +291,9 @@ const CoverPageWorkflow = ({
   );
 
   const adminOverrideEntries = useMemo(() => {
-    const entries = [];
-    Object.entries(fetchedGrades.admin || {}).forEach(([gradeKey, entry]) => {
-      const label = resolveGradeLabel(gradeKey, resolvedGradeNames[gradeKey]);
-      const themeLabel = getThemeLabel(
-        entry?.theme_id || entry?.theme,
-        entry?.theme_label || entry?.theme
-      );
-      const colourLabel = normalizeColourId(
-        entry?.colour_id || entry?.theme_colour || entry?.colour_label || entry?.theme_colour_label
-      ) || '-';
-      entries.push({ gradeKey, label, themeLabel, colourLabel });
-    });
-    return entries;
-  }, [fetchedGrades.admin, getThemeLabel, resolvedGradeNames]);
+    // No separate admin document; summary is driven by the client document only.
+    return [];
+  }, []);
   const buildClientAssignmentsForTheme = useCallback(
     (themeId) => {
       if (!themeId) return {};
@@ -344,6 +338,40 @@ const CoverPageWorkflow = ({
     () => themes.find((theme) => theme.id === selectedThemeId) || null,
     [selectedThemeId, themes]
   );
+  const selectedThemeDisplay = useMemo(
+    () => selectedThemeId || selectedTheme?.id || selectedTheme?.label || 'Not selected',
+    [selectedThemeId, selectedTheme]
+  );
+  const enabledGrades = useMemo(() => {
+    const map = {};
+    const grades = school?.grades || {};
+    Object.entries(grades).forEach(([key, value]) => {
+      const normalized = key.toString().toLowerCase();
+      const isEnabled = value && typeof value === 'object' ? Boolean(value.enabled) : false;
+      map[normalized] = isEnabled;
+      if (normalized === 'playgroup') {
+        map.pg = isEnabled;
+      }
+    });
+    return map;
+  }, [school?.grades]);
+
+  const isGradeEnabled = useCallback(
+    (gradeKey) => {
+      const normalized = gradeKey?.toString().toLowerCase();
+      if (!normalized) return false;
+      if (Object.prototype.hasOwnProperty.call(enabledGrades, normalized)) {
+        return enabledGrades[normalized] === true;
+      }
+      return false;
+    },
+    [enabledGrades]
+  );
+
+  const enabledGradeOrder = useMemo(() => {
+    const filtered = GRADE_ORDER.filter((gradeKey) => isGradeEnabled(gradeKey));
+    return filtered.length ? filtered : GRADE_ORDER;
+  }, [isGradeEnabled]);
 
   const colourOptions = useMemo(() => {
     const availableVersions = Object.keys(libraryColours);
@@ -377,14 +405,15 @@ const CoverPageWorkflow = ({
   const selectedColour = useMemo(() => colourOptions.find((colour) => colour.id === activeColourId) || null, [colourOptions, activeColourId]);
 
   const assignedGradeSummaries = useMemo(() => {
-    return GRADE_ORDER.map((gradeKey) => {
+    const filteredGrades = GRADE_ORDER.filter((gradeKey) => isGradeEnabled(gradeKey));
+    return filteredGrades.map((gradeKey) => {
       const { baselineColour } = getClientBaseline(gradeKey);
       const gradeCode = GRADE_CODE_MAP[gradeKey];
       const gradeLabel = resolveGradeLabel(gradeKey, resolvedGradeNames[gradeKey]);
       const imageUrl = baselineColour ? libraryColours[baselineColour]?.[gradeCode] : null;
       return { gradeKey, gradeLabel, colourId: baselineColour, imageUrl };
     }).filter((entry) => entry.colourId);
-  }, [getClientBaseline, libraryColours, resolvedGradeNames]);
+  }, [getClientBaseline, isGradeEnabled, libraryColours, resolvedGradeNames]);
 
   const hydrateSelectionsFromServer = useCallback(async () => {
     const schoolId = school?.school_id;
@@ -392,8 +421,10 @@ const CoverPageWorkflow = ({
       setHasHydratedFromServer(true);
       return;
     }
-    // Admin fetches full selections; non-admin skips
-    if (!isAdmin) {
+    if (authLoading) {
+      return;
+    }
+    if (fetchInFlightRef.current) {
       return;
     }
 
@@ -401,14 +432,9 @@ const CoverPageWorkflow = ({
     if (summaryCacheKey && Object.keys(fetchedGrades.client || {}).length === 0) {
       try {
         const cached = JSON.parse(sessionStorage.getItem(summaryCacheKey) || '{}');
-        if (cached && (cached.client || cached.admin)) {
-          if (cached.client) {
-            setFetchedGrades((prev) => ({ ...prev, client: cached.client }));
-            setClientGrades((prev) => ({ ...cached.client, ...prev }));
-          }
-          if (cached.admin) {
-            setFetchedGrades((prev) => ({ ...prev, admin: cached.admin }));
-          }
+        if (cached && cached.client) {
+          setFetchedGrades((prev) => ({ ...prev, client: cached.client }));
+          setClientGrades((prev) => ({ ...cached.client, ...prev }));
         }
       } catch (err) {
         // ignore cache errors
@@ -417,12 +443,16 @@ const CoverPageWorkflow = ({
 
     const baselineUpdates = {};
 
+    let attempted = false;
+
+    fetchInFlightRef.current = true;
     try {
       const token = await getIdToken?.();
       if (!token) {
         // wait for auth to resolve; do not mark hydrated yet
         return;
       }
+      attempted = true;
       const headers = { Authorization: `Bearer ${token}` };
       const response = await axios.get(`${API_BASE_URL}/cover-selections/${schoolId}`, {
         headers,
@@ -432,10 +462,9 @@ const CoverPageWorkflow = ({
         return;
       }
       const clientGrades = response.data?.client_grades || response.data?.grades || {};
-      const adminGrades = response.data?.admin_grades || {};
+      // No separate admin doc; we drive summary from client doc only.
+      const adminGrades = {};
       const library = response.data?.library;
-      const clientThemeId = response.data?.client_theme_id || response.data?.client_theme || '';
-
       const loadedColours = {};
       let loadedThemeId = selectedThemeId;
       let loadedColourId = selectedColourId;
@@ -456,15 +485,15 @@ const CoverPageWorkflow = ({
         const normalizedGrade = gradeKey.toString().toLowerCase();
         const baselineTheme = normalizeThemeId(
           baselineByGrade?.[normalizedGrade]?.theme ||
-            entry?.client_theme ||
-            entry?.client_theme_id ||
-            entry?.clientTheme
+            entry?.theme ||
+            entry?.theme_id
         );
         const baselineColour = normalizeColourId(
           baselineByGrade?.[normalizedGrade]?.colour ||
             entry?.client_colour_png ||
             entry?.client_colour ||
-            entry?.client_colour_id
+            entry?.client_colour_id ||
+            entry?.colour_id
         );
         if (baselineTheme && !baselineByGrade?.[normalizedGrade]) {
           baselineUpdates[normalizedGrade] = { theme: baselineTheme, colour: baselineColour };
@@ -492,6 +521,7 @@ const CoverPageWorkflow = ({
 
       setFetchedGrades({ client: clientGrades, admin: adminGrades });
       setClientGrades(clientGrades);
+      setServerVersion((prev) => prev + 1);
       if (Object.keys(baselineUpdates).length > 0) {
         setBaselineByGrade((prev) => ({ ...prev, ...baselineUpdates }));
       }
@@ -506,7 +536,7 @@ const CoverPageWorkflow = ({
         try {
           sessionStorage.setItem(
             summaryCacheKey,
-            JSON.stringify({ client: clientGrades, admin: adminGrades })
+            JSON.stringify({ client: clientGrades })
           );
         } catch (err) {
           // ignore cache errors
@@ -515,12 +545,16 @@ const CoverPageWorkflow = ({
     } catch (error) {
       console.warn('Unable to load saved cover selections', error);
     } finally {
-      setHasHydratedFromServer(true);
+      fetchInFlightRef.current = false;
+      if (attempted) {
+        setHasHydratedFromServer(true);
+      }
     }
   }, [
     API_BASE_URL,
     grade,
     getIdToken,
+    authLoading,
     isFinished,
     lastSavedAt,
     school?.school_id,
@@ -557,9 +591,10 @@ const CoverPageWorkflow = ({
     });
 
     setSelectedColoursByGrade(loadedColours);
+    // Do not auto-select a theme when switching grades; wait for fresh data.
     setPngAssignments({});
-    setSelectedThemeId(activeThemeId || '');
-    setSelectedColourId(activeColour || '');
+    setSelectedThemeId('');
+    setSelectedColourId('');
     setIsFinished(activeFinished);
     setLastSavedAt(activeUpdatedAt);
   }, [grade, school?.school_id]);
@@ -570,10 +605,26 @@ const CoverPageWorkflow = ({
       return;
     }
 
-    if (!hasHydratedFromServer) {
+    if (!hasHydratedFromServer && !authLoading) {
+      // For non-admins in status 2, rely on cached state and skip network fetch.
+      if (!isAdmin && workflowStatus === '2') {
+        setHasHydratedFromServer(true);
+        return;
+      }
       void hydrateSelectionsFromServer();
     }
-  }, [grade, hasHydratedFromServer, school?.school_id, hydrateSelectionsFromServer]);
+  }, [grade, hasHydratedFromServer, school?.school_id, hydrateSelectionsFromServer, authLoading, isAdmin, workflowStatus]);
+
+  // Poll for status changes to refresh non-admin UI with low latency
+  useEffect(() => {
+    if (isAdmin) return;
+    if (!school?.school_id) return;
+    const interval = setInterval(() => {
+      setHasHydratedFromServer(false);
+      void hydrateSelectionsFromServer();
+    }, 8000); // lightweight poll every 8s
+    return () => clearInterval(interval);
+  }, [hydrateSelectionsFromServer, isAdmin, school?.school_id, serverVersion]);
 
   useEffect(() => {
     const fetchThemeImages = async () => {
@@ -603,21 +654,6 @@ const CoverPageWorkflow = ({
 
     void fetchThemeImages();
   }, []);
-
-  // Always anchor admin view to client baseline theme/colour after hydration
-  useEffect(() => {
-    if (!isAdmin) return;
-    const { baselineTheme, baselineColour } = getClientBaseline(grade);
-    const desiredTheme = normalizeThemeId(clientThemeAnchor || baselineTheme);
-    if (desiredTheme && normalizeThemeId(selectedThemeId) !== desiredTheme) {
-      setSelectedThemeId(desiredTheme);
-    }
-    // Only lock colour to baseline when no draft assignments are present
-    if (baselineColour && Object.keys(pngAssignments || {}).length === 0) {
-      setSelectedColourId(baselineColour);
-      setSelectedColoursByGrade((prev) => ({ ...prev, [grade]: baselineColour }));
-    }
-  }, [clientThemeAnchor, getClientBaseline, grade, isAdmin, selectedThemeId, fetchedGrades.client, pngAssignments]);
 
   useEffect(() => {
     const schoolId = school?.school_id;
@@ -671,14 +707,26 @@ const CoverPageWorkflow = ({
   const persistStatus = useCallback(
     async (nextStatus) => {
       if (effectiveReadOnly) return false;
+      const previousStatus = workflowStatus;
+      setWorkflowStatus(nextStatus);
       const schoolId = school?.school_id;
       if (!schoolId) {
         toast.error('Missing school id.');
+        setWorkflowStatus(previousStatus);
         return false;
       }
 
-      // If only status change (no assignments), just patch status without touching selections
       const hasAssignments = Object.keys(pngAssignments || {}).length > 0;
+      const existingSelection = (fetchedGrades?.client && fetchedGrades.client[grade]) || {};
+      const hasSavedTheme =
+        normalizeThemeId(existingSelection.theme) ||
+        normalizeThemeId(existingSelection.theme_id) ||
+        normalizeThemeId(existingSelection.client_theme);
+      const statusPayload = {
+        school_id: schoolId,
+        grade,
+        status: nextStatus,
+      };
 
       try {
         const token = await getIdToken?.();
@@ -706,7 +754,7 @@ const CoverPageWorkflow = ({
                 grade: gradeKey,
                 theme_id: selectedThemeId,
                 theme_label: themeLabel,
-                colour_id: colourId, // PNG filename (e.g., C3)
+                colour_id: colourId,
                 colour_label: colourOptions.find((c) => c.id === colourId)?.label || null,
                 status: nextStatus,
               },
@@ -715,27 +763,71 @@ const CoverPageWorkflow = ({
           );
           await Promise.all(tasks);
         } else {
-          // Status-only update via PATCH on client doc
-          await axios.patch(
-            `${API_BASE_URL}/cover-selections/${schoolId}/${grade}`,
-            { school_id: schoolId, grade, status: nextStatus },
-            { headers }
-          );
+          // Status-only update: write directly to client doc; skip if nothing exists for this grade.
+          if (!hasSavedTheme && !selectedThemeId) {
+            toast.warning('No saved cover selection to update for this grade.');
+            setWorkflowStatus(previousStatus);
+            return false;
+          }
+          await axios.post(`${API_BASE_URL}/cover-selections`, statusPayload, { headers });
         }
 
         setWorkflowStatus(nextStatus);
         setIsFinished(nextStatus !== '1');
         const timestamp = Date.now();
         setLastSavedAt(timestamp);
+        saveCoverWorkflowState(schoolId, grade, {
+          selectedThemeId: selectedThemeId || '',
+          selectedColourId: selectedColourId || '',
+          status: nextStatus,
+          updatedAt: timestamp,
+          selectedThemeLabel: selectedTheme?.label || '',
+          selectedColourLabel: selectedColour?.label || '',
+        });
+        setFetchedGrades((prev) => ({
+          ...prev,
+          client: {
+            ...(prev?.client || {}),
+            [grade]: {
+              ...(prev?.client?.[grade] || {}),
+              status: nextStatus,
+              theme: selectedThemeId || prev?.client?.[grade]?.theme,
+              theme_id: selectedThemeId || prev?.client?.[grade]?.theme_id,
+              colour_id: selectedColourId || prev?.client?.[grade]?.colour_id,
+              theme_colour: selectedColourId || prev?.client?.[grade]?.theme_colour,
+            },
+          },
+        }));
+        // Clear local selections and reload fresh data to avoid auto-selecting the previous theme on grade switches.
+        setSelectedThemeId('');
+        setSelectedColourId('');
+        setPngAssignments({});
+        setHasHydratedFromServer(false);
+        void hydrateSelectionsFromServer();
         toast.success('Status updated');
         return true;
       } catch (error) {
         console.warn('Unable to persist cover selections', error);
         toast.error('Could not save cover selection/status');
+        setWorkflowStatus(previousStatus);
         return false;
       }
     },
-    [API_BASE_URL, colourOptions, effectiveReadOnly, grade, school?.school_id, selectedTheme?.label, selectedThemeId, pngAssignments, getIdToken]
+    [
+      API_BASE_URL,
+      colourOptions,
+      effectiveReadOnly,
+      grade,
+      school?.school_id,
+      selectedTheme?.label,
+      selectedThemeId,
+      selectedColourId,
+      pngAssignments,
+      getIdToken,
+      fetchedGrades.client,
+      isAdmin,
+      workflowStatus,
+    ]
   );
 
   const handleFinishSave = async () => {
@@ -756,20 +848,10 @@ const CoverPageWorkflow = ({
     if (effectiveReadOnly) {
       return;
     }
-    const { baselineTheme, baselineColour } = getClientBaseline(grade);
-    const anchorTheme = normalizeThemeId(clientThemeAnchor || baselineTheme);
-    const nextAssignments =
-      isAdmin && normalizeThemeId(themeId) === anchorTheme
-        ? buildClientAssignmentsForTheme(themeId)
-        : {};
     setSelectedThemeId(themeId);
-    setSelectedColourId(normalizeThemeId(themeId) === anchorTheme ? baselineColour || '' : '');
-    setSelectedColoursByGrade(
-      normalizeThemeId(themeId) === anchorTheme
-        ? { ...selectedColoursByGrade, [grade]: baselineColour || '' }
-        : {}
-    );
-    setPngAssignments(nextAssignments);
+    setSelectedColourId('');
+    setSelectedColoursByGrade((prev) => ({ ...prev, [grade]: '' }));
+    setPngAssignments({});
     setIsFinished(false);
     if (colourSectionRef.current) {
       // Smooth scroll to colour section after DOM updates
@@ -804,6 +886,137 @@ const CoverPageWorkflow = ({
   const handleFinish = () => {
     void handleFinishSave();
   };
+
+  const renderApprovalGallery = (readonly = false) => {
+    if (approvalLoading) {
+      return (
+        <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-4 text-sm text-slate-600">
+          Loading uploaded covers...
+        </div>
+      );
+    }
+    if (approvalError) {
+      return (
+        <div className="rounded-lg border border-dashed border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+          {approvalError}
+        </div>
+      );
+    }
+    if (!approvalCovers.length) {
+      return (
+        <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-4 text-sm text-slate-600">
+          No uploaded covers found for this school yet.
+        </div>
+      );
+    }
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {approvalCovers.map((item) => (
+          <div key={item.name} className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="aspect-[4/3] bg-slate-50 flex items-center justify-center">
+              <img
+                src={item.uploadedUrl || item.url}
+                alt={item.name}
+                className="h-full w-full object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.opacity = '0.3';
+                }}
+              />
+            </div>
+            <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
+              <span className="font-semibold text-slate-800 truncate">{item.name}</span>
+              <span
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+                  item.exists ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                )}
+              >
+                {item.exists ? 'Uploaded' : 'Missing'}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const extractCoverNamesFromSelections = useCallback((classes) => {
+    const names = new Set();
+    (classes || []).forEach((cls) => {
+      const items = Array.isArray(cls?.items) ? cls.items : [];
+      items.forEach((item) => {
+        ['core_cover', 'work_cover', 'addon_cover'].forEach((key) => {
+          const value = (item && item[key]) || '';
+          if (typeof value === 'string' && value.trim()) {
+            names.add(value.trim());
+          }
+        });
+      });
+    });
+    return Array.from(names);
+  }, []);
+
+  const fetchApprovalAssets = useCallback(async () => {
+    if (!school?.school_id) {
+      return;
+    }
+    setApprovalLoading(true);
+    setApprovalError('');
+    try {
+      const token = await getIdToken?.();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const [booksRes, uploadsRes] = await Promise.all([
+        axios.get(`${API_BASE_URL}/book-selections/${school.school_id}`, {
+          headers,
+          validateStatus: () => true
+        }),
+        axios.get(`${API_BASE_URL}/cover-uploads/${school.school_id}`, {
+          headers,
+          validateStatus: () => true
+        })
+      ]);
+      const classes = booksRes.status < 400 ? booksRes.data?.classes || [] : [];
+      const uploadFiles = uploadsRes.status < 400 ? uploadsRes.data?.files || [] : [];
+      const desiredNames = extractCoverNamesFromSelections(classes);
+      const uploadedMap = new Map(
+        uploadFiles.map((f) => {
+          const url =
+            f.url ||
+            `${API_BASE_URL}/cover-uploads/${school.school_id}/${encodeURIComponent(f.name)}`;
+          return [f.name, url];
+        })
+      );
+      const gallery = desiredNames.map((name) => ({
+        name,
+        url: normalizeAssetUrl(`/public/Assets/covers/${school.school_id}/${name}`),
+        exists: uploadedMap.has(name),
+        uploadedUrl: uploadedMap.get(name)
+      }));
+      setApprovalCovers(gallery);
+      if (!desiredNames.length) {
+        setApprovalError('No cover files referenced by book selections yet.');
+      }
+    } catch (error) {
+      console.warn('Unable to load cover approval assets', error);
+      setApprovalCovers([]);
+      setApprovalError('Unable to load uploaded covers. Please try again.');
+    } finally {
+      setApprovalLoading(false);
+    }
+  }, [API_BASE_URL, extractCoverNamesFromSelections, getIdToken, school?.school_id]);
+
+  useEffect(() => {
+    if (workflowStatus === '3' || workflowStatus === '4') {
+      void fetchApprovalAssets();
+    }
+  }, [fetchApprovalAssets, workflowStatus]);
+
+  const handleClientApprove = useCallback(async () => {
+    const ok = await persistStatus('3');
+    if (ok) {
+      toast.success('Covers approved.');
+    }
+  }, [persistStatus]);
 
   const handleAdminStatusChange = (nextStatus) => {
     void persistStatus(nextStatus);
@@ -871,8 +1084,6 @@ const CoverPageWorkflow = ({
       const label = resolveGradeLabel(gradeKey, resolvedGradeNames[gradeKey]);
       const baselineTheme =
         baselineByGrade?.[gradeKey]?.theme ||
-        entry?.client_theme ||
-        entry?.client_theme_id ||
         entry?.theme ||
         entry?.theme_id ||
         '';
@@ -884,7 +1095,7 @@ const CoverPageWorkflow = ({
         entry?.theme_colour ||
         entry?.colour_id ||
         '';
-      const themeLabel = getThemeLabel(baselineTheme, entry?.client_theme_label || entry?.theme_label);
+      const themeLabel = getThemeLabel(baselineTheme, entry?.theme_label);
       const colourLabel = normalizeColourId(baselineColour) || '';
       entries.push({ gradeKey, label, themeLabel, colourLabel });
     });
@@ -905,6 +1116,53 @@ const CoverPageWorkflow = ({
 
   // For non-admin users, once status moves beyond 1, show status-only UI.
   if (!isAdmin && workflowStatus !== '1') {
+    if (workflowStatus === '3' || workflowStatus === '4') {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-slate-50 to-slate-100 py-10 px-6">
+          <div className="mx-auto max-w-5xl space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-indigo-500">Cover pages approval</p>
+                <h1 className="text-2xl font-semibold text-slate-900">{school.school_name}</h1>
+                <p className="text-sm text-slate-600">School ID: {school.school_id}</p>
+                <p className="text-sm font-semibold text-indigo-700">
+                  {workflowStatus === '3'
+                    ? 'Review uploaded covers and approve.'
+                    : 'Covers are frozen. Contact admin for changes.'}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={onBackToMode} className="bg-white/80 hover:bg-white">
+                  Back to menu
+                </Button>
+                <Button variant="outline" onClick={onLogout} className="bg-white/80 hover:bg-white">
+                  Logout
+                </Button>
+              </div>
+            </div>
+
+            <Card className="border-none bg-white/80 shadow-md shadow-indigo-100/60">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xl font-semibold text-slate-900">
+                  {workflowStatus === '4' ? 'Approved covers' : 'Uploaded covers'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {renderApprovalGallery(workflowStatus === '4')}
+                {workflowStatus === '3' && (
+                  <div className="flex justify-end">
+                    <Button type="button" onClick={handleClientApprove} disabled={approvalLoading}>
+                      Approve covers
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
     if (workflowStatus === '2') {
       return (
         <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
@@ -957,22 +1215,6 @@ const CoverPageWorkflow = ({
               <Button variant="outline" onClick={onLogout} className="bg-white/80 hover:bg-white">
                 Logout
               </Button>
-              {isAdmin && (
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => handleAdminStatusChange('1')} className="bg-slate-100 text-slate-800 hover:bg-slate-200">
-                    Set status: Allow client re-edit (1)
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={() => handleAdminStatusChange('2')} className="bg-amber-100 text-amber-700 hover:bg-amber-200">
-                    Set status: Preparing (2)
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={() => handleAdminStatusChange('3')} className="bg-indigo-100 text-indigo-700 hover:bg-indigo-200">
-                    Set status: View pages (3)
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={() => handleAdminStatusChange('4')} className="bg-rose-100 text-rose-700 hover:bg-rose-200">
-                    Set status: Freeze (4)
-                  </Button>
-                </div>
-              )}
             </div>
           </div>
 
@@ -1073,7 +1315,7 @@ const CoverPageWorkflow = ({
               )}
             </div>
             <p className="text-sm text-slate-700">
-              Theme: {selectedTheme?.label || 'Not selected'} | Colour: {selectedColour?.label || 'Not selected'}
+              Theme: {selectedThemeDisplay}
             </p>
             {workflowStatus === '2' && (
               <p className="text-sm font-semibold text-amber-700">Cover pages are being prepared. Please wait.</p>
@@ -1120,18 +1362,18 @@ const CoverPageWorkflow = ({
                 </div>
               </div>
             </div>
-            {isAdmin && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {clientGradeEntries.map((entry) => (
-                    <div key={entry.gradeKey} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-semibold text-slate-800">{entry.label}</span>
-                        <span className="text-xs text-slate-500">Theme: {entry.themeLabel}</span>
-                        {entry.colourLabel && (
-                          <span className="text-xs text-slate-500">Colour: {entry.colourLabel}</span>
-                        )}
-                      </div>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {clientGradeEntries.map((entry) => (
+                  <div key={entry.gradeKey} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-semibold text-slate-800">{entry.label}</span>
+                      <span className="text-xs text-slate-500">Theme: {entry.themeLabel}</span>
+                      {entry.colourLabel && (
+                        <span className="text-xs text-slate-500">Colour: {entry.colourLabel}</span>
+                      )}
+                    </div>
+                    {isAdmin && (
                       <button
                         type="button"
                         onClick={() => handleRemoveOverride(entry.gradeKey)}
@@ -1140,35 +1382,12 @@ const CoverPageWorkflow = ({
                       >
                         x
                       </button>
-                    </div>
-                  ))}
-                </div>
-                {adminOverrideEntries.length > 0 && (
-                  <div className="pt-1 space-y-2">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Admin overrides</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {adminOverrideEntries.map((entry) => (
-                        <div key={`admin-${entry.gradeKey}`} className="flex items-center justify-between rounded-lg border border-indigo-200 bg-white px-3 py-2">
-                          <div className="flex flex-col">
-                            <span className="text-sm font-semibold text-slate-800">{entry.label}</span>
-                            <span className="text-xs text-slate-500">Theme: {entry.themeLabel}</span>
-                            <span className="text-xs text-slate-500">Colour: {entry.colourLabel}</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveOverride(entry.gradeKey)}
-                            className="text-rose-600 hover:text-rose-700 text-xs font-semibold"
-                            aria-label={`Remove ${entry.label}`}
-                          >
-                            x
-                          </button>
-                        </div>
-                      ))}
-                    </div>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
-            )}
+              {adminOverrideEntries.length > 0 && null}
+            </div>
           </CardContent>
         </Card>
 
@@ -1299,11 +1518,13 @@ const CoverPageWorkflow = ({
                                     disabled={effectiveReadOnly}
                                   >
                                     <option value="">Assign to grade</option>
-                                    {Object.entries(GRADE_CODE_MAP).map(([gradeKey]) => (
-                                      <option key={gradeKey} value={gradeKey}>
-                                        {resolveGradeLabel(gradeKey, resolvedGradeNames[gradeKey])}
-                                      </option>
-                                    ))}
+                                    {Object.entries(GRADE_CODE_MAP)
+                                      .filter(([gradeKey]) => isGradeEnabled(gradeKey))
+                                      .map(([gradeKey]) => (
+                                        <option key={gradeKey} value={gradeKey}>
+                                          {resolveGradeLabel(gradeKey, resolvedGradeNames[gradeKey])}
+                                        </option>
+                                      ))}
                                   </select>
                                 </div>
                                 <img

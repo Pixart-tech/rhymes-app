@@ -31,7 +31,7 @@ from io import BytesIO
 from pathlib import Path, PureWindowsPath
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile, Form, Request
+from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile, Form, Request, Query
 from fastapi.staticfiles import StaticFiles
 
 from pydantic import BaseModel, EmailStr, Field
@@ -81,6 +81,11 @@ generate_rhyme_svg = rhymes.generate_rhyme_svg
 MAX_RHYME_PAGES = 44
 
 COVER_GRADE_LABELS = ["Playgroup", "Nursery", "LKG", "UKG"]
+STICKER_CODES = {
+    "nursery": "100000238",
+    "lkg": "100000318",
+    "ukg": "100000421",
+}
 
 _sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
 _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
@@ -90,25 +95,26 @@ _localize_svg_image_assets = svg_processing.localize_svg_image_assets
 PUBLIC_DIR = (ROOT_DIR / "public").resolve()
 COVER_THEME_PUBLIC_DIR = PUBLIC_DIR / "cover-themes"
 LIBRARY_ROOT_DIR = PUBLIC_DIR / "cover-library"
-LIBRARY_THEMES_DIR = LIBRARY_ROOT_DIR / "themes"
-LIBRARY_COLOURS_DIR = LIBRARY_ROOT_DIR / "colours"  # legacy location for colour PNGs
-LIBRARY_COVERS_DIR = LIBRARY_ROOT_DIR / "covers"  # preferred location for cover+colour PNGs (C1-C4)
-LIBRARY_COLOUR_BASE_DIRS = [LIBRARY_COVERS_DIR, LIBRARY_COLOURS_DIR]
+UPLOAD_COVERS_DIR = (PUBLIC_DIR / "Assets" / "covers").resolve()
+BACKEND_COVERS_DIR = (Path(__file__).resolve().parent / "Assets" / "covers").resolve()
+# Use only the colours folder for library assets.
+LIBRARY_COVERS_DIR = LIBRARY_ROOT_DIR / "colours"
+LIBRARY_COLOUR_BASE_DIRS = [LIBRARY_COVERS_DIR]
 LIBRARY_THEME_KEYS = [f"Theme {i}" for i in range(1, 17)]
 LIBRARY_GRADE_CODES = ["P", "N", "L", "U"]
 DEFAULT_COLOUR_VERSIONS = [f"V{i}" for i in range(1, 17)]
 PUBLIC_URL_PREFIX = "/public"
 SUBJECT_PDF_DIR = PUBLIC_DIR / "subject-pdfs"
 
-try:
-    COVER_THEME_PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
-    LIBRARY_THEMES_DIR.mkdir(parents=True, exist_ok=True)
-    LIBRARY_COVERS_DIR.mkdir(parents=True, exist_ok=True)
-    LIBRARY_COLOURS_DIR.mkdir(parents=True, exist_ok=True)
-    
-    SUBJECT_PDF_DIR.mkdir(parents=True, exist_ok=True)
-except OSError as exc:
-    logger.warning("Unable to create public cover directory %s: %s", COVER_THEME_PUBLIC_DIR, exc)
+# try:
+#     COVER_THEME_PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+#     LIBRARY_THEMES_DIR.mkdir(parents=True, exist_ok=True)
+#     LIBRARY_COVERS_DIR.mkdir(parents=True, exist_ok=True)
+#     LIBRARY_COLOURS_DIR.mkdir(parents=True, exist_ok=True)
+#     UPLOAD_COVERS_DIR.mkdir(parents=True, exist_ok=True)
+#     SUBJECT_PDF_DIR.mkdir(parents=True, exist_ok=True)
+# except OSError as exc:
+#     logger.warning("Unable to create public cover directory %s: %s", COVER_THEME_PUBLIC_DIR, exc)
 
 
 class CoverThemeImageStore:
@@ -219,7 +225,7 @@ _SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 _IMAGE_EXTENSIONS = (".png", ".apng", ".jpg", ".jpeg", ".webp")
 THUMB_MAX_WIDTH = 320
 PREVIEW_MAX_WIDTH = 1100
-IMAGE_INPUT_BASE = LIBRARY_THEMES_DIR
+IMAGE_INPUT_BASE = LIBRARY_COVERS_DIR
 THUMB_OUTPUT_DIR = LIBRARY_ROOT_DIR / "thumbnails-webp"
 PREVIEW_OUTPUT_DIR = LIBRARY_ROOT_DIR / "previews-webp"
 
@@ -235,11 +241,6 @@ def _sanitize_component(value: str, fallback: str) -> str:
 def _resolve_theme_dir(theme_id: str) -> Path:
     safe_theme_id = _sanitize_component(theme_id, "theme")
     return COVER_THEME_PUBLIC_DIR / safe_theme_id
-
-
-def _resolve_library_theme_dir(theme_key: str) -> Path:
-    safe = _sanitize_component(theme_key, "Theme")
-    return LIBRARY_THEMES_DIR / safe
 
 
 def _get_library_colour_base_dir(prefer_existing: bool = True) -> Path:
@@ -1111,6 +1112,15 @@ def _merge_cover_entries(
     }
 
 
+def _combine_theme_colour(admin_entry: Dict[str, Any], client_entry: Dict[str, Any]) -> Optional[str]:
+    """Return a combined theme_colour string like 'V1_C2' when both ids are present."""
+    theme_id = (admin_entry.get("theme_id") or client_entry.get("theme_id") or "").strip()
+    colour_id = (admin_entry.get("colour_id") or client_entry.get("colour_id") or "").strip()
+    if theme_id and colour_id:
+        return f"{theme_id}_{colour_id}"
+    return None
+
+
 def _build_rhyme_doc_id(school_id: str, grade: str, page_index: int, position: str) -> str:
     """Use the provided school_id verbatim (trimmed) to key rhyme selections per school."""
     safe_school = school_id.strip()
@@ -1124,6 +1134,17 @@ def _verify_and_decode_token(authorization: Optional[str]) -> Dict[str, Any]:
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
     return verify_and_decode_token(authorization)
+
+
+def _verify_and_decode_token_optional(authorization: Optional[str]) -> Dict[str, Any]:
+    """Decode token when provided; allow anonymous access when absent."""
+    if not authorization:
+        return {}
+    try:
+        return verify_and_decode_token(authorization)
+    except HTTPException:
+        # Preserve existing behavior for explicitly bad tokens
+        raise
 
 
 def _rhyme_collection_for_school(school_id: str):
@@ -1170,7 +1191,15 @@ def _strip_binary_fields(record: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _book_collection_for_school(school_id: str):
-    return db.collection("book_selections").document(school_id).collection("classes")
+    """Primary collection for book selections per grade (grades path)."""
+    return db.collection("book_selections").document(school_id).collection("grades")
+
+
+def _stream_book_class_docs(school_id: str):
+    """Stream book selection docs from grades path."""
+    primary_docs = list(_book_collection_for_school(school_id).stream())
+    docs_by_id = {doc.id: doc for doc in primary_docs}
+    return list(docs_by_id.values())
 
 
 def _normalize_class_doc_id(class_name: str) -> str:
@@ -1187,6 +1216,60 @@ def _cover_collection_for_school(school_id: str):
 
 def _cover_root_doc(school_id: str):
     return db.collection("cover_selections").document(school_id)
+
+def _resolve_cover_upload_dir(school_id: str) -> Path:
+    safe_school = re.sub(r"[^A-Za-z0-9_-]", "_", (school_id or "").strip())
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    return (UPLOAD_COVERS_DIR / safe_school).resolve()
+
+def _resolve_backend_cover_dir(school_id: str) -> Path:
+    safe_school = re.sub(r"[^A-Za-z0-9_-]", "_", (school_id or "").strip())
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    return (BACKEND_COVERS_DIR / safe_school).resolve()
+
+
+@api_router.get("/cover-uploads/{school_id}")
+def list_cover_uploads(school_id: str, authorization: Optional[str] = Header(None)):
+    """List uploaded cover files for a school from backend/Assets/covers/<school_id>."""
+    _verify_and_decode_token(authorization)
+    base_dir = _resolve_backend_cover_dir(school_id)
+    try:
+        base_dir.relative_to(BACKEND_COVERS_DIR)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid school id")
+
+    if not base_dir.exists() or not base_dir.is_dir():
+        return {"files": []}
+
+    files: List[Dict[str, str]] = []
+    for entry in sorted(base_dir.iterdir()):
+        if entry.is_file() and entry.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            files.append(
+                {
+                    "name": entry.name,
+                    "path": str(entry),
+                    "url": f"/api/cover-uploads/{school_id}/{entry.name}",
+                }
+            )
+    return {"files": files}
+
+
+@api_router.get("/cover-uploads/{school_id}/{file_name}")
+def get_cover_upload_file(school_id: str, file_name: str, authorization: Optional[str] = Header(None)):
+    """Serve a specific uploaded cover file from backend/Assets/covers/<school_id>."""
+    _verify_and_decode_token(authorization)
+    base_dir = _resolve_backend_cover_dir(school_id)
+    target = (base_dir / file_name).resolve()
+    try:
+        target.relative_to(base_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type, _ = mimetypes.guess_type(target.name)
+    return Response(content=target.read_bytes(), media_type=media_type or "application/octet-stream")
 
 def _format_cover_theme(theme_id: Optional[str]) -> Optional[str]:
     if not theme_id:
@@ -1413,7 +1496,7 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
     school_record = _strip_binary_fields(raw_school_record)
 
     # Aggregate book selections from class documents
-    class_docs = list(_book_collection_for_school(school_id).stream())
+    class_docs = _stream_book_class_docs(school_id)
     book_selections: List[Dict[str, Any]] = []
     latest_book_update: Optional[Any] = None
     for doc in class_docs:
@@ -1425,6 +1508,15 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
         if updated_at and (latest_book_update is None or updated_at > latest_book_update):
             latest_book_update = updated_at
 
+    # Build stickers map per grade when English or Maths skillbooks are selected
+    stickers: Dict[str, str] = {}
+    for item in book_selections:
+        grade_label = (item.get("class_label") or item.get("class") or "").strip()
+        grade_key = grade_label.lower()
+        subject = (item.get("subject") or "").strip().lower()
+        if subject in {"english", "maths"} and grade_key in STICKER_CODES:
+            stickers[grade_label or grade_key] = STICKER_CODES[grade_key]
+
     rhyme_selections = get_selected_rhymes(school_id)
 
     cover_docs = list(
@@ -1433,29 +1525,23 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
         .stream()
     )
     cover_client_grades: Dict[str, Any] = {}
-    cover_admin_grades: Dict[str, Any] = {}
     latest_cover_update: Optional[Any] = None
     for doc in cover_docs:
         data = doc.to_dict() or {}
         doc_id = doc.id or ""
-        is_admin_doc = doc_id.endswith("__admin")
-        grade_key = (data.get("grade") or (doc_id[:-8] if is_admin_doc else doc_id) or "").strip()
+        grade_key = (data.get("grade") or doc_id or "").strip()
         if not grade_key:
             continue
-        if is_admin_doc:
-            cover_admin_grades[grade_key] = data
-        else:
-            cover_client_grades[grade_key] = data
+        cover_client_grades[grade_key] = data
         updated_at = data.get("updated_at")
         if updated_at and (latest_cover_update is None or updated_at > latest_cover_update):
             latest_cover_update = updated_at
 
     cover_grades: Dict[str, Any] = {}
-    for grade_key in set([*cover_client_grades.keys(), *cover_admin_grades.keys()]):
-        cover_grades[grade_key] = _merge_cover_entries(
-            cover_client_grades.get(grade_key, {}),
-            cover_admin_grades.get(grade_key, {}),
-        )
+    for grade_key, client_entry in cover_client_grades.items():
+        merged = _merge_cover_entries(client_entry, {})
+        merged["theme_colour"] = _combine_theme_colour({}, client_entry)
+        cover_grades[grade_key] = merged
 
     def _format_timestamp(value: Any) -> Optional[str]:
         if isinstance(value, datetime):
@@ -1470,6 +1556,7 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
         },
         "books": {
             "selections": book_selections,
+            "stickers": stickers,
             "excluded_assessments": [],
             "source": "wizard",
             "updated_at": _format_timestamp(latest_book_update),
@@ -1562,7 +1649,13 @@ async def save_book_selections(
     now = datetime.utcnow()
     class_groups: Dict[str, List[Dict[str, Any]]] = {}
     for item in payload.selections:
-        class_name = (item.get("class") or "").strip()
+        # Prefer the underlying grade key (class / class_name) over display labels.
+        class_name = (
+            item.get("class")
+            or item.get("class_name")
+            or item.get("class_label")
+            or ""
+        ).strip()
         if not class_name:
             continue
         key = class_name.lower()
@@ -1584,6 +1677,7 @@ async def save_book_selections(
 
         class_record: Dict[str, Any] = {
             "class": class_key,
+            "class_label": class_name,
             "items": merged_items,
             "excluded_assessments": merged_excluded,
             "updated_at": now,
@@ -1640,6 +1734,7 @@ def get_book_selections(school_id: str, authorization: Optional[str] = Header(No
         .select(
             [
                 "class",
+                "class_label",
                 "items",
                 "excluded_assessments",
                 "updated_at",
@@ -1650,13 +1745,45 @@ def get_book_selections(school_id: str, authorization: Optional[str] = Header(No
         )
         .stream()
     )
+    # Append legacy docs not present in the new path
+    try:
+        legacy_docs = list(
+            _book_collection_for_school_legacy_classes(school_id)
+            .select(
+                [
+                    "class",
+                    "class_label",
+                    "items",
+                    "excluded_assessments",
+                    "updated_at",
+                    "source",
+                    "updated_by",
+                    "updated_by_email",
+                ]
+            )
+            .stream()
+        )
+        existing_ids = {doc.id for doc in class_docs}
+        for doc in legacy_docs:
+            if doc.id not in existing_ids:
+                class_docs.append(doc)
+    except Exception:
+        pass
     classes: List[Dict[str, Any]] = []
     for doc in class_docs:
         data = doc.to_dict() or {}
         data.setdefault("class", data.get("class") or doc.id)
+        data.setdefault("class_label", data.get("class_label") or doc.id)
+        data["doc_id"] = doc.id
         classes.append(data)
 
     return {"classes": classes}
+
+
+@api_router.get("/book-selections/{school_id}/grades")
+def get_book_selections_grades(school_id: str, authorization: Optional[str] = Header(None)):
+    """Return saved book selections grouped per grade (alias to main endpoint)."""
+    return get_book_selections(school_id, authorization)
 
 
 @api_router.post("/cover-selections")
@@ -1813,6 +1940,20 @@ def get_cover_selections(school_id: str, authorization: Optional[str] = Header(N
         "client_theme_label": root_data.get("client_theme_label"),
         "library": _build_library_manifest(request),
     }
+
+
+@api_router.get("/cover-selections/{school_id}/exists")
+def cover_selection_exists(
+    school_id: str, authorization: Optional[str] = Header(None)
+):
+    """Lightweight check to see if any cover selection doc exists for the school."""
+    _verify_and_decode_token(authorization)
+    try:
+        doc_iter = _cover_collection_for_school(school_id).limit(1).stream()
+        has_any = any(True for _ in doc_iter)
+    except Exception:
+        has_any = False
+    return {"has_covers": has_any}
 
 
 @api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
@@ -2016,7 +2157,22 @@ async def select_rhyme(input: RhymeSelectionCreate):
 @api_router.get("/rhymes/status/{school_id}")
 async def get_grade_status(school_id: str):
     """Get selection status for all grades"""
-    grades = ["nursery", "lkg", "ukg", "playgroup"]
+    school_doc = db.collection("schools").document(school_id).get()
+    enabled_grades = []
+    if school_doc.exists:
+        record = school_doc.to_dict() or {}
+        grades_map = record.get("grades") or {}
+        if isinstance(grades_map, dict):
+            for key, value in grades_map.items():
+                try:
+                    normalized_key = key.strip().lower()
+                except Exception:
+                    continue
+                is_enabled = bool(value.get("enabled")) if isinstance(value, dict) else False
+                if is_enabled:
+                    enabled_grades.append(normalized_key)
+
+    grades = enabled_grades or ["nursery", "lkg", "ukg", "playgroup"]
     status = []
 
     for grade in grades:

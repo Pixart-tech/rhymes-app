@@ -10,8 +10,9 @@ const firebaseConfig = {
   storageBucket: "sales-catelogue.firebasestorage.app",
   messagingSenderId: "595821344222",
   appId: "1:595821344222:web:91fac7c9ddcff9bc7cd94f",
-  measurementId: "G-0189X9Q78X"
+  measurementId: "G-DN7RZKN313"
 };
+
 
 const missingKeys = Object.entries(firebaseConfig)
   .filter(([, value]) => !value)

@@ -188,7 +188,8 @@ const ModeSelectionPage = ({
   isFrozen = false,
   onBackToAdmin,
   onBackToDashboard,
-  onEditProfile
+  onEditProfile,
+  modePending
 }) => {
   const hasBookSelections = useMemo(() => {
     const schoolId = school?.school_id;
@@ -324,24 +325,27 @@ const ModeSelectionPage = ({
                 return (
                   <Card
                     key={option.id}
-                    className="group aspect-square flex flex-col cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg border border-slate-200 bg-white"
+                    className="group h-full min-h-[220px] sm:min-h-[240px] flex flex-col cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg border border-slate-200 bg-white"
                     onClick={() => onModeSelect(option.id)}
                   >
-                    <CardContent className="flex-1 flex flex-col justify-between p-3 sm:p-4 text-center gap-1.5">
-                    <div className="space-y-1.5">
+                    <CardContent className="flex-1 flex flex-col justify-between p-3 sm:p-4 text-center gap-2">
+                      <div className="space-y-2">
                         <div className={`w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-lg sm:text-xl shadow`}>
                           <IconComponent className="h-6 w-6 sm:h-7 sm:w-7" />
                         </div>
-                        <h3 className="text-sm sm:text-lg font-semibold text-gray-800 truncate">{option.title}</h3>
-                        <p className="text-xs sm:text-sm text-gray-600 leading-relaxed line-clamp-2 overflow-hidden text-ellipsis">
+                        <h3 className="text-sm sm:text-lg font-semibold text-gray-800">{option.title}</h3>
+                        <p className="text-[12px] sm:text-sm text-gray-600 leading-snug line-clamp-3">
                           {option.description}
                         </p>
-                    </div>
+                      </div>
                       {showCoverButton && (
                         <Button
                           type="button"
                           onClick={() => onModeSelect(option.id)}
-                          className="w-full text-sm sm:text-base bg-gradient-to-r from-orange-400 to-red-400 text-white shadow hover:from-orange-500 hover:to-red-500"
+                          disabled={modePending && option.id === 'books'}
+                          className={`w-full text-[11px] sm:text-sm leading-tight bg-gradient-to-r from-orange-400 to-red-400 text-white shadow hover:from-orange-500 hover:to-red-500 ${
+                            modePending && option.id === 'books' ? 'opacity-50 pointer-events-none' : ''
+                          }`}
                         >
                           {buttonLabel}
                         </Button>
@@ -861,14 +865,23 @@ const GradeSelectionPage = ({
   useEffect(() => {
     const grades = school?.grades;
     if (!grades) {
-      setEnabledGradeMap({});
+      // Default to all disabled when no grade map is provided
+      const base: Record<string, boolean> = {};
+      GRADE_OPTIONS.forEach((grade) => {
+        base[grade.id] = false;
+        if (grade.id === 'playgroup') {
+          base.pg = false;
+        }
+      });
+      setEnabledGradeMap(base);
       return;
     }
     const enabled: Record<string, boolean> = {};
-    Object.entries(grades).forEach(([key, value]) => {
-      const isEnabled = value && typeof value === 'object' ? Boolean(value.enabled) : false;
-      enabled[key.toLowerCase()] = isEnabled;
-      if (key.toLowerCase() === 'playgroup') {
+    GRADE_OPTIONS.forEach((grade) => {
+      const entry = grades[grade.id];
+      const isEnabled = entry && typeof entry === 'object' ? Boolean(entry.enabled) : false;
+      enabled[grade.id] = isEnabled;
+      if (grade.id === 'playgroup') {
         enabled.pg = isEnabled;
       }
     });
@@ -2878,6 +2891,7 @@ export function RhymesWorkflowApp() {
   const [workspaceUser, setWorkspaceUser] = useState<WorkspaceUserProfile | null>(
     () => persistedState.workspaceUser ?? null
   );
+  const [modePending, setModePending] = useState(false);
   const [school, setSchool] = useState<SchoolProfile | null>(() => persistedState.school ?? null);
   const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
   const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
@@ -2888,6 +2902,16 @@ export function RhymesWorkflowApp() {
       ...(persistedState.coverDefaults || {}),
       gradeNames: buildGradeNamesFromSchool(persistedState.school)
     })
+  );
+  const resolveEnabledGrade = useCallback(
+    (gradeId: string): boolean => {
+      const entry = school?.grades?.[gradeId];
+      if (entry === undefined) {
+        return false;
+      }
+      return Boolean(entry?.enabled);
+    },
+    [school?.grades]
   );
   const { user, loading: authLoading, signOut: authSignOut, getIdToken } = useAuth();
   const [isEditingSchoolProfile, setIsEditingSchoolProfile] = useState(false);
@@ -3113,19 +3137,74 @@ export function RhymesWorkflowApp() {
     setIsEditingSchoolProfile(false);
   };
 
-  const handleModeSelect = (mode) => {
-    setSelectedMode(mode);
-    if (mode === 'cover') {
-      // Jump directly into cover workflow with the first grade instead of showing grade selection.
-      setSelectedGrade(GRADE_OPTIONS[0]?.id || null);
-    } else {
-      setSelectedGrade(null);
+  const ensureCoverSelectionsExist = useCallback(async () => {
+    if (!school?.school_id) {
+      toast.error('School information is missing. Please reload and try again.');
+      return false;
     }
-    if (mode === 'cover') {
-      setIsCoverDetailsStepComplete(false);
-      setCoverWorkflowIntent(selectionsFrozen ? 'view' : 'edit');
+    try {
+      const token = await getIdToken?.();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const response = await axios.get(`${API}/cover-selections/${school.school_id}/exists`, {
+        headers,
+        validateStatus: () => true,
+      });
+      if (response.status >= 400) {
+        toast.warning('Please complete cover page selections before moving to books.');
+        return false;
+      }
+      const hasCovers = response.data?.has_covers === true;
+      if (!hasCovers) {
+        toast.warning('Please complete cover page selections before moving to books.');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.warn('Unable to verify cover selections', error);
+      toast.error('Unable to verify cover selections. Please try again.');
+      return false;
     }
-  };
+  }, [API, getIdToken, school?.school_id]);
+
+  const resolveFirstEnabledGrade = useCallback(() => {
+    for (const option of GRADE_OPTIONS) {
+      if (resolveEnabledGrade(option.id)) {
+        return option.id;
+      }
+    }
+    return null;
+  }, [resolveEnabledGrade]);
+
+  const handleModeSelect = useCallback(
+    async (mode) => {
+      if (modePending) {
+        return;
+      }
+      setModePending(true);
+      try {
+        if (mode === 'books') {
+          const ok = await ensureCoverSelectionsExist();
+          if (!ok) {
+            return;
+          }
+        }
+        setSelectedMode(mode);
+        if (mode === 'cover') {
+          // Jump directly into cover workflow with the first enabled grade instead of showing grade selection.
+          setSelectedGrade(resolveFirstEnabledGrade());
+        } else {
+          setSelectedGrade(null);
+        }
+        if (mode === 'cover') {
+          setIsCoverDetailsStepComplete(false);
+          setCoverWorkflowIntent(selectionsFrozen ? 'view' : 'edit');
+        }
+      } finally {
+        setModePending(false);
+      }
+    },
+    [ensureCoverSelectionsExist, modePending, resolveFirstEnabledGrade, selectionsFrozen]
+  );
 
   const handleGradeSelect = (grade, mode) => {
     if (mode) {
@@ -3225,6 +3304,7 @@ export function RhymesWorkflowApp() {
           onBackToAdmin={handleReturnToAdminDashboard}
           onBackToDashboard={!isSuperAdminUser ? handleReturnToBranchList : undefined}
           onEditProfile={() => setIsEditingSchoolProfile(true)}
+          modePending={modePending}
         />
       ) : !selectedGrade && (selectedMode === 'rhymes' || selectedMode === 'cover') ? (
         <GradeSelectionPage

@@ -125,6 +125,37 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const persistedWorkspaceRole = persistedState?.workspaceUser?.role;
   const isPersistedAdmin = persistedWorkspaceRole === 'super-admin';
   const initialGradeNames = deriveGradeLabelsFromSchool(persistedState?.school?.grades);
+  const enabledGrades = useMemo(() => {
+    const base: Record<string, boolean> = {
+      playgroup: false,
+      nursery: false,
+      lkg: false,
+      ukg: false,
+      pg: false,
+    };
+    const grades = persistedState?.school?.grades || {};
+    Object.entries(grades).forEach(([key, value]) => {
+      const normalized = key.toLowerCase();
+      const isEnabled = value && typeof value === 'object' ? Boolean((value as any).enabled) : false;
+      base[normalized] = isEnabled;
+      if (normalized === 'playgroup') {
+        base.pg = isEnabled;
+      }
+    });
+    return base;
+  }, [persistedState?.school?.grades]);
+
+  const isGradeEnabled = useCallback(
+    (className: string): boolean => {
+      const normalized = className.toLowerCase();
+      if (normalized === 'pg' || normalized.includes('playgroup')) return enabledGrades.playgroup;
+      if (normalized.includes('nursery')) return enabledGrades.nursery;
+      if (normalized === 'lkg') return enabledGrades.lkg;
+      if (normalized === 'ukg') return enabledGrades.ukg;
+      return false;
+    },
+    [enabledGrades]
+  );
 
   const [isLoadingSavedSelections, setIsLoadingSavedSelections] = useState(false);
   const [currentClassIndex, setCurrentClassIndex] = useState<number>(-1);
@@ -411,8 +442,17 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     setShowTermsModal(false);
   };
 
-  const handleStartClass = (index: number) => {
-    const className = SCHOOL_DATA[index]?.name;
+  const resolveClassIndex = useCallback((className: string) => {
+    return SCHOOL_DATA.findIndex((c) => c.name === className);
+  }, []);
+
+  const handleStartClass = (className: string) => {
+    const index = resolveClassIndex(className);
+    if (index < 0) return;
+    if (className && !isGradeEnabled(className)) {
+      toast.error('This grade is disabled for this school.');
+      return;
+    }
     const readOnlyForClass = className ? isClassReadOnly(className) : false;
     const isConfigured = className ? configuredClasses.has(className) : false;
     setCurrentClassIndex(index);
@@ -432,7 +472,9 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     setSkipWorkMap({});
   };
   
-  const handleViewSummary = (index: number) => {
+  const handleViewSummary = (className: string) => {
+    const index = resolveClassIndex(className);
+    if (index < 0) return;
     setCurrentClassIndex(index);
     setViewState('SUMMARY');
   }
@@ -827,6 +869,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       }
   }, []);
 
+
   const fetchSavedSelections = useCallback(async () => {
     if (!bookSelectionSchoolId) {
       return;
@@ -836,11 +879,26 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       const trimmed = (raw || '').trim();
       if (!trimmed) return '';
       const lower = trimmed.toLowerCase();
-      if (lower === 'playgroup') return 'PG';
-      return (
-        SCHOOL_DATA.find((c) => c.name.toLowerCase() === lower)?.name ||
-        trimmed
+      const mapToCanonical = (key: string) => {
+        if (key === 'pg' || key === 'playgroup') return 'PG';
+        if (key === 'nursery') return 'Nursery';
+        if (key === 'lkg') return 'LKG';
+        if (key === 'ukg') return 'UKG';
+        return key;
+      };
+      // Try label -> key mapping first
+      const labelMatch = Object.entries(gradeNames).find(
+        ([, label]) => (label || '').toString().trim().toLowerCase() === lower
       );
+      if (labelMatch) {
+        const key = labelMatch[0].toLowerCase();
+        return mapToCanonical(key);
+      }
+      if (lower === 'playgroup' || lower === 'pg') return 'PG';
+      if (lower === 'nursery') return 'Nursery';
+      if (lower === 'lkg') return 'LKG';
+      if (lower === 'ukg') return 'UKG';
+      return SCHOOL_DATA.find((c) => c.name.toLowerCase() === lower)?.name || trimmed;
     };
     try {
       const token = await getIdToken();
@@ -857,7 +915,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       const seenSelections: Set<string> = new Set();
 
       classes.forEach((entry: any) => {
-        const rawClass = entry.class || entry.class_name || '';
+        const rawClass = entry.doc_id || entry.class_label || entry.class || entry.class_name || '';
         if (!rawClass) {
           return;
         }
@@ -1303,7 +1361,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {SCHOOL_DATA.map((cls, index) => {
+          {SCHOOL_DATA.filter((cls) => isGradeEnabled(cls.name)).map((cls, index) => {
             const isConfigured = configuredOrCompletedClasses.has(cls.name);
             const classHasSelections = selections.some((s) => s.className === cls.name);
             const bookCount = classHasSelections ? calculateBookCount(cls.name) : 0;
@@ -1337,35 +1395,34 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
                     </div>
                     
                     <div className="mt-4 flex gap-2">
-                         {classHasSelections ? (
-                             <>
-                                <button 
-                                    type="button"
-                                    onClick={() => handleViewSummary(index)}
-                                    className="flex-1 text-xs py-2 bg-white border rounded-lg"
-                                >
-                                    {readOnlyForClass || isCompleted ? 'View' : 'Summary'}
-                                </button>
-                                {!readOnlyForClass && (
-                                  <button 
-                                      type="button"
-                                      onClick={() => handleStartClass(index)}
-                                      className={`flex-1 text-xs py-2 rounded-lg ${theme.primary} text-white`}
-                                  >
-                                      Edit
-                                  </button>
-                                )}
-                             </>
-                         ) : (
-                             <button
-                                type="button"
-                                onClick={() => handleStartClass(index)}
-                                disabled={readOnlyForClass}
-                                className={`w-full text-xs py-2 rounded-lg ${theme.textSub} bg-white ${readOnlyForClass ? 'opacity-50 cursor-not-allowed' : ''}`}
-                             >
-                                Start
-                             </button>
-                         )}
+                      {classHasSelections ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleViewSummary(cls.name)}
+                            className="flex-1 text-xs py-2 bg-white border rounded-lg"
+                          >
+                            {readOnlyForClass || isCompleted ? 'View' : 'Summary'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleStartClass(cls.name)}
+                            disabled={readOnlyForClass}
+                            className={`flex-1 text-xs py-2 rounded-lg ${theme.primary} text-white ${readOnlyForClass ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            Edit
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleStartClass(cls.name)}
+                          disabled={readOnlyForClass}
+                          className={`w-full text-xs py-2 rounded-lg ${theme.textSub} bg-white ${readOnlyForClass ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          Start
+                        </button>
+                      )}
                     </div>
                 </div>
             );
