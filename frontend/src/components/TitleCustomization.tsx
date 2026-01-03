@@ -7,6 +7,7 @@ interface TitleCustomizationProps {
   classData: ClassData;
   selections: SelectionRecord[];
   onUpdateSelections: (updatedSelections: SelectionRecord[]) => void;
+  showCodes?: boolean;
   
   assessmentDetails: { defaultCoreCoverTitle: string } | null;
   customAssessmentTitle: string | undefined;
@@ -17,7 +18,7 @@ interface TitleCustomizationProps {
 }
 
 const TitleCustomization: React.FC<TitleCustomizationProps> = ({ 
-    classData, selections, onUpdateSelections,
+    classData, selections, onUpdateSelections, showCodes = true,
     assessmentDetails, customAssessmentTitle, onUpdateAssessmentTitle,
     onNext, onBack
 }) => {
@@ -39,12 +40,12 @@ const TitleCustomization: React.FC<TitleCustomizationProps> = ({
       onUpdateSelections(newSelections);
   };
 
-  const InputGroup = ({ label, colorClass, titleValue, idValue, spineValue, onTitleChange, onIdChange, onSpineChange, defaultTitle, defaultId, defaultSpine }: any) => (
+  const InputGroup = ({ label, colorClass, titleValue, idValue, spineValue, onTitleChange, onIdChange, onSpineChange, defaultTitle, defaultId, defaultSpine, showCodes }: any) => (
       <div className="bg-slate-50 p-3 rounded-md border border-slate-200">
           <div className="flex items-center gap-2 mb-2">
             <span className={`text-xs font-bold uppercase ${colorClass} bg-white px-2 py-0.5 rounded border border-slate-200`}>{label}</span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className={`grid grid-cols-1 ${showCodes ? 'md:grid-cols-3' : ''} gap-3`}>
               {/* Title Input */}
               <div className="relative">
                   <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1 ml-1">Cover Title</label>
@@ -62,36 +63,40 @@ const TitleCustomization: React.FC<TitleCustomizationProps> = ({
               </div>
 
               {/* ID Input */}
-              <div className="relative">
-                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1 ml-1">Book Code (ID)</label>
-                  <div className="relative">
-                    <input 
-                        type="text" 
-                        className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-xs md:text-sm placeholder-slate-400 bg-white text-slate-900 font-mono !bg-white !text-slate-900 !border-slate-300"
-                        style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
-                        value={idValue ?? defaultId ?? ''}
-                        onChange={(e) => onIdChange(e.target.value)}
-                        placeholder={defaultId}
-                    />
-                    <Hash size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                  </div>
-              </div>
+              {showCodes && (
+                <>
+                <div className="relative">
+                    <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1 ml-1">Book Code (ID)</label>
+                    <div className="relative">
+                      <input 
+                          type="text" 
+                          className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-xs md:text-sm placeholder-slate-400 bg-white text-slate-900 font-mono !bg-white !text-slate-900 !border-slate-300"
+                          style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
+                          value={idValue ?? defaultId ?? ''}
+                          onChange={(e) => onIdChange(e.target.value)}
+                          placeholder={defaultId}
+                      />
+                      <Hash size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    </div>
+                </div>
 
-              {/* Spine Input */}
-              <div className="relative">
-                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1 ml-1">Spine Code</label>
-                  <div className="relative">
-                    <input 
-                        type="text" 
-                        className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-xs md:text-sm placeholder-slate-400 bg-white text-slate-900 font-mono !bg-white !text-slate-900 !border-slate-300"
-                        style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
-                        value={spineValue ?? defaultSpine ?? ''}
-                        onChange={(e) => onSpineChange(e.target.value)}
-                        placeholder={defaultSpine}
-                    />
-                    <BookTemplate size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                  </div>
-              </div>
+                {/* Spine Input */}
+                <div className="relative">
+                    <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1 ml-1">Spine Code</label>
+                    <div className="relative">
+                      <input 
+                          type="text" 
+                          className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-xs md:text-sm placeholder-slate-400 bg-white text-slate-900 font-mono !bg-white !text-slate-900 !border-slate-300"
+                          style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
+                          value={spineValue ?? defaultSpine ?? ''}
+                          onChange={(e) => onSpineChange(e.target.value)}
+                          placeholder={defaultSpine}
+                      />
+                      <BookTemplate size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    </div>
+                </div>
+                </>
+              )}
           </div>
       </div>
   );
@@ -131,49 +136,52 @@ const TitleCustomization: React.FC<TitleCustomizationProps> = ({
                         
                         <div className="space-y-4">
                             {hasCore && (
-                                <InputGroup 
-                                    label="Skill Book / Core"
-                                    colorClass="text-indigo-600 border-indigo-200"
-                                    titleValue={s.customCoreTitle}
-                                    idValue={s.customCoreId}
-                                    spineValue={s.customCoreSpine}
-                                    defaultTitle={opt.defaultCoreCoverTitle}
-                                    defaultId={opt.coreId}
-                                    defaultSpine={opt.coreSpine}
-                                    onTitleChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customCoreTitle', val)}
-                                    onIdChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customCoreId', val)}
+                            <InputGroup 
+                                label="Skill Book / Core"
+                                colorClass="text-indigo-600 border-indigo-200"
+                                titleValue={s.customCoreTitle}
+                                idValue={s.customCoreId}
+                                spineValue={s.customCoreSpine}
+                                showCodes={showCodes}
+                                defaultTitle={opt.defaultCoreCoverTitle}
+                                defaultId={opt.coreId}
+                                defaultSpine={opt.coreSpine}
+                                onTitleChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customCoreTitle', val)}
+                                onIdChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customCoreId', val)}
                                     onSpineChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customCoreSpine', val)}
                                 />
                             )}
 
                             {hasWork && (
-                                <InputGroup 
-                                    label="Workbook"
-                                    colorClass="text-green-600 border-green-200"
-                                    titleValue={s.customWorkTitle}
-                                    idValue={s.customWorkId}
-                                    spineValue={s.customWorkSpine}
-                                    defaultTitle={opt.defaultWorkCoverTitle}
-                                    defaultId={opt.workId}
-                                    defaultSpine={opt.workSpine}
-                                    onTitleChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customWorkTitle', val)}
-                                    onIdChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customWorkId', val)}
+                            <InputGroup 
+                                label="Workbook"
+                                colorClass="text-green-600 border-green-200"
+                                titleValue={s.customWorkTitle}
+                                idValue={s.customWorkId}
+                                spineValue={s.customWorkSpine}
+                                showCodes={showCodes}
+                                defaultTitle={opt.defaultWorkCoverTitle}
+                                defaultId={opt.workId}
+                                defaultSpine={opt.workSpine}
+                                onTitleChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customWorkTitle', val)}
+                                onIdChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customWorkId', val)}
                                     onSpineChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customWorkSpine', val)}
                                 />
                             )}
 
                             {hasAddon && (
-                                <InputGroup 
-                                    label="Add-on"
-                                    colorClass="text-purple-600 border-purple-200"
-                                    titleValue={s.customAddonTitle}
-                                    idValue={s.customAddonId}
-                                    spineValue={s.customAddonSpine}
-                                    defaultTitle={opt.defaultAddonCoverTitle}
-                                    defaultId={opt.addOnId}
-                                    defaultSpine={opt.addOnSpine}
-                                    onTitleChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customAddonTitle', val)}
-                                    onIdChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customAddonId', val)}
+                            <InputGroup 
+                                label="Add-on"
+                                colorClass="text-purple-600 border-purple-200"
+                                titleValue={s.customAddonTitle}
+                                idValue={s.customAddonId}
+                                spineValue={s.customAddonSpine}
+                                showCodes={showCodes}
+                                defaultTitle={opt.defaultAddonCoverTitle}
+                                defaultId={opt.addOnId}
+                                defaultSpine={opt.addOnSpine}
+                                onTitleChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customAddonTitle', val)}
+                                onIdChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customAddonId', val)}
                                     onSpineChange={(val: string) => handleFieldChange(s.subjectName, opt.typeId, 'customAddonSpine', val)}
                                 />
                             )}

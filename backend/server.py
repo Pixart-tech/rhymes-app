@@ -91,17 +91,21 @@ PUBLIC_DIR = (ROOT_DIR / "public").resolve()
 COVER_THEME_PUBLIC_DIR = PUBLIC_DIR / "cover-themes"
 LIBRARY_ROOT_DIR = PUBLIC_DIR / "cover-library"
 LIBRARY_THEMES_DIR = LIBRARY_ROOT_DIR / "themes"
-LIBRARY_COLOURS_DIR = LIBRARY_ROOT_DIR / "colours"
+LIBRARY_COLOURS_DIR = LIBRARY_ROOT_DIR / "colours"  # legacy location for colour PNGs
+LIBRARY_COVERS_DIR = LIBRARY_ROOT_DIR / "covers"  # preferred location for cover+colour PNGs (C1-C4)
+LIBRARY_COLOUR_BASE_DIRS = [LIBRARY_COVERS_DIR, LIBRARY_COLOURS_DIR]
 LIBRARY_THEME_KEYS = [f"Theme {i}" for i in range(1, 17)]
 LIBRARY_GRADE_CODES = ["P", "N", "L", "U"]
-DEFAULT_COLOUR_VERSIONS = [f"V{i}_C" for i in range(1, 9)]
+DEFAULT_COLOUR_VERSIONS = [f"V{i}" for i in range(1, 17)]
 PUBLIC_URL_PREFIX = "/public"
 SUBJECT_PDF_DIR = PUBLIC_DIR / "subject-pdfs"
 
 try:
     COVER_THEME_PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
     LIBRARY_THEMES_DIR.mkdir(parents=True, exist_ok=True)
+    LIBRARY_COVERS_DIR.mkdir(parents=True, exist_ok=True)
     LIBRARY_COLOURS_DIR.mkdir(parents=True, exist_ok=True)
+    
     SUBJECT_PDF_DIR.mkdir(parents=True, exist_ok=True)
 except OSError as exc:
     logger.warning("Unable to create public cover directory %s: %s", COVER_THEME_PUBLIC_DIR, exc)
@@ -238,10 +242,30 @@ def _resolve_library_theme_dir(theme_key: str) -> Path:
     return LIBRARY_THEMES_DIR / safe
 
 
-def _resolve_library_colour_path(version: str, grade_code: str, extension: str = ".png") -> Path:
-    safe_version = _sanitize_component(version, "V1_C")
+def _get_library_colour_base_dir(prefer_existing: bool = True) -> Path:
+    """
+    Prefer the new ``covers`` folder when it exists; fall back to the legacy
+    ``colours`` folder if that's where PNGs currently live.
+    """
+    if prefer_existing:
+        for base_dir in LIBRARY_COLOUR_BASE_DIRS:
+            try:
+                if base_dir.exists() and any(base_dir.iterdir()):
+                    return base_dir
+            except OSError:
+                continue
+
+    for base_dir in LIBRARY_COLOUR_BASE_DIRS:
+        if base_dir.exists():
+            return base_dir
+    return LIBRARY_COLOUR_BASE_DIRS[0]
+
+
+def _resolve_library_colour_path(version: str, grade_code: str, extension: str = ".png", *, for_write: bool = False) -> Path:
+    safe_version = _sanitize_component(version, "V1")
     safe_grade = _sanitize_component(grade_code, "P")
-    return (LIBRARY_COLOURS_DIR / safe_version) / f"{safe_grade}{extension}"
+    base_dir = LIBRARY_COLOUR_BASE_DIRS[0] if for_write else _get_library_colour_base_dir()
+    return (base_dir / safe_version) / f"{safe_grade}{extension}"
 
 def _resolve_subject_pdf_path(class_name: str, subject_name: str, filename: str) -> Path:
     safe_class = _sanitize_component(class_name, "class")
@@ -531,6 +555,14 @@ def _write_public_image(target_path: Path, content: bytes) -> None:
         raise HTTPException(status_code=500, detail="Unable to store uploaded image.") from exc
 
 
+COLOUR_FILE_STEMS_BY_GRADE: Dict[str, list[str]] = {
+    "P": ["C1", "P", "PG", "PG1"],
+    "N": ["C2", "N", "NUR", "NURSERY"],
+    "L": ["C3", "L", "LKG"],
+    "U": ["C4", "U", "UKG"],
+}
+
+
 def _build_library_theme_payload(theme_key: str, request: Optional[Request] = None) -> Dict[str, Any]:
     theme_dir = _resolve_library_theme_dir(theme_key)
     existing = _find_existing_image(theme_dir, "cover")
@@ -560,25 +592,86 @@ def _build_library_theme_payload(theme_key: str, request: Optional[Request] = No
     }
 
 
-def _build_library_manifest(request: Optional[Request] = None) -> Dict[str, Any]:
-    themes = [_build_library_theme_payload(theme_key, request) for theme_key in LIBRARY_THEME_KEYS]
+def _list_colour_version_dirs() -> Tuple[List[Tuple[str, Path]], Path]:
+    """
+    Return colour version folders, preferring the new ``covers`` path but
+    falling back to the legacy ``colours`` folder when needed.
+    """
+    for base_dir in LIBRARY_COLOUR_BASE_DIRS:
+        versions: List[Tuple[str, Path]] = []
+        if base_dir.exists():
+            for entry in sorted(base_dir.iterdir()):
+                if entry.is_dir():
+                    raw_name = entry.name.strip() or entry.name
+                    version_id = raw_name.upper()
+                    versions.append((version_id, entry))
+        if versions:
+            return versions, base_dir
+    fallback_base = _get_library_colour_base_dir(prefer_existing=False)
+    return [], fallback_base
 
-    colour_versions: List[str] = []
-    if LIBRARY_COLOURS_DIR.exists():
-        for entry in sorted(LIBRARY_COLOURS_DIR.iterdir()):
-            if entry.is_dir():
-                colour_versions.append(entry.name)
-    if not colour_versions:
+
+def _build_colour_grade_map(version_dir: Path, request: Optional[Request]) -> Dict[str, Optional[str]]:
+    grade_map: Dict[str, Optional[str]] = {}
+    for grade_code in LIBRARY_GRADE_CODES:
+        stems = COLOUR_FILE_STEMS_BY_GRADE.get(grade_code, [grade_code])
+        colour_path: Optional[Path] = None
+        for stem in stems:
+            colour_path = _find_existing_image(version_dir, stem)
+            if colour_path:
+                break
+        grade_map[grade_code] = _public_url_for(colour_path, request) if colour_path else None
+    return grade_map
+
+
+def _build_theme_from_colour_dir(
+    version_id: str, version_dir: Path, request: Optional[Request] = None
+) -> Dict[str, Any]:
+    cover_path: Optional[Path] = None
+    for stem in COLOUR_FILE_STEMS_BY_GRADE.get("P", ["C1"]):
+        cover_path = _find_existing_image(version_dir, stem)
+        if cover_path:
+            break
+    if cover_path is None and version_dir.exists():
+        for entry in sorted(version_dir.iterdir()):
+            if entry.is_file() and entry.suffix.lower() in _IMAGE_EXTENSIONS:
+                cover_path = entry
+                break
+
+    label = version_id
+    match = re.search(r"(\d+)", version_id)
+    if match:
+        label = f"Theme {match.group(1)}"
+
+    public_cover = _public_url_for(cover_path, request) if cover_path else None
+    return {
+        "id": version_id,
+        "label": label,
+        "coverUrl": public_cover,
+        "thumbnailUrl": public_cover,
+        "previewUrl": None,
+    }
+
+
+def _build_library_manifest(request: Optional[Request] = None) -> Dict[str, Any]:
+    colour_entries, colour_base_dir = _list_colour_version_dirs()
+    colour_entries = colour_entries[: len(LIBRARY_THEME_KEYS)]
+    using_colour_dirs = len(colour_entries) > 0
+
+    if using_colour_dirs:
+        colour_versions = [version_id for version_id, _ in colour_entries]
+        themes = [
+            _build_theme_from_colour_dir(version_id, version_dir, request)
+            for version_id, version_dir in colour_entries
+        ]
+    else:
         colour_versions = DEFAULT_COLOUR_VERSIONS
+        themes = [_build_library_theme_payload(theme_key, request) for theme_key in LIBRARY_THEME_KEYS]
+        colour_entries = [(version, colour_base_dir / version) for version in colour_versions]
 
     colours: Dict[str, Dict[str, Optional[str]]] = {}
-    for version in colour_versions:
-        version_dir = LIBRARY_COLOURS_DIR / version
-        grade_map: Dict[str, Optional[str]] = {}
-        for grade_code in LIBRARY_GRADE_CODES:
-            colour_path = _find_existing_image(version_dir, grade_code)
-            grade_map[grade_code] = _public_url_for(colour_path, request) if colour_path else None
-        colours[version] = grade_map
+    for version_id, version_dir in colour_entries:
+        colours[version_id] = _build_colour_grade_map(version_dir, request)
 
     return {
         "themes": themes,
@@ -976,6 +1069,46 @@ class CoverSelectionPayload(BaseModel):
     colour_id: Optional[str] = None
     colour_label: Optional[str] = None
     status: Optional[str] = None
+    is_selected: Optional[bool] = True
+
+
+def _cover_doc_id(grade: str, *, admin: bool = False) -> str:
+    safe_grade = (grade or "").strip().lower().replace(" ", "_")
+    return f"{safe_grade}__admin" if admin else safe_grade
+
+
+def _merge_cover_entries(
+    client_entry: Dict[str, Any],
+    admin_entry: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Return effective cover selection per grade:
+    - If an admin override exists, prefer it.
+    - Otherwise, use the client baseline.
+    """
+    def _entry_value(entry: Dict[str, Any], key: str, fallback_key: str = "") -> Optional[str]:
+        if not entry:
+            return None
+        return entry.get(key) or (entry.get(fallback_key) if fallback_key else None)
+
+    if admin_entry:
+        admin_theme = _format_cover_theme(_entry_value(admin_entry, "theme_id", "theme"))
+        admin_colour_raw = _entry_value(admin_entry, "colour_id", "theme_colour")
+        return {
+            "theme": admin_theme,
+            "theme_colour": _format_cover_colour(admin_theme, admin_colour_raw, admin_entry.get("grade")),
+            "status": admin_entry.get("status"),
+            "is_selected": admin_entry.get("is_selected", True),
+        }
+
+    client_theme = _format_cover_theme(_entry_value(client_entry, "theme_id", "theme"))
+    client_colour_raw = _entry_value(client_entry, "colour_id", "theme_colour")
+    return {
+        "theme": client_theme,
+        "theme_colour": _format_cover_colour(client_theme, client_colour_raw, client_entry.get("grade")),
+        "status": client_entry.get("status"),
+        "is_selected": client_entry.get("is_selected", True),
+    }
 
 
 def _build_rhyme_doc_id(school_id: str, grade: str, page_index: int, position: str) -> str:
@@ -1040,6 +1173,11 @@ def _book_collection_for_school(school_id: str):
     return db.collection("book_selections").document(school_id).collection("classes")
 
 
+def _normalize_class_doc_id(class_name: str) -> str:
+    """Return a stable document id for a class key (lowercase, spaces->underscores)."""
+    return (class_name or "").strip().lower().replace(" ", "_")
+
+
 def _rhyme_collection_for_school(school_id: str):
     return db.collection("rhyme_selections").document(school_id).collection("classes")
 
@@ -1047,27 +1185,80 @@ def _rhyme_collection_for_school(school_id: str):
 def _cover_collection_for_school(school_id: str):
     return db.collection("cover_selections").document(school_id).collection("grades")
 
+def _cover_root_doc(school_id: str):
+    return db.collection("cover_selections").document(school_id)
+
 def _format_cover_theme(theme_id: Optional[str]) -> Optional[str]:
     if not theme_id:
         return None
     theme_str = str(theme_id).strip()
     if not theme_str:
         return None
-    match = re.match(r"theme(\d+)", theme_str, re.IGNORECASE)
+    match = re.match(r"theme\s*(\d+)", theme_str, re.IGNORECASE)
     if match:
         return f"V{match.group(1)}"
     return theme_str
 
-def _format_cover_colour(theme_code: Optional[str], colour_id: Optional[str]) -> Optional[str]:
-    if not colour_id:
+def _grade_to_colour_stem(grade_key: Optional[str]) -> Optional[str]:
+    if not grade_key:
         return None
-    colour_str = str(colour_id).strip()
-    if not colour_str:
+    normalized = grade_key.strip().lower()
+    if not normalized:
         return None
-    match = re.match(r"colour(\d+)", colour_str, re.IGNORECASE)
-    if match and theme_code:
-        return f"{theme_code}_C{match.group(1)}"
-    return colour_str
+    mapping = {
+        "playgroup": "C1",
+        "pg": "C1",
+        "p": "C1",
+        "toddler": "C1",
+        "nursery": "C2",
+        "n": "C2",
+        "nur": "C2",
+        "nurs": "C2",
+        "lkg": "C3",
+        "l": "C3",
+        "ukg": "C4",
+        "u": "C4",
+    }
+    return mapping.get(normalized)
+
+
+def _format_cover_colour(
+    theme_code: Optional[str],
+    colour_id: Optional[str],
+    grade_key: Optional[str] = None,
+) -> Optional[str]:
+    colour_number: Optional[str] = None
+    version: Optional[str] = None
+
+    if colour_id:
+        colour_str = str(colour_id).strip()
+        if colour_str:
+            match_version = re.search(r"v\s*(\d+)", colour_str, re.IGNORECASE)
+            if match_version:
+                version = f"V{match_version.group(1)}"
+            match_colour = re.search(r"colour\s*(\d+)", colour_str, re.IGNORECASE)
+            if match_colour:
+                colour_number = match_colour.group(1)
+            else:
+                match_c_digit = re.search(r"c\s*(\d+)", colour_str, re.IGNORECASE)
+                if match_c_digit:
+                    colour_number = match_c_digit.group(1)
+
+    if not version and theme_code:
+        version = str(theme_code).strip() or None
+
+    if not version:
+        return None
+
+    stem = _grade_to_colour_stem(grade_key)
+    if not stem and colour_number:
+        stem = f"C{colour_number}"
+
+    if not stem:
+        return version
+
+    # Return without file extension to keep binder.json clean
+    return f"{version}_{stem}"
 
 
 def _coerce_to_bytes(value: Any) -> Optional[bytes]:
@@ -1238,24 +1429,33 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
 
     cover_docs = list(
         _cover_collection_for_school(school_id)
-        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "status", "updated_at"])
+        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "status", "is_selected", "updated_at"])
         .stream()
     )
-    cover_grades: Dict[str, Any] = {}
+    cover_client_grades: Dict[str, Any] = {}
+    cover_admin_grades: Dict[str, Any] = {}
     latest_cover_update: Optional[Any] = None
     for doc in cover_docs:
         data = doc.to_dict() or {}
-        grade_key = (data.get("grade") or doc.id or "").strip()
+        doc_id = doc.id or ""
+        is_admin_doc = doc_id.endswith("__admin")
+        grade_key = (data.get("grade") or (doc_id[:-8] if is_admin_doc else doc_id) or "").strip()
         if not grade_key:
             continue
-        theme_code = _format_cover_theme(data.get("theme_id"))
-        cover_grades[grade_key] = {
-            "theme": theme_code,
-            "theme_colour": _format_cover_colour(theme_code, data.get("colour_id")),
-        }
+        if is_admin_doc:
+            cover_admin_grades[grade_key] = data
+        else:
+            cover_client_grades[grade_key] = data
         updated_at = data.get("updated_at")
         if updated_at and (latest_cover_update is None or updated_at > latest_cover_update):
             latest_cover_update = updated_at
+
+    cover_grades: Dict[str, Any] = {}
+    for grade_key in set([*cover_client_grades.keys(), *cover_admin_grades.keys()]):
+        cover_grades[grade_key] = _merge_cover_entries(
+            cover_client_grades.get(grade_key, {}),
+            cover_admin_grades.get(grade_key, {}),
+        )
 
     def _format_timestamp(value: Any) -> Optional[str]:
         if isinstance(value, datetime):
@@ -1369,7 +1569,7 @@ async def save_book_selections(
         class_groups.setdefault(key, []).append(item)
 
     for class_key, items in class_groups.items():
-        doc_id = class_key.replace(" ", "_")
+        doc_id = _normalize_class_doc_id(class_key)
         doc_ref = _book_collection_for_school(payload.school_id).document(doc_id)
         existing_doc = doc_ref.get()
         existing_data: Dict[str, Any] = existing_doc.to_dict() if existing_doc.exists else {}
@@ -1401,12 +1601,31 @@ async def save_book_selections(
     for class_name in payload.deleted_classes:
         if not class_name:
             continue
-        doc_id = class_name.strip().lower().replace(" ", "_")
+        doc_id = _normalize_class_doc_id(class_name)
         if not doc_id:
             continue
         _book_collection_for_school(payload.school_id).document(doc_id).delete()
 
     return {"ok": True, "updated_at": now.isoformat()}
+
+
+@api_router.get("/book-selections/{school_id}/classes/{class_name}")
+def get_book_selection_for_class(
+    school_id: str, class_name: str, authorization: Optional[str] = Header(None)
+):
+    """Return saved book selection for a single class without streaming the entire collection."""
+    _verify_and_decode_token(authorization)
+    doc_id = _normalize_class_doc_id(class_name)
+    if not doc_id:
+        raise HTTPException(status_code=400, detail="class_name is required")
+    doc_ref = _book_collection_for_school(school_id).document(doc_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Class selection not found")
+
+    data = snapshot.to_dict() or {}
+    data.setdefault("class", data.get("class") or snapshot.id)
+    return data
 
 
 @api_router.get("/book-selections/{school_id}")
@@ -1461,6 +1680,7 @@ async def save_cover_selection(
         "colour_id": (payload.colour_id or "").strip() or None,
         "colour_label": (payload.colour_label or "").strip() or None,
         "status": (payload.status or "").strip() or None,
+        "is_selected": True if payload.is_selected is None else bool(payload.is_selected),
         "updated_at": now,
     }
 
@@ -1469,10 +1689,86 @@ async def save_cover_selection(
         if decoded_token.get("email"):
             record["updated_by_email"] = decoded_token.get("email")
 
-    doc_ref = _cover_collection_for_school(school_id).document(grade.replace(" ", "_"))
+    doc_ref = _cover_collection_for_school(school_id).document(_cover_doc_id(grade, admin=False))
     doc_ref.set(record)
 
+    # Anchor client theme at the root doc for the school (immutable once set)
+    if record.get("theme_id"):
+        root_ref = _cover_root_doc(school_id)
+        root_snapshot = root_ref.get()
+        root_data = root_snapshot.to_dict() or {}
+        if not root_data.get("client_theme_id"):
+            root_ref.set(
+                {
+                    "client_theme_id": record.get("theme_id"),
+                    "client_theme_label": record.get("theme_label"),
+                    "updated_at": now,
+                },
+                merge=True,
+            )
+
     return {"ok": True, "updated_at": now.isoformat()}
+
+
+@api_router.patch("/cover-selections/{school_id}/{grade}")
+async def patch_cover_selection(
+    school_id: str, grade: str, payload: CoverSelectionPayload, authorization: Optional[str] = Header(None)
+):
+    """Update an existing cover selection without creating a new record."""
+    decoded_token = _verify_and_decode_token(authorization)
+    safe_school = (school_id or "").strip()
+    safe_grade = (grade or "").strip().lower()
+    if not safe_school or not safe_grade:
+        raise HTTPException(status_code=400, detail="school_id and grade are required")
+
+    now = datetime.utcnow()
+    record: Dict[str, Any] = {"updated_at": now}
+
+    if payload.theme_id is not None:
+        record["theme_id"] = (payload.theme_id or "").strip() or None
+    if payload.theme_label is not None:
+        record["theme_label"] = (payload.theme_label or "").strip() or None
+    if payload.colour_id is not None:
+        record["colour_id"] = (payload.colour_id or "").strip() or None
+    if payload.colour_label is not None:
+        record["colour_label"] = (payload.colour_label or "").strip() or None
+    if payload.status is not None:
+        record["status"] = (payload.status or "").strip() or None
+    if payload.is_selected is not None:
+        record["is_selected"] = bool(payload.is_selected)
+
+    if decoded_token:
+        record["updated_by"] = decoded_token.get("uid") or decoded_token.get("user_id")
+        if decoded_token.get("email"):
+            record["updated_by_email"] = decoded_token.get("email")
+
+    doc_ref = _cover_collection_for_school(safe_school).document(_cover_doc_id(safe_grade, admin=True))
+    doc_ref.set(record, merge=True)
+
+    return {"ok": True, "updated_at": now.isoformat()}
+
+
+@api_router.delete("/cover-selections/{school_id}/{grade}")
+async def delete_cover_override(
+    school_id: str, grade: str, authorization: Optional[str] = Header(None)
+):
+    """Remove admin override and delete the client grade document."""
+    _verify_and_decode_token(authorization)
+    safe_school = (school_id or "").strip()
+    safe_grade = (grade or "").strip().lower()
+    if not safe_school or not safe_grade:
+        raise HTTPException(status_code=400, detail="school_id and grade are required")
+
+    admin_ref = _cover_collection_for_school(safe_school).document(_cover_doc_id(safe_grade, admin=True))
+    client_ref = _cover_collection_for_school(safe_school).document(_cover_doc_id(safe_grade, admin=False))
+
+    # Delete admin override if present
+    admin_ref.delete()
+
+    # Delete client selection document entirely
+    client_ref.delete()
+
+    return {"ok": True}
 
 
 @api_router.get("/cover-selections/{school_id}")
@@ -1480,28 +1776,43 @@ def get_cover_selections(school_id: str, authorization: Optional[str] = Header(N
     """Return saved cover selections for all grades of a school."""
     _verify_and_decode_token(authorization)
 
+    root_snapshot = _cover_root_doc(school_id).get()
+    root_data = root_snapshot.to_dict() or {}
+
     docs = list(
         _cover_collection_for_school(school_id)
-        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "status", "updated_at"])
+        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "status", "is_selected", "updated_at"])
         .stream()
     )
 
     grades: Dict[str, Any] = {}
+    admin_grades: Dict[str, Any] = {}
     for doc in docs:
         data = doc.to_dict() or {}
-        grade_key = (data.get("grade") or doc.id or "").strip()
+        doc_id = doc.id or ""
+        is_admin_doc = doc_id.endswith("__admin")
+        grade_key = (data.get("grade") or (doc_id[:-8] if is_admin_doc else doc_id) or "").strip()
         if not grade_key:
             continue
-        grades[grade_key] = {
+        target = admin_grades if is_admin_doc else grades
+        target[grade_key] = {
             "theme": data.get("theme_id"),
             "theme_label": data.get("theme_label"),
             "theme_colour": data.get("colour_id"),
             "theme_colour_label": data.get("colour_label"),
             "status": data.get("status"),
+            "is_selected": data.get("is_selected", True),
             "updated_at": data.get("updated_at"),
         }
 
-    return {"grades": grades, "library": _build_library_manifest(request)}
+    return {
+        "grades": grades,
+        "client_grades": grades,
+        "admin_grades": admin_grades,
+        "client_theme_id": root_data.get("client_theme_id"),
+        "client_theme_label": root_data.get("client_theme_label"),
+        "library": _build_library_manifest(request),
+    }
 
 
 @api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
@@ -2072,8 +2383,11 @@ async def upload_library_colour(version: str, grade_code: str, file: UploadFile 
     if not content:
         raise HTTPException(status_code=400, detail="Colour image is empty.")
     extension = _guess_image_extension(file)
-    target_path = _resolve_library_colour_path(version, grade_code.upper(), extension)
-    _remove_existing_images(target_path.parent, Path(target_path).stem)
+    safe_version = _sanitize_component(version, "V1")
+    safe_grade = _sanitize_component(grade_code, "P")
+    for base_dir in LIBRARY_COLOUR_BASE_DIRS:
+        _remove_existing_images(base_dir / safe_version, safe_grade)
+    target_path = _resolve_library_colour_path(version, grade_code.upper(), extension, for_write=True)
     _write_public_image(target_path, content)
     return {"status": "ok", "library": _build_library_manifest(request)}
 
@@ -2083,9 +2397,11 @@ async def delete_library_colour(version: str, grade_code: str, request: Request)
     if grade_code.upper() not in LIBRARY_GRADE_CODES:
         raise HTTPException(status_code=400, detail="Grade code must be one of P,N,L,U.")
     # remove any extension variant
-    version_dir = LIBRARY_COLOURS_DIR / _sanitize_component(version, "V1_C")
     safe_grade = _sanitize_component(grade_code, "P")
-    _remove_existing_images(version_dir, safe_grade)
+    safe_version = _sanitize_component(version, "V1")
+    for base_dir in LIBRARY_COLOUR_BASE_DIRS:
+        version_dir = base_dir / safe_version
+        _remove_existing_images(version_dir, safe_grade)
     return {"status": "ok", "library": _build_library_manifest(request)}
 
 

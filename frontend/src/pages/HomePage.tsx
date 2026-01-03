@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import type { SchoolProfile } from '../types/types';
-import { loadPersistedAppState } from '../lib/storage';
+import { loadPersistedAppState, loadBookWorkflowState } from '../lib/storage';
 
 interface HomePageProps {
   onBackToMode?: () => void;
@@ -34,6 +34,15 @@ const HomePage: React.FC<HomePageProps> = ({ onBackToMode, school, onStartBookSe
     }
   };
   const resolvedSchoolId = school?.school_id ?? persistedSchool?.school_id ?? user?.schoolId ?? null;
+  const hasBookSelections = useMemo(() => {
+    if (!resolvedSchoolId) return false;
+    const grades = ['nursery', 'lkg', 'ukg', 'playgroup'];
+    return grades.some((gradeId) => {
+      const state = loadBookWorkflowState(resolvedSchoolId, gradeId);
+      return Array.isArray(state?.selectedBooks) && state.selectedBooks.length > 0;
+    });
+  }, [resolvedSchoolId]);
+  const primaryCtaLabel = hasBookSelections ? 'View selections' : 'Start Book Selection';
 
   if (loading) {
     return <div className="text-center p-12">Loading...</div>;
@@ -56,7 +65,7 @@ const HomePage: React.FC<HomePageProps> = ({ onBackToMode, school, onStartBookSe
               onClick={handleStartBookSelection}
               className="w-full sm:w-auto bg-primary-600 text-white px-8 py-3 font-semibold hover:bg-primary-700 transition-transform hover:scale-105"
             >
-              Start Book Selection
+              {primaryCtaLabel}
             </Button>
           </div>
           

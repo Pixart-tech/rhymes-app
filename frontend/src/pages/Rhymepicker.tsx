@@ -190,11 +190,45 @@ const ModeSelectionPage = ({
   onBackToDashboard,
   onEditProfile
 }) => {
+  const hasBookSelections = useMemo(() => {
+    const schoolId = school?.school_id;
+    if (!schoolId) return false;
+    return GRADE_OPTIONS.some((grade) => {
+      const stored = loadBookWorkflowState(schoolId, grade.id);
+      const count = Array.isArray(stored?.selectedBooks) ? stored.selectedBooks.length : 0;
+      return count > 0;
+    });
+  }, [school?.school_id]);
+
+  const coverStatus = useMemo(() => {
+    const rank: Record<string, number> = { '1': 1, '2': 2, '3': 3, '4': 4 };
+    let status = (school?.cover_status || '1').toString();
+    const schoolId = school?.school_id;
+    if (schoolId) {
+      let best = status;
+      GRADE_OPTIONS.forEach((grade) => {
+        const state = loadCoverWorkflowState(schoolId, grade.id);
+        const s = (state?.status || '').toString();
+        if (rank[s] && (!rank[best] || rank[s] > rank[best])) {
+          best = s;
+        }
+      });
+      status = best || status || '1';
+    }
+    return status;
+  }, [school?.cover_status, school?.school_id]);
+  const coverStatusDescription =
+    {
+      '1': 'Explore the cover pages to begin selection.',
+      '2': 'Cover pages are being prepared. Please wait.',
+      '3': 'View uploaded cover pages and approve.',
+      '4': 'Selections are frozen. Contact admin for changes.'
+    }[coverStatus] || 'Explore the cover pages to begin selection.';
   const options = [
     {
       id: 'cover',
       title: 'Cover Pages',
-      description: 'Design and manage engaging cover pages tailored to each grade.',
+      description: coverStatusDescription,
       gradient: 'from-rose-400 to-pink-500',
       icon: LayoutTemplate
     },
@@ -284,6 +318,9 @@ const ModeSelectionPage = ({
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
               {options.map((option) => {
                 const IconComponent = option.icon;
+                const showCoverButton = !(option.id === 'cover' && coverStatus !== '1');
+                const isBooksOption = option.id === 'books';
+                const buttonLabel = isBooksOption && hasBookSelections ? 'View selections' : `Explore ${option.title}`;
                 return (
                   <Card
                     key={option.id}
@@ -300,13 +337,15 @@ const ModeSelectionPage = ({
                           {option.description}
                         </p>
                     </div>
-                      <Button
-                        type="button"
-                        onClick={() => onModeSelect(option.id)}
-                        className="w-full text-sm sm:text-base bg-gradient-to-r from-orange-400 to-red-400 text-white shadow hover:from-orange-500 hover:to-red-500"
-                      >
-                        Explore {option.title}
-                      </Button>
+                      {showCoverButton && (
+                        <Button
+                          type="button"
+                          onClick={() => onModeSelect(option.id)}
+                          className="w-full text-sm sm:text-base bg-gradient-to-r from-orange-400 to-red-400 text-white shadow hover:from-orange-500 hover:to-red-500"
+                        >
+                          {buttonLabel}
+                        </Button>
+                      )}
                     </CardContent>
                   </Card>
                 );
@@ -768,6 +807,7 @@ const GradeSelectionPage = ({
   const [downloadingGradeId, setDownloadingGradeId] = useState(null);
   const [bookSelectionCounts, setBookSelectionCounts] = useState<Record<string, number>>({});
   const [coverSelections, setCoverSelections] = useState<Record<string, any>>({});
+  const [enabledGradeMap, setEnabledGradeMap] = useState<Record<string, boolean>>({});
   const navigate = useNavigate();
   const isCoverMode = mode === 'cover';
   const isRhymeMode = mode === 'rhymes';
@@ -817,6 +857,23 @@ const GradeSelectionPage = ({
     });
     setBookSelectionCounts(counts);
   }, [isBookMode, school?.school_id]);
+
+  useEffect(() => {
+    const grades = school?.grades;
+    if (!grades) {
+      setEnabledGradeMap({});
+      return;
+    }
+    const enabled: Record<string, boolean> = {};
+    Object.entries(grades).forEach(([key, value]) => {
+      const isEnabled = value && typeof value === 'object' ? Boolean(value.enabled) : false;
+      enabled[key.toLowerCase()] = isEnabled;
+      if (key.toLowerCase() === 'playgroup') {
+        enabled.pg = isEnabled;
+      }
+    });
+    setEnabledGradeMap(enabled);
+  }, [school?.grades]);
 
   useEffect(() => {
     if (!isCoverMode || !school?.school_id) {
@@ -1035,7 +1092,7 @@ const GradeSelectionPage = ({
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-            {GRADE_OPTIONS.map((grade) => {
+            {GRADE_OPTIONS.filter((grade) => enabledGradeMap[grade.id] !== false).map((grade) => {
               const resolvedGradeName = gradeNameOverrides[grade.id] || grade.name;
               const { selectedPages, maxPages } = getGradeStatusInfo(grade.id);
               const formattedSelectedPages = Number.isInteger(selectedPages)
@@ -1045,7 +1102,16 @@ const GradeSelectionPage = ({
                 ? maxPages
                 : maxPages.toFixed(1);
               const coverState = coverSelections[grade.id];
-              const isCoverFinished = coverState?.status === 'finished';
+              const coverStatusCode = (coverState?.status || '1').toString();
+              const coverStatusText =
+                {
+                  '1': 'Explore cover pages',
+                  '2': 'Cover pages are being prepared',
+                  '3': 'View cover pages',
+                  '4': 'Selections are frozen',
+                  finished: 'Selections are frozen',
+                }[coverStatusCode] || 'Explore cover pages';
+              const isCoverFinished = coverStatusCode === '4' || coverStatusCode === 'finished';
               const coverThemeLabel = coverState?.selectedThemeLabel || coverState?.selectedThemeId;
               const coverColourLabel = coverState?.selectedColourLabel || coverState?.selectedColourId;
 
@@ -1067,12 +1133,10 @@ const GradeSelectionPage = ({
                                 : 'bg-slate-100 text-slate-700'
                             }`}
                           >
-                            {isCoverFinished ? 'Finished' : 'In progress'}
+                            {coverStatusText}
                           </span>
                           <p className="text-sm text-gray-600">
-                            {isCoverFinished
-                              ? `Theme: ${coverThemeLabel || 'Pending'} · Colour: ${coverColourLabel || 'Pending'}`
-                              : `Start cover setup for ${resolvedGradeName}.`}
+                            {coverStatusCode === '1' ? 'Explore cover pages' : coverStatusCode === '2' ? 'Cover pages are being prepared' : coverStatusCode === '3' ? 'View uploaded pages' : 'Selections are frozen'}
                           </p>
                         </div>
                       ) : (
@@ -1111,6 +1175,43 @@ const GradeSelectionPage = ({
                           <Download className="w-4 h-4" />
                         )}
                       </Button>
+                    )}
+                    {isBookMode && (
+                      <div className="flex flex-col gap-2">
+                        {bookSelectionCounts[grade.id] > 0 ? (
+                          <>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onGradeSelect(grade.id, mode);
+                              }}
+                            >
+                              View selection
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onGradeSelect(grade.id, mode);
+                              }}
+                            >
+                              Edit selection
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onGradeSelect(grade.id, mode);
+                            }}
+                          >
+                            Start selection
+                          </Button>
+                        )}
+                      </div>
                     )}
                     {isCoverMode && (
                       <div className="flex flex-col gap-2">
@@ -2797,6 +2898,7 @@ export function RhymesWorkflowApp() {
     return school?.selections_approved === true || status === 'approved';
   }, [school]);
   const freezeNoticeShown = useRef(false);
+  const lastNavigationStateRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (authLoading) {
@@ -2857,6 +2959,59 @@ export function RhymesWorkflowApp() {
       freezeNoticeShown.current = true;
     }
   }, [isSuperAdminUser, selectionsFrozen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const applyNavState = (state: any) => {
+      setSelectedMode(state?.mode ?? null);
+      setSelectedGrade(state?.grade ?? null);
+      setCoverWorkflowIntent(state?.intent === 'view' ? 'view' : 'edit');
+      setIsEditingSchoolProfile(false);
+    };
+
+    const initialState = {
+      __rhymeNav: true,
+      mode: selectedMode,
+      grade: selectedGrade,
+      intent: coverWorkflowIntent
+    };
+
+    if (!window.history.state || !window.history.state.__rhymeNav) {
+      window.history.replaceState(initialState, '');
+      lastNavigationStateRef.current = JSON.stringify(initialState);
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state;
+      if (state && state.__rhymeNav) {
+        applyNavState(state);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [coverWorkflowIntent, selectedGrade, selectedMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const navState = {
+      __rhymeNav: true,
+      mode: selectedMode,
+      grade: selectedGrade,
+      intent: coverWorkflowIntent
+    };
+    const serialized = JSON.stringify(navState);
+    if (serialized === lastNavigationStateRef.current) {
+      return;
+    }
+    window.history.pushState(navState, '');
+    lastNavigationStateRef.current = serialized;
+  }, [coverWorkflowIntent, selectedGrade, selectedMode]);
 
   useEffect(() => {
     if (!school) {
@@ -3131,3 +3286,8 @@ export function RhymesWorkflowApp() {
 }
 
 export default RhymeSelectionPage;
+
+
+
+
+
