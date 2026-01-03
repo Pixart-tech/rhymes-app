@@ -7,9 +7,9 @@ from datetime import datetime
 import json
 from typing import Any, Dict, Iterable, List, Literal, Optional, Set, Tuple
 
-from fastapi import Form, HTTPException
+from fastapi import Form, HTTPException, Request
 from firebase_admin import firestore
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, FieldValidationInfo, field_validator
 
 from .models import School
 
@@ -61,7 +61,7 @@ def extract_service_type(value: Any) -> List[SchoolServiceType]:
 def _parse_json_field(value: Any) -> Optional[Any]:
     if value is None or value == "":
         return None
-    if isinstance(value, dict):
+    if isinstance(value, (dict, list)):
         return value
     if isinstance(value, str):
         try:
@@ -69,6 +69,69 @@ def _parse_json_field(value: Any) -> Optional[Any]:
         except json.JSONDecodeError:
             return None
     return None
+
+
+def _extract_string_value(value: Any, keys: Iterable[str]) -> Optional[str]:
+    seen = set()
+
+    def _search(target: Any) -> Optional[str]:
+        if isinstance(target, str):
+            trimmed = target.strip()
+            return trimmed or None
+        if not target or id(target) in seen:
+            return None
+        seen.add(id(target))
+        if isinstance(target, dict):
+            for key in keys:
+                entry = target.get(key)
+                result = _search(entry)
+                if result:
+                    return result
+            for entry in target.values():
+                result = _search(entry)
+                if result:
+                    return result
+        elif isinstance(target, (list, tuple, set)):
+            for entry in target:
+                result = _search(entry)
+                if result:
+                    return result
+        else:
+            entry = getattr(target, "value", None)
+            if entry is not None:
+                result = _search(entry)
+                if result:
+                    return result
+        return None
+
+    return _search(value)
+
+
+def _coerce_optional_string(value: Any, keys: Iterable[str]) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    return _extract_string_value(value, keys)
+
+
+def _coerce_record_string(record: Dict[str, Any], field: str) -> Optional[str]:
+    return _coerce_optional_string(record.get(field), (field, "value"))
+
+
+def _is_json_content_type(request: Request) -> bool:
+    content_type = request.headers.get("content-type", "")
+    if not content_type:
+        return False
+    return "application/json" in content_type.lower()
+
+
+async def _json_payload(request: Request) -> Dict[str, Any]:
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON payload must be an object")
+    return body
 
 
 def _normalize_id_card_fields(value: Optional[Any]) -> Optional[List[str]]:
@@ -120,15 +183,32 @@ def normalize_grades(value: Optional[Any]) -> Dict[GradeKey, Dict[str, Any]]:
         key: {"enabled": False, "label": ""} for key in GRADE_KEYS
     }
     parsed = _parse_json_field(value)
-    if isinstance(parsed, dict):
-        for key in GRADE_KEYS:
-            entry = parsed.get(key)
-            if isinstance(entry, dict):
-                enabled = bool(entry.get("enabled"))
-                label_raw = entry.get("label")
-                label = label_raw.strip() if isinstance(label_raw, str) else ""
-                normalized[key] = {"enabled": enabled, "label": label}
+    entries = _gather_grade_entries(parsed)
+    for key, entry in entries.items():
+        enabled = bool(entry.get("enabled"))
+        label_raw = entry.get("label")
+        label = label_raw.strip() if isinstance(label_raw, str) else ""
+        normalized[key] = {"enabled": enabled, "label": label}
     return normalized
+
+
+def _gather_grade_entries(parsed: Optional[Any]) -> Dict[GradeKey, Dict[str, Any]]:
+    entries: Dict[GradeKey, Dict[str, Any]] = {}
+    if not isinstance(parsed, (dict, list)):
+        return entries
+    if isinstance(parsed, dict):
+        for grade_key in GRADE_KEYS:
+            entry = parsed.get(grade_key)
+            if isinstance(entry, dict):
+                entries[grade_key] = entry
+    else:
+        for entry in parsed:
+            if not isinstance(entry, dict):
+                continue
+            grade_key = entry.get("grade")
+            if isinstance(grade_key, str) and grade_key in GRADE_KEYS:
+                entries[grade_key] = entry
+    return entries
 
 
 def compose_address(
@@ -155,15 +235,6 @@ def compose_address(
 
 
 ZOHO_DETAILS_COLLECTION = "zoho_details"
-ZOHO_DETAILS_CONTACT_FIELDS: Tuple[str, ...] = (
-    "school_name",
-    "email",
-    "phone",
-    "website",
-    "principal_name",
-    "principal_email",
-    "principal_phone",
-)
 
 
 def _zoho_details_doc_ref(db_client: firestore.Client, school_id: str):
@@ -191,34 +262,6 @@ def set_zoho_customer_id(db_client: firestore.Client, school_id: str, customer_i
     )
 
 
-def add_branch_to_zoho_details(db_client: firestore.Client, school_id: str, branch_id: str):
-    if not school_id or not branch_id:
-        return
-    doc_ref = _zoho_details_doc_ref(db_client, school_id)
-    doc_ref.set({"branches": firestore.ArrayUnion([branch_id])}, merge=True)
-
-
-def _build_zoho_details_contact_payload(record: Dict[str, Any]) -> Dict[str, Optional[str]]:
-    payload: Dict[str, str] = {}
-    school_name = _clean_optional_string(record.get("school_name"))
-    if school_name:
-        payload["school_name"] = school_name
-    email = _normalize_email(record.get("email"))
-    if email:
-        payload["email"] = email
-    return payload
-
-
-def update_zoho_details_from_school(db_client: firestore.Client, school_id: str, record: Dict[str, Any]):
-    if not school_id:
-        return
-    payload = _build_zoho_details_contact_payload(record)
-    if not payload:
-        return
-    doc_ref = _zoho_details_doc_ref(db_client, school_id)
-    doc_ref.set(payload, merge=True)
-
-
 def set_zoho_grade_mapping(
     db_client: firestore.Client,
     school_id: str,
@@ -232,6 +275,17 @@ def set_zoho_grade_mapping(
         payload["grade_unique_values"] = grade_unique_values
     doc_ref = _zoho_details_doc_ref(db_client, school_id)
     doc_ref.set(payload, merge=True)
+
+
+def set_zoho_service_type(
+    db_client: firestore.Client,
+    school_id: str,
+    service_type: Optional[List[SchoolServiceType]],
+):
+    if not school_id or service_type is None:
+        return
+    doc_ref = _zoho_details_doc_ref(db_client, school_id)
+    doc_ref.set({"service_type": service_type}, merge=True)
 
 
 class SchoolCreatePayload(BaseModel):
@@ -282,28 +336,62 @@ class SchoolCreatePayload(BaseModel):
         if value is None or value == "":
             return None
         parsed = _parse_json_field(value)
-        if not isinstance(parsed, dict):
-            raise ValueError("Invalid grades payload")
+        if not isinstance(parsed, (dict, list)):
+            return None
+        entries = _gather_grade_entries(parsed)
+        if not entries:
+            return None
         normalized: Dict[GradeKey, Dict[str, Any]] = {}
-        for key in GRADE_KEYS:
-            entry = parsed.get(key)
-            if isinstance(entry, dict):
-                enabled = bool(entry.get("enabled"))
-                label_raw = entry.get("label")
-                normalized[key] = {
-                    "enabled": enabled,
-                    "label": label_raw.strip() if isinstance(label_raw, str) else ""
-                }
-        return normalized or None
+        for key, entry in entries.items():
+            label_raw = entry.get("label")
+            normalized[key] = {
+                "enabled": bool(entry.get("enabled")),
+                "label": label_raw.strip() if isinstance(label_raw, str) else ""
+            }
+        return normalized
+
+    @field_validator("principal_name", mode="before")
+    @classmethod
+    def _normalize_principal_name(cls, value: Any) -> Optional[str]:
+        extracted = _extract_string_value(value, ("principal_name", "name", "value"))
+        if extracted is not None:
+            return extracted
+        if isinstance(value, str):
+            trimmed = value.strip()
+            return trimmed or None
+        return None
 
     @field_validator("id_card_fields", mode="before")
     @classmethod
     def _coerce_id_card_fields(cls, value: Any) -> Optional[List[str]]:
         return _normalize_id_card_fields(value)
 
+    @field_validator("principal_email", mode="before")
     @classmethod
-    def as_form(
+    def _normalize_principal_email(cls, value: Any) -> Any:
+        extracted = _extract_string_value(value, ("principal_email", "email", "value"))
+        if extracted is not None:
+            return extracted
+        if isinstance(value, str):
+            trimmed = value.strip()
+            return trimmed or None
+        return None
+
+    @field_validator("principal_phone", mode="before")
+    @classmethod
+    def _normalize_principal_phone(cls, value: Any) -> Any:
+        extracted = _extract_string_value(value, ("principal_phone", "phone", "value"))
+        if extracted is not None:
+            return extracted
+        if isinstance(value, str):
+            trimmed = value.strip()
+            return trimmed or None
+        return None
+
+    @classmethod
+    async def as_form(
         cls,
+        request: Request,
         school_name: str = Form(...),
         email: EmailStr = Form(...),
         phone: str = Form(...),
@@ -320,6 +408,9 @@ class SchoolCreatePayload(BaseModel):
         grades: Optional[Any] = Form(default=None),
         id_card_fields: Optional[Any] = Form(default=None),
     ) -> "SchoolCreatePayload":
+        if _is_json_content_type(request):
+            return cls(**(await _json_payload(request)))
+
         return cls(
             school_name=school_name,
             email=email,
@@ -389,8 +480,31 @@ class SchoolUpdatePayload(BaseModel):
     service_type: Optional[List[SchoolServiceType]] = None
     service_status: Optional[Dict[SchoolServiceType, ServiceStatus]] = None
     grades: Optional[Dict[GradeKey, Dict[str, Any]]] = None
+    grade_default_labels: Optional[Dict[str, str]] = None
+    grade_unique_values: Optional[Dict[str, str]] = None
     id_card_fields: Optional[List[str]] = None
     zoho_customer_id: Optional[str] = None
+
+    @field_validator("school_name", "tagline", "city", "state", "pin", "website", mode="before")
+    @classmethod
+    def _normalize_optional_str_fields(cls, value: Any, info: FieldValidationInfo) -> Optional[str]:
+        return _coerce_optional_string(value, (info.field_name, "value"))
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _normalize_update_email(cls, value: Any) -> Any:
+        normalized = _coerce_optional_string(value, ("email", "value"))
+        if normalized is not None:
+            return normalized
+        return None
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def _normalize_update_phone(cls, value: Any) -> Any:
+        normalized = _coerce_optional_string(value, ("phone", "value"))
+        if normalized is not None:
+            return normalized
+        return None
 
     @field_validator("service_type", mode="before")
     @classmethod
@@ -421,19 +535,19 @@ class SchoolUpdatePayload(BaseModel):
         if value is None or value == "":
             return None
         parsed = _parse_json_field(value)
-        if not isinstance(parsed, dict):
-            raise ValueError("Invalid grades payload")
+        if not isinstance(parsed, (dict, list)):
+            return None
+        entries = _gather_grade_entries(parsed)
+        if not entries:
+            return None
         normalized: Dict[GradeKey, Dict[str, Any]] = {}
-        for key in GRADE_KEYS:
-            entry = parsed.get(key)
-            if isinstance(entry, dict):
-                enabled = bool(entry.get("enabled"))
-                label_raw = entry.get("label")
-                normalized[key] = {
-                    "enabled": enabled,
-                    "label": label_raw.strip() if isinstance(label_raw, str) else ""
-                }
-        return normalized or None
+        for key, entry in entries.items():
+            label_raw = entry.get("label")
+            normalized[key] = {
+                "enabled": bool(entry.get("enabled")),
+                "label": label_raw.strip() if isinstance(label_raw, str) else ""
+            }
+        return normalized
 
     @field_validator("id_card_fields", mode="before")
     @classmethod
@@ -442,9 +556,89 @@ class SchoolUpdatePayload(BaseModel):
             return None
         return _normalize_id_card_fields(value)
 
+    @field_validator("principal_name", mode="before")
     @classmethod
-    def as_form(
+    def _normalize_update_principal_name(cls, value: Any) -> Any:
+        extracted = _extract_string_value(value, ("principal_name", "name", "value"))
+        if extracted is not None:
+            return extracted
+        if isinstance(value, str):
+            trimmed = value.strip()
+            return trimmed or None
+        return None
+
+    @field_validator("principal_email", mode="before")
+    @classmethod
+    def _normalize_update_principal_email(cls, value: Any) -> Any:
+        extracted = _extract_string_value(value, ("principal_email", "email", "value"))
+        if extracted is not None:
+            return extracted
+        if isinstance(value, str):
+            trimmed = value.strip()
+            return trimmed or None
+        return None
+
+    @field_validator("principal_phone", mode="before")
+    @classmethod
+    def _normalize_update_principal_phone(cls, value: Any) -> Any:
+        extracted = _extract_string_value(value, ("principal_phone", "phone", "value"))
+        if extracted is not None:
+            return extracted
+        if isinstance(value, str):
+            trimmed = value.strip()
+            return trimmed or None
+        return None
+
+    @field_validator("zoho_customer_id", mode="before")
+    @classmethod
+    def _normalize_zoho_customer_id(cls, value: Any) -> Any:
+        extracted = _extract_string_value(
+            value,
+            ("zoho_customer_id", "customer_id", "id", "value"),
+        )
+        if extracted is not None:
+            return extracted
+        if isinstance(value, str):
+            trimmed = value.strip()
+            return trimmed or None
+        return None
+
+    @field_validator("grade_default_labels", mode="before")
+    @classmethod
+    def _coerce_grade_default_labels(cls, value: Any) -> Optional[Dict[str, str]]:
+        parsed = _parse_json_field(value) if isinstance(value, str) else value
+        if parsed is None:
+            return None
+        if isinstance(parsed, dict):
+            normalized: Dict[str, str] = {}
+            for key, entry in parsed.items():
+                if isinstance(entry, str):
+                    trimmed = entry.strip()
+                    if trimmed:
+                        normalized[key] = trimmed
+            return normalized or None
+        return None
+
+    @field_validator("grade_unique_values", mode="before")
+    @classmethod
+    def _coerce_grade_unique_values(cls, value: Any) -> Optional[Dict[str, str]]:
+        parsed = _parse_json_field(value) if isinstance(value, str) else value
+        if parsed is None:
+            return None
+        if isinstance(parsed, dict):
+            normalized: Dict[str, str] = {}
+            for key, entry in parsed.items():
+                if isinstance(entry, str):
+                    trimmed = entry.strip()
+                    if trimmed:
+                        normalized[key] = trimmed
+            return normalized or None
+        return None
+
+    @classmethod
+    async def as_form(
         cls,
+        request: Request,
         school_name: Optional[str] = Form(default=FORM_UNSET),
         email: Optional[EmailStr] = Form(default=FORM_UNSET),
         phone: Optional[str] = Form(default=FORM_UNSET),
@@ -462,7 +656,11 @@ class SchoolUpdatePayload(BaseModel):
         service_status: Optional[Any] = Form(default=FORM_UNSET),
         grades: Optional[Any] = Form(default=FORM_UNSET),
         id_card_fields: Optional[Any] = Form(default=FORM_UNSET),
+        grade_default_labels: Optional[Any] = Form(default=FORM_UNSET),
+        grade_unique_values: Optional[Any] = Form(default=FORM_UNSET),
     ) -> "SchoolUpdatePayload":
+        if _is_json_content_type(request):
+            return cls(**(await _json_payload(request)))
         field_values: Dict[str, Any] = {
             "school_name": school_name,
             "email": email,
@@ -481,6 +679,8 @@ class SchoolUpdatePayload(BaseModel):
             "service_status": service_status,
             "grades": grades,
             "id_card_fields": id_card_fields,
+            "grade_default_labels": grade_default_labels,
+            "grade_unique_values": grade_unique_values,
         }
         provided_values = {
             key: value for key, value in field_values.items() if value is not FORM_UNSET
@@ -604,20 +804,20 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
     return School(
         id=record.get("id") or school_id,
         school_id=school_id,
-        school_name=record.get("school_name") or "School",
+        school_name=_coerce_record_string(record, "school_name") or "School",
         logo_url=logo_url,
         school_image_urls=school_image_urls,
-        email=record.get("email"),
-        phone=record.get("phone"),
-        address=record.get("address"),
-        city=record.get("city"),
-        state=record.get("state"),
-        pin=record.get("pin"),
-        tagline=record.get("tagline"),
-        website=record.get("website"),
-        principal_name=record.get("principal_name"),
-        principal_email=record.get("principal_email"),
-        principal_phone=record.get("principal_phone"),
+        email=_coerce_record_string(record, "email"),
+        phone=_coerce_record_string(record, "phone"),
+        address=_coerce_record_string(record, "address"),
+        city=_coerce_record_string(record, "city"),
+        state=_coerce_record_string(record, "state"),
+        pin=_coerce_record_string(record, "pin"),
+        tagline=_coerce_record_string(record, "tagline"),
+        website=_coerce_record_string(record, "website"),
+        principal_name=_coerce_record_string(record, "principal_name"),
+        principal_email=_coerce_record_string(record, "principal_email"),
+        principal_phone=_coerce_record_string(record, "principal_phone"),
         service_type=extract_service_type(record.get("service_type")),
         service_status=normalize_service_status(record.get("service_status")),
         grades=normalize_grades(grades_from_record),
@@ -755,7 +955,7 @@ def create_school_profile(
                 school_payload[f"school_image_{idx}"] = blob
                 school_payload[f"school_image_{idx}_mime"] = mime
 
-    school_payload["zoho_customer_id"] = None
+    # Zoho customer id stored separately in zoho_details collection.
     db.collection("schools").document(school_id).set(school_payload)
     if assignee_id:
         db.collection("users").document(assignee_id).update(
@@ -844,7 +1044,6 @@ def create_branch_profile(
             "timestamp": now,
         }
     )
-    add_branch_to_zoho_details(db, parent_school_id, branch_id)
     return build_school_from_record(branch_payload)
 
 
@@ -870,7 +1069,6 @@ __all__ = [
     "BRANCH_STATUS_INACTIVE",
     "get_zoho_customer_id",
     "set_zoho_customer_id",
-    "add_branch_to_zoho_details",
     "set_zoho_grade_mapping",
-    "update_zoho_details_from_school",
+    "set_zoho_service_type",
 ]

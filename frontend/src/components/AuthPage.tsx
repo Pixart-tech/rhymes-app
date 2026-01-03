@@ -75,8 +75,9 @@ const SERVICE_LABELS: Record<SchoolServiceType, string> = {
   report_cards: 'Report cards',
   certificates: 'Certificates'
 };
-const GRADE_KEYS_ORDER: GradeKey[] = ['playgroup', 'nursery', 'lkg', 'ukg'];
+const GRADE_KEYS_ORDER: GradeKey[] = ['None', 'playgroup', 'nursery', 'lkg', 'ukg'];
 const GRADE_LABELS: Record<GradeKey, string> = {
+  None: 'None',
   playgroup: 'Playgroup',
   nursery: 'Nursery',
   lkg: 'LKG',
@@ -771,7 +772,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       formData.append('grade_default_labels', JSON.stringify(gradeDefaultValues));
       formData.append('grade_unique_values', JSON.stringify(gradeUniqueValues));
       formData.append('update_zoho_details', 'true');
-      const response = await axios.put<SchoolProfile>(`${API}/schools/${addonsDialogSchool.school_id}`, formData, {
+      const response = await axios.patch<SchoolProfile>(`${API}/schools/${addonsDialogSchool.school_id}/addons`, formData, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const serverSchool = response.data;
