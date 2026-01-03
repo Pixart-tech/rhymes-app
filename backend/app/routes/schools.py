@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 import imghdr
 import mimetypes
@@ -13,6 +14,8 @@ from pydantic import BaseModel, field_validator
 
 SchoolServiceType = school_profiles.SchoolServiceType
 ServiceStatus = school_profiles.ServiceStatus
+
+logger = logging.getLogger(__name__)
 from ..firebase_service import (
     DEFAULT_USER_ROLE,
     db,
@@ -158,18 +161,18 @@ def _sync_zoho_metadata(
     service_type: Optional[List[str]],
     customer_id: Optional[str],
 ) -> None:
-    if not should_update or not grade_labels:
-        return
-    school_profiles.set_zoho_grade_mapping(
-        db_client,
-        school_id,
-        grade_labels,
-        grade_unique_values,
-    )
-    if service_type:
-        school_profiles.set_zoho_service_type(db_client, school_id, service_type)
+    if should_update and grade_labels:
+        school_profiles.set_zoho_grade_mapping(
+            db_client,
+            school_id,
+            grade_labels,
+            grade_unique_values,
+        )
+        if service_type:
+            school_profiles.set_zoho_service_type(db_client, school_id, service_type)
     if customer_id:
         school_profiles.set_zoho_customer_id(db_client, school_id, customer_id)
+        logger.info("Updated Zoho customer id for %s -> %s", school_id, customer_id)
 
 
 def _guess_image_extension(mime_type: Optional[str]) -> str:
@@ -467,10 +470,13 @@ async def update_school_addons(
         doc_ref.update(updates)
         existing.update(updates)
 
+    should_update_zoho = bool(payload.update_zoho_details) or bool(payload.zoho_customer_id) or bool(
+        payload.grade_default_labels
+    ) or bool(payload.grade_unique_values)
     _sync_zoho_metadata(
         db,
         main_school_id,
-        bool(payload.update_zoho_details),
+        should_update_zoho,
         payload.grade_default_labels,
         payload.grade_unique_values,
         service_type_value,
