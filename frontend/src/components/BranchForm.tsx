@@ -19,7 +19,7 @@ export interface BranchFormValues {
   pin: string;
 }
 
-const createDefaultBranchValues = (): BranchFormValues => ({
+export const createDefaultBranchValues = (): BranchFormValues => ({
   branch_name: '',
   coordinator_name: '',
   coordinator_email: '',
@@ -30,19 +30,51 @@ const createDefaultBranchValues = (): BranchFormValues => ({
   pin: ''
 });
 
+export const buildBranchFormValuesFromBranch = (branch?: SchoolProfile | null): BranchFormValues => ({
+  branch_name: branch?.school_name ?? '',
+  coordinator_name: branch?.principal_name ?? '',
+  coordinator_email: branch?.principal_email ?? '',
+  coordinator_phone: branch?.principal_phone ?? '',
+  address: branch?.address ?? '',
+  city: branch?.city ?? '',
+  state: branch?.state ?? '',
+  pin: branch?.pin ?? ''
+});
+
 export interface BranchFormProps {
   parentSchool: SchoolProfile;
   submitting: boolean;
   onSubmit: (values: BranchFormValues) => Promise<void> | void;
   onCancel: () => void;
+  initialValues?: BranchFormValues;
+  mode?: 'create' | 'edit' | 'view';
+  formTitle?: string;
+  formDescription?: string;
+  submitLabel?: string;
 }
 
-const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSubmit, onCancel }) => {
-  const [values, setValues] = useState<BranchFormValues>(createDefaultBranchValues());
+const BranchForm: React.FC<BranchFormProps> = ({
+  parentSchool,
+  submitting,
+  onSubmit,
+  onCancel,
+  initialValues,
+  mode = 'create',
+  formTitle,
+  formDescription,
+  submitLabel
+}) => {
+  const [values, setValues] = useState<BranchFormValues>(initialValues ?? createDefaultBranchValues());
 
   useEffect(() => {
-    setValues(createDefaultBranchValues());
-  }, [parentSchool.school_id]);
+    if (initialValues) {
+      setValues(initialValues);
+    } else {
+      setValues(createDefaultBranchValues());
+    }
+  }, [initialValues, parentSchool.school_id]);
+
+  const isViewMode = mode === 'view';
 
   const handleFieldChange =
     (field: keyof BranchFormValues) =>
@@ -53,17 +85,27 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isViewMode) {
+      return;
+    }
     await onSubmit(values);
   };
+
+  const autoTitle =
+    mode === 'edit' ? `Edit ${values.branch_name || 'branch'}` : `Add branch for ${parentSchool.school_name}`;
+  const autoDescription =
+    mode === 'view'
+      ? 'Review the coordinator details for this branch.'
+      : 'Share the branch name, coordinator contact, and location so the branch can be tracked separately.';
+
+  const submitButtonLabel = submitLabel ?? (mode === 'edit' ? 'Save changes' : 'Create branch');
 
   return (
     <Card className="border border-slate-200 bg-white shadow-sm">
       <form onSubmit={handleSubmit} className="space-y-6">
         <CardHeader>
-          <CardTitle className="text-2xl text-slate-900">Add branch for {parentSchool.school_name}</CardTitle>
-          <p className="text-sm text-slate-500">
-            Share the branch name, coordinator contact, and location so the new branch can be tracked separately.
-          </p>
+          <CardTitle className="text-2xl text-slate-900">{formTitle ?? autoTitle}</CardTitle>
+          <p className="text-sm text-slate-500">{formDescription ?? autoDescription}</p>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -75,6 +117,7 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
               onChange={handleFieldChange('branch_name')}
               minLength={2}
               required
+              disabled={submitting || isViewMode}
             />
           </div>
           <div className="grid gap-4 md:grid-cols-2">
@@ -87,6 +130,7 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
                 onChange={handleFieldChange('coordinator_name')}
                 minLength={2}
                 required
+                disabled={submitting || isViewMode}
               />
             </div>
             <div className="space-y-2">
@@ -98,31 +142,34 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
                 value={values.coordinator_email}
                 onChange={handleFieldChange('coordinator_email')}
                 required
+                disabled={submitting || isViewMode}
               />
             </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="coordinator_phone">Coordinator phone</Label>
-              <Input
-                id="coordinator_phone"
-                type="tel"
-                placeholder="+91 98765 43210"
-                value={values.coordinator_phone}
-                onChange={handleFieldChange('coordinator_phone')}
-                minLength={5}
-                inputMode="tel"
-                required
-              />
+            <Input
+              id="coordinator_phone"
+              type="tel"
+              placeholder="+91 98765 43210"
+              value={values.coordinator_phone}
+              onChange={handleFieldChange('coordinator_phone')}
+              minLength={5}
+              inputMode="tel"
+              required
+              disabled={submitting || isViewMode}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="branch_address">Address</Label>
-              <Input
-                id="branch_address"
-                placeholder="Plot 123, Green Park"
-                value={values.address}
-                onChange={handleFieldChange('address')}
-                required
-              />
+            <Input
+              id="branch_address"
+              placeholder="Plot 123, Green Park"
+              value={values.address}
+              onChange={handleFieldChange('address')}
+              required
+              disabled={submitting || isViewMode}
+            />
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -133,6 +180,7 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
                 value={values.city}
                 onChange={handleFieldChange('city')}
                 required
+                disabled={submitting || isViewMode}
               />
             </div>
             <div className="space-y-2">
@@ -143,6 +191,7 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
                 value={values.state}
                 onChange={handleFieldChange('state')}
                 required
+                disabled={submitting || isViewMode}
               />
             </div>
           </div>
@@ -154,6 +203,7 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
               value={values.pin}
               onChange={handleFieldChange('pin')}
               required
+              disabled={submitting || isViewMode}
             />
           </div>
         </CardContent>
@@ -161,10 +211,12 @@ const BranchForm: React.FC<BranchFormProps> = ({ parentSchool, submitting, onSub
           <Button variant="outline" type="button" onClick={onCancel} disabled={submitting}>
             Cancel
           </Button>
-          <Button type="submit" disabled={submitting}>
-            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Create branch
-          </Button>
+          {!isViewMode && (
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {submitButtonLabel}
+            </Button>
+          )}
         </CardFooter>
       </form>
     </Card>
