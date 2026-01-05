@@ -255,6 +255,23 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const currentClassData = currentClassIndex >= 0 ? SCHOOL_DATA[currentClassIndex] : null;
   const currentSubject = currentClassData ? currentClassData.subjects[currentSubjectIndex] : null;
 
+  const getActiveCoreSelections = (classSelections: SelectionRecord[]) => {
+    const isActive = (s: SelectionRecord): boolean => {
+      if (!s.selectedOption) return false;
+      const coreActive = !!s.selectedOption.coreId && !s.skipCore;
+      const workActive = !!s.selectedOption.workId && !s.skipWork;
+      const addonActive = !!s.selectedOption.addOnId && !s.skipAddon;
+      return coreActive || workActive || addonActive;
+    };
+    const englishSelection =
+      classSelections.find((s) => s.subjectName === 'English' && isActive(s))?.selectedOption || null;
+    const mathsSelection =
+      classSelections.find((s) => s.subjectName === 'Maths' && isActive(s))?.selectedOption || null;
+    const evsSelection =
+      classSelections.find((s) => s.subjectName === 'EVS' && isActive(s))?.selectedOption || null;
+    return { englishSelection, mathsSelection, evsSelection, hasAny: Boolean(englishSelection || mathsSelection || evsSelection) };
+  };
+
   const calculateBookCount = (className: string) => {
     const classSelections = selections.filter(s => s.className === className);
     let count = 0;
@@ -276,15 +293,17 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     });
 
     if (!excludedAssessments.includes(className)) {
-        const englishSelection = classSelections.find(s => s.subjectName === "English" && hasActive(s))?.selectedOption || null;
-        const mathsSelection = classSelections.find(s => s.subjectName === "Maths" && hasActive(s))?.selectedOption || null;
-        const assessment = getAssessmentForClass(
-          className,
-          englishSelection,
-          mathsSelection,
-          assessmentVariants[className] || 'WITH_MARKS'
-        );
-        if (assessment) count++;
+        const { englishSelection, mathsSelection, evsSelection, hasAny } = getActiveCoreSelections(classSelections);
+        if (hasAny) {
+          const assessment = getAssessmentForClass(
+            className,
+            englishSelection,
+            mathsSelection,
+            assessmentVariants[className] || 'WITH_MARKS'
+          );
+          // Count even if assessment payload can't be built yet; only hide when all three subjects are removed.
+          if (assessment || hasAny) count++;
+        }
     }
 
     return count;
@@ -708,13 +727,17 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const getCurrentAssessmentDetails = () => {
     if (!currentClassData) return null;
     const classSelections = selections.filter(s => s.className === currentClassData.name);
-    const englishSelection = classSelections.find(s => s.subjectName === "English")?.selectedOption || null;
-    const mathsSelection = classSelections.find(s => s.subjectName === "Maths")?.selectedOption || null;
-    return getAssessmentForClass(
-      currentClassData.name,
-      englishSelection,
-      mathsSelection,
-      getAssessmentVariantForClass(currentClassData.name)
+    const { englishSelection, mathsSelection, evsSelection, hasAny } = getActiveCoreSelections(classSelections);
+    if (!hasAny) {
+      return null;
+    }
+    return (
+      getAssessmentForClass(
+        currentClassData.name,
+        englishSelection,
+        mathsSelection,
+        getAssessmentVariantForClass(currentClassData.name)
+      ) || { label: 'Assessment', coreId: '', coreCover: '', coreSpine: '', defaultCoreCoverTitle: 'Assessment', link: '' }
     );
   };
   
@@ -1367,6 +1390,8 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             const bookCount = classHasSelections ? calculateBookCount(cls.name) : 0;
             const theme = getTheme(cls.name);
             const gradeLabel = getGradeLabelForClass(cls.name);
+            const isLongGradeLabel = gradeLabel.length > 14;
+            const gradeTitleClass = isLongGradeLabel ? 'text-lg leading-tight sm:text-xl' : 'text-xl sm:text-2xl';
             const readOnlyForClass = isClassReadOnly(cls.name);
             const isCompleted = completedClasses.has(cls.name);
             
@@ -1382,7 +1407,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
                     )}
                     
                     <div className="text-center">
-                        <h3 className={`text-xl font-extrabold ${theme.textMain}`}>
+                        <h3 className={`${gradeTitleClass} font-extrabold ${theme.textMain} break-words`}>
                             {gradeLabel}
                         </h3>
                         

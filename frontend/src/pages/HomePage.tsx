@@ -42,7 +42,6 @@ const HomePage: React.FC<HomePageProps> = ({ onBackToMode, school, onStartBookSe
 
   const handleStartBookSelection = useCallback(async () => {
     if (typeof onStartBookSelection === 'function') {
-      console.log('Starting book selection via callback');
       onStartBookSelection();
     } else {
       navigate('/wizard');

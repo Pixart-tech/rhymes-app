@@ -230,6 +230,11 @@ async def index():
               <input list="subjectOptions" id="subjectInput" name="subject_name" placeholder="e.g. English" required />
               <datalist id="subjectOptions"></datalist>
             </div>
+            <div>
+              <label for="typeInput">Type (optional)</label>
+              <input list="typeOptions" id="typeInput" name="type_name" placeholder="e.g. Language / Core / Workbook" />
+              <datalist id="typeOptions"></datalist>
+            </div>
           </div>
           <div class="row">
             <div>
@@ -245,10 +250,16 @@ async def index():
         const rows = {subjects_json};
         const classes = Array.from(new Set(rows.map(r => r.class))).sort((a,b)=>a.localeCompare(b));
         const subjectsByClass = {{}};
+        const typesByClassSubject = {{}};
         rows.forEach(r => {{
           const key = r.class;
           if (!subjectsByClass[key]) subjectsByClass[key] = new Set();
           subjectsByClass[key].add(r.subject);
+          const typeKey = `${{r.class}}||${{r.subject}}`;
+          if (!typesByClassSubject[typeKey]) typesByClassSubject[typeKey] = new Set();
+          if (r.type) {{
+            typesByClassSubject[typeKey].add(r.type);
+          }}
         }});
         const classOptions = document.getElementById('classOptions');
         classes.forEach(c => {{
@@ -257,6 +268,7 @@ async def index():
           classOptions.appendChild(opt);
         }});
         const subjectOptions = document.getElementById('subjectOptions');
+        const typeOptions = document.getElementById('typeOptions');
         function populateSubjects(className) {{
           subjectOptions.innerHTML = '';
           const set = subjectsByClass[className] || new Set(rows.map(r => r.subject));
@@ -265,9 +277,25 @@ async def index():
             opt.value = sub;
             subjectOptions.appendChild(opt);
           }});
+          const firstSubject = subjectOptions.options[0]?.value || '';
+          populateTypes(className, firstSubject);
+        }}
+        function populateTypes(className, subjectName) {{
+          typeOptions.innerHTML = '';
+          const typeKey = `${{className}}||${{subjectName}}`;
+          const set = typesByClassSubject[typeKey] || new Set();
+          Array.from(set).sort((a,b)=>a.localeCompare(b)).forEach(t => {{
+            const opt = document.createElement('option');
+            opt.value = t;
+            typeOptions.appendChild(opt);
+          }});
         }}
         document.getElementById('classInput').addEventListener('change', (e) => {{
           populateSubjects(e.target.value);
+        }});
+        document.getElementById('subjectInput').addEventListener('change', (e) => {{
+          const cls = document.getElementById('classInput').value;
+          populateTypes(cls, e.target.value);
         }});
         populateSubjects(classes[0] || '');
 
@@ -312,6 +340,7 @@ async def subjects():
 async def upload_pdf(
     class_name: str = Form(...),
     subject_name: str = Form(...),
+    type_name: Optional[str] = Form(None),
     file: UploadFile = File(...),
 ):
     if not file.filename:
@@ -322,16 +351,24 @@ async def upload_pdf(
 
     safe_class = _sanitize(class_name, "class")
     safe_subject = _sanitize(subject_name, "subject")
+    safe_type = _sanitize(type_name, "type") if type_name else None
 
     target_dir = SUBJECT_PDF_DIR / safe_class
+    if safe_type:
+        target_dir = target_dir / safe_type
     target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / f"{safe_subject}.pdf"
+    file_stem = f"{safe_subject}{'_' + safe_type if safe_type else ''}"
+    target_path = target_dir / f"{file_stem}.pdf"
     try:
         target_path.write_bytes(data)
     except OSError as exc:  # pragma: no cover - filesystem error
         raise HTTPException(status_code=500, detail=f"Unable to store PDF: {exc}") from exc
 
-    public_url = f"/public/subject-pdfs/{safe_class}/{safe_subject}.pdf"
+    parts = ["", "public", "subject-pdfs", safe_class]
+    if safe_type:
+        parts.append(safe_type)
+    parts.append(f"{file_stem}.pdf")
+    public_url = "/".join(parts)
     return {"status": "ok", "url": public_url}
 
 

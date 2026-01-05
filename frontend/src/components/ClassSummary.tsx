@@ -74,11 +74,24 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   const currentAssessmentVariant = assessmentVariants[classData.name] || 'WITH_MARKS';
   const hasCoreSubjects = useMemo(() => {
     const lower = (value: string) => value?.toString().trim().toLowerCase();
-    return classSelections.some(
-      (s) =>
-        hasActiveBook(s) &&
-        ['english', 'maths', 'evs'].includes(lower(s.subjectName))
+    const presence = classSelections.reduce(
+      (acc, selection) => {
+        if (!hasActiveBook(selection)) {
+          return acc;
+        }
+        const key = lower(selection.subjectName);
+        if (key === 'english') {
+          acc.english = true;
+        } else if (key === 'maths') {
+          acc.maths = true;
+        } else if (key === 'evs') {
+          acc.evs = true;
+        }
+        return acc;
+      },
+      { english: false, maths: false, evs: false }
     );
+    return presence.english || presence.maths || presence.evs;
   }, [classSelections]);
 
   // Drop Handlers
@@ -329,6 +342,18 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
               onRestore: canMutate ? handleRestoreAssessment : undefined
           });
         }
+      }
+      // If we have core subjects but assessment payload is missing, still render a placeholder entry
+      if (!assessment && !excludedAssessments.includes(classData.name)) {
+        list.push({
+          id: 'assessment-placeholder',
+          title: `Assessment`,
+          type: 'Assessment',
+          subjectName: 'General',
+          className: classData.name,
+          canDrop: canMutate,
+          onDrop: canMutate ? handleDropAssessment : undefined,
+        });
       }
     }
 
