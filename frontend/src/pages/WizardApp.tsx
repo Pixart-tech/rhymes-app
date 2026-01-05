@@ -8,7 +8,7 @@ import TitleCustomization from '../components/TitleCustomization';
 import { Check, Book, Home, ChevronLeft, Info, Square, CheckSquare } from 'lucide-react';
 import { buildFinalBookSelections } from '../lib/bookSelectionUtils';
 import { useAuth } from '../hooks/useAuth';
-import { API_BASE_URL } from '../lib/utils';
+import { API_BASE_URL, normalizeAssetUrl } from '../lib/utils';
 import { loadPersistedAppState } from '../lib/storage';
 import { toast } from 'sonner';
 const SIGNATURE_FIELDS = [
@@ -1459,7 +1459,7 @@ const Header = ({ onHome, hasFinish, onFinish, showReturnToMenu = false, onRetur
         <header className="bg-white border-b py-3 px-6 shadow-sm sticky top-0">
             <div className="max-w-6xl mx-auto flex items-center justify-between">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={onHome}>
-                    <img src=".../Edplore-book-selector-logo.png" alt="Logo" className="w-8 h-8" />
+                    <img src="/public/Edplore%20book%20selector%20logo.png" alt="Logo" className="w-8 h-8" />
 
                     <h1 className="text-xl font-bold">Edplore Book Selector</h1>
                 </div>

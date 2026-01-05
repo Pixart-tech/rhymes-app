@@ -406,13 +406,15 @@ const CoverPageWorkflow = ({
 
   const assignedGradeSummaries = useMemo(() => {
     const filteredGrades = GRADE_ORDER.filter((gradeKey) => isGradeEnabled(gradeKey));
-    return filteredGrades.map((gradeKey) => {
-      const { baselineColour } = getClientBaseline(gradeKey);
-      const gradeCode = GRADE_CODE_MAP[gradeKey];
-      const gradeLabel = resolveGradeLabel(gradeKey, resolvedGradeNames[gradeKey]);
-      const imageUrl = baselineColour ? libraryColours[baselineColour]?.[gradeCode] : null;
-      return { gradeKey, gradeLabel, colourId: baselineColour, imageUrl };
-    }).filter((entry) => entry.colourId);
+    return filteredGrades
+      .map((gradeKey) => {
+        const { baselineTheme, baselineColour } = getClientBaseline(gradeKey);
+        const gradeCode = GRADE_CODE_MAP[gradeKey];
+        const gradeLabel = resolveGradeLabel(gradeKey, resolvedGradeNames[gradeKey]);
+        const imageUrl = baselineColour ? libraryColours[baselineColour]?.[gradeCode] : null;
+        return { gradeKey, gradeLabel, colourId: baselineColour, themeId: baselineTheme, imageUrl };
+      })
+      .filter((entry) => entry.colourId && entry.themeId);
   }, [getClientBaseline, isGradeEnabled, libraryColours, resolvedGradeNames]);
 
   const hydrateSelectionsFromServer = useCallback(async () => {
@@ -717,11 +719,8 @@ const CoverPageWorkflow = ({
       }
 
       const hasAssignments = Object.keys(pngAssignments || {}).length > 0;
-      const existingSelection = (fetchedGrades?.client && fetchedGrades.client[grade]) || {};
-      const hasSavedTheme =
-        normalizeThemeId(existingSelection.theme) ||
-        normalizeThemeId(existingSelection.theme_id) ||
-        normalizeThemeId(existingSelection.client_theme);
+      const existingSelection = (fetchedGrades?.client && fetchedGrades.client[grade]) || null;
+      const hasSavedDoc = !!existingSelection;
       const statusPayload = {
         school_id: schoolId,
         grade,
@@ -764,7 +763,7 @@ const CoverPageWorkflow = ({
           await Promise.all(tasks);
         } else {
           // Status-only update: write directly to client doc; skip if nothing exists for this grade.
-          if (!hasSavedTheme && !selectedThemeId) {
+          if (!hasSavedDoc && !selectedThemeId) {
             toast.warning('No saved cover selection to update for this grade.');
             setWorkflowStatus(previousStatus);
             return false;
@@ -1095,9 +1094,11 @@ const CoverPageWorkflow = ({
         entry?.theme_colour ||
         entry?.colour_id ||
         '';
-      const themeLabel = getThemeLabel(baselineTheme, entry?.theme_label);
+      const themeLabel = baselineTheme ? getThemeLabel(baselineTheme, entry?.theme_label) : '';
       const colourLabel = normalizeColourId(baselineColour) || '';
-      entries.push({ gradeKey, label, themeLabel, colourLabel });
+      if (baselineTheme && colourLabel) {
+        entries.push({ gradeKey, label, themeLabel, colourLabel });
+      }
     });
     return entries;
   }, [baselineByGrade, fetchedGrades.client, getThemeLabel, resolvedGradeNames]);

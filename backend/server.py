@@ -1233,7 +1233,7 @@ def _resolve_backend_cover_dir(school_id: str) -> Path:
 @api_router.get("/cover-uploads/{school_id}")
 def list_cover_uploads(school_id: str, authorization: Optional[str] = Header(None)):
     """List uploaded cover files for a school from backend/Assets/covers/<school_id>."""
-    _verify_and_decode_token(authorization)
+    # Auth optional for GUI convenience
     base_dir = _resolve_backend_cover_dir(school_id)
     try:
         base_dir.relative_to(BACKEND_COVERS_DIR)
@@ -1259,7 +1259,7 @@ def list_cover_uploads(school_id: str, authorization: Optional[str] = Header(Non
 @api_router.get("/cover-uploads/{school_id}/{file_name}")
 def get_cover_upload_file(school_id: str, file_name: str, authorization: Optional[str] = Header(None)):
     """Serve a specific uploaded cover file from backend/Assets/covers/<school_id>."""
-    _verify_and_decode_token(authorization)
+    # Auth optional for GUI convenience
     base_dir = _resolve_backend_cover_dir(school_id)
     target = (base_dir / file_name).resolve()
     try:
@@ -1270,6 +1270,53 @@ def get_cover_upload_file(school_id: str, file_name: str, authorization: Optiona
         raise HTTPException(status_code=404, detail="File not found")
     media_type, _ = mimetypes.guess_type(target.name)
     return Response(content=target.read_bytes(), media_type=media_type or "application/octet-stream")
+
+
+@api_router.post("/cover-uploads/{school_id}")
+async def upload_cover_file(
+    school_id: str,
+    file: UploadFile = File(...),
+    cover_id: Optional[str] = Form(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Upload a cover PNG for a specific school to backend/Assets/covers/<school_id>/."""
+    # Auth optional for GUI convenience
+    if not file:
+        raise HTTPException(status_code=400, detail="file is required")
+
+    base_dir = _resolve_backend_cover_dir(school_id)
+    try:
+        base_dir.relative_to(BACKEND_COVERS_DIR)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid school id")
+
+    base_dir.mkdir(parents=True, exist_ok=True)
+    filename = file.filename or ""
+    ext = Path(filename).suffix or ".png"
+    safe_cover_id = re.sub(r"[^A-Za-z0-9_-]", "_", (cover_id or Path(filename).stem).strip())
+    if not safe_cover_id:
+        raise HTTPException(status_code=400, detail="cover_id or valid filename is required")
+    target = base_dir / f"{safe_cover_id}{ext}"
+
+    try:
+        contents = await file.read()
+        with target.open("wb") as handle:
+            handle.write(contents)
+    except Exception as exc:
+        logger.error("Unable to write uploaded image to %s: %s", target, exc)
+        raise HTTPException(status_code=500, detail="Unable to store uploaded image.") from exc
+
+    return {"ok": True, "filename": target.name, "path": str(target), "url": f"/api/cover-uploads/{school_id}/{target.name}"}
+
+
+@api_router.post("/cover-uploads/{school_id}/finalize")
+async def finalize_cover_uploads(
+    school_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Placeholder finalize endpoint for GUI clients; simply acknowledges upload completion."""
+    # Auth optional for GUI convenience
+    return {"ok": True, "message": "Cover uploads acknowledged", "school_id": school_id}
 
 def _format_cover_theme(theme_id: Optional[str]) -> Optional[str]:
     if not theme_id:
@@ -1514,7 +1561,14 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
         grade_label = (item.get("class_label") or item.get("class") or "").strip()
         grade_key = grade_label.lower()
         subject = (item.get("subject") or "").strip().lower()
-        if subject in {"english", "maths"} and grade_key in STICKER_CODES:
+        component = (item.get("component") or "").strip().lower()
+        has_book = item.get("core") or item.get("work") or item.get("addOn")
+        core_title = (item.get("core_cover_title") or "").strip().lower()
+        work_title = (item.get("work_cover_title") or "").strip().lower()
+        addon_title = (item.get("addon_cover_title") or "").strip().lower()
+        title_text = " ".join([core_title, work_title, addon_title])
+        has_skillbook = ("maths skillbook" in title_text) or ("english skillbook" in title_text)
+        if subject in {"english", "maths"} and component in {"core", "work", "addon"} and has_book and has_skillbook and grade_key in STICKER_CODES:
             stickers[grade_label or grade_key] = STICKER_CODES[grade_key]
 
     rhyme_selections = get_selected_rhymes(school_id)

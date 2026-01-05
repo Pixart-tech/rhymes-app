@@ -156,9 +156,23 @@ export const buildFinalBookSelections = (
 
     if (!excludedAssessments.includes(className)) {
       const englishSelection =
-        classSelections.find((item) => item.subjectName === 'English' && hasActive(item))?.selectedOption || null;
+        classSelections.find(
+          (item) =>
+            (item.subjectName || '').toString().trim().toLowerCase() === 'english' && hasActive(item)
+        )?.selectedOption || null;
       const mathsSelection =
-        classSelections.find((item) => item.subjectName === 'Maths' && hasActive(item))?.selectedOption || null;
+        classSelections.find(
+          (item) =>
+            (item.subjectName || '').toString().trim().toLowerCase() === 'maths' && hasActive(item)
+        )?.selectedOption || null;
+      const evsSelection =
+        classSelections.find(
+          (item) => (item.subjectName || '').toString().trim().toLowerCase() === 'evs' && hasActive(item)
+        )?.selectedOption || null;
+      // Skip assessment if all core subjects are absent
+      if (!englishSelection && !mathsSelection && !evsSelection) {
+        return;
+      }
       const assessment = getAssessmentForClass(
         className,
         englishSelection,
