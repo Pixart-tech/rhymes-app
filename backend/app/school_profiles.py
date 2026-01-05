@@ -423,8 +423,6 @@ class BranchCreatePayload(BaseModel):
 def build_branch_summary_entry(branch_payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": branch_payload.get("school_id"),
-        "school_id": branch_payload.get("school_id"),
-        "school_name": branch_payload.get("school_name"),
         "branch_name": branch_payload.get("school_name"),
         "coordinator_name": branch_payload.get("principal_name"),
         "coordinator_email": branch_payload.get("principal_email"),

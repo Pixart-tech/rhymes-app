@@ -34,7 +34,7 @@ import {
   ServiceStatusMap,
   WorkspaceUserUpdatePayload
 } from '../types/types';
-import BranchForm, { type BranchFormValues } from './BranchForm';
+import BranchForm, { type BranchFormValues, buildBranchFormValuesFromBranch } from './BranchForm';
 import {
   SchoolForm,
   SchoolFormSubmitPayload,
@@ -53,6 +53,7 @@ import {
 } from './ui/dropdown-menu';
 
 const API = API_BASE_URL || '/api';
+type AuthViewState = 'list' | 'create' | 'edit' | 'branch' | 'branch-edit' | 'branch-view';
 
 const normalizeSchoolId = (value?: string | null) => {
   if (!value) {
@@ -218,10 +219,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [schools, setSchools] = useState<SchoolProfile[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [view, setView] = useState<'list' | 'create' | 'edit' | 'branch'>('list');
+  const [view, setView] = useState<AuthViewState>('list');
   const [editingSchool, setEditingSchool] = useState<SchoolProfile | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [branchParent, setBranchParent] = useState<SchoolProfile | null>(null);
+  const [branchTarget, setBranchTarget] = useState<SchoolProfile | null>(null);
   const [branchSubmitting, setBranchSubmitting] = useState(false);
   const [branchStatusUpdatingId, setBranchStatusUpdatingId] = useState<string | null>(null);
   const [adminSchools, setAdminSchools] = useState<AdminSchoolProfile[]>([]);
@@ -256,6 +258,26 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     }, {} as Record<GradeKey, string>)
   );
   const [gradeDefaultsLoadedFor, setGradeDefaultsLoadedFor] = useState<string | null>(null);
+
+  const findBranchParentSchool = useCallback(
+    (branch?: SchoolProfile | null): SchoolProfile | null => {
+      if (!branch || !branch.branch_parent_id) {
+        return null;
+      }
+      const normalizedParentId = normalizeSchoolId(branch.branch_parent_id);
+      if (!normalizedParentId) {
+        return null;
+      }
+      return (
+        schools.find(
+          (school) =>
+            normalizeSchoolId(school.school_id) === normalizedParentId ||
+            normalizeSchoolId((school as { id?: string }).id) === normalizedParentId
+        ) ?? null
+      );
+    },
+    [schools]
+  );
 
   const workspaceFetchInFlight = useRef(false);
   const lastFetchedWorkspaceUserId = useRef<string | null>(null);
@@ -392,7 +414,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   }, [workspaceUser]);
 
   useEffect(() => {
-    if (view !== 'branch' && branchParent) {
+    const isBranchViewState = view === 'branch' || view === 'branch-edit' || view === 'branch-view';
+    if (!isBranchViewState && branchParent) {
       setBranchParent(null);
     }
   }, [view, branchParent]);
@@ -956,6 +979,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         void fetchWorkspace({ force: true });
         toast.success('Branch created');
         setView('list');
+        setBranchTarget(null);
         setBranchParent(null);
       } catch (error) {
         console.error('Failed to create branch', error);
@@ -972,8 +996,69 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     [branchParent, getIdToken, workspaceUser]
   );
 
+  const handleBranchUpdate = useCallback(
+    async (values: BranchFormValues) => {
+      if (!workspaceUser || !branchTarget) {
+        return;
+      }
+
+      setBranchSubmitting(true);
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+        const cleanString = (value: string) => value.trim() || undefined;
+        const payload = {
+          school_name: values.branch_name.trim(),
+          principal_name: values.coordinator_name.trim(),
+          principal_email: values.coordinator_email.trim(),
+          principal_phone: values.coordinator_phone.trim(),
+          address: cleanString(values.address),
+          city: cleanString(values.city),
+          state: cleanString(values.state),
+          pin: cleanString(values.pin)
+        };
+        const response = await axios.patch<SchoolProfile>(
+          `${API}/schools/${branchTarget.school_id}`,
+          payload,
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        const updatedBranch = response.data;
+        setSchools((prev) =>
+          prev.map((school) =>
+            school.school_id === updatedBranch.school_id ? updatedBranch : school
+          )
+        );
+        setAdminSchools((prev) =>
+          prev.map((school) =>
+            school.school_id === updatedBranch.school_id ? { ...school, ...updatedBranch } : school
+          )
+        );
+        toast.success('Branch updated');
+        setBranchTarget(null);
+        setBranchParent(null);
+        setView('list');
+      } catch (error) {
+        console.error('Failed to update branch', error);
+        const serverMessage = getAxiosDetailMessage(error);
+        if (serverMessage) {
+          toast.error(serverMessage);
+        } else {
+          toast.error('Unable to update branch. Please try again.');
+        }
+      } finally {
+        setBranchSubmitting(false);
+      }
+    },
+    [branchTarget, getIdToken, setAdminSchools, setSchools, setBranchParent, setBranchTarget, setView, workspaceUser]
+  );
+
   const handleBranchCancel = useCallback(() => {
     setBranchParent(null);
+    setBranchTarget(null);
     setView('list');
   }, []);
 
@@ -988,11 +1073,22 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
 
   const handleEditBranch = useCallback(
     (branch: SchoolProfile) => {
-      setSchoolFormValues(buildFormValues(branch));
-      setEditingSchool(branch);
-      setView('edit');
+      const parent = findBranchParentSchool(branch) ?? branch;
+      setBranchParent(parent);
+      setBranchTarget(branch);
+      setView('branch-edit');
     },
-    [buildFormValues]
+    [findBranchParentSchool]
+  );
+
+  const handleViewBranchDetails = useCallback(
+    (branch: SchoolProfile) => {
+      const parent = findBranchParentSchool(branch) ?? branch;
+      setBranchParent(parent);
+      setBranchTarget(branch);
+      setView('branch-view');
+    },
+    [findBranchParentSchool]
   );
 
   const handleBranchStatusChange = useCallback(
@@ -1042,9 +1138,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const handleAddBranch = useCallback(
     (school: SchoolProfile) => {
       setBranchParent(school);
+      setBranchTarget(null);
       setView('branch');
     },
-    [setView, setBranchParent]
+    [setView, setBranchParent, setBranchTarget]
   );
 
   const handleAdminDelete = useCallback(
@@ -1199,7 +1296,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const isSuperAdmin = workspaceUser?.role === 'super-admin';
   const isCreateView = view === 'create' || (!isSuperAdmin && schools.length === 0);
   const isEditView = view === 'edit' && Boolean(editingSchool);
-  const isBranchView = view === 'branch' && Boolean(branchParent);
+  const isBranchCreateView = view === 'branch' && Boolean(branchParent);
+  const isBranchEditView = view === 'branch-edit' && Boolean(branchParent) && Boolean(branchTarget);
+  const isBranchDetailsView = view === 'branch-view' && Boolean(branchParent) && Boolean(branchTarget);
 
   const renderUserDashboard = () => {
     const { rootSchools, orphanBranches } = branchStructure;
@@ -1374,7 +1473,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                       variant="outline"
                                       size="sm"
                                       className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300"
-                                      onClick={() => handleSchoolSelect(branch)}
+                                      onClick={() => handleViewBranchDetails(branch)}
                                     >
                                       <Eye className="h-4 w-4" />
                                       View
@@ -1437,7 +1536,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                 variant="outline"
                                 size="sm"
                                 className="border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:border-sky-300"
-                                onClick={() => handleSchoolSelect(branch)}
+                                onClick={() => handleViewBranchDetails(branch)}
                               >
                                 <Eye className="h-4 w-4" />
                                 View
@@ -1970,13 +2069,40 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
               isSuperAdmin={isSuperAdmin}
             />
           </div>
-        ) : isBranchView && branchParent ? (
+        ) : isBranchCreateView && branchParent ? (
           <div className="w-full max-w-4xl">
             <BranchForm
               parentSchool={branchParent}
               submitting={branchSubmitting}
               onSubmit={handleBranchSubmit}
               onCancel={handleBranchCancel}
+            />
+          </div>
+        ) : isBranchEditView && branchParent && branchTarget ? (
+          <div className="w-full max-w-4xl">
+            <BranchForm
+              parentSchool={branchParent}
+              submitting={branchSubmitting}
+              onSubmit={handleBranchUpdate}
+              onCancel={handleBranchCancel}
+              initialValues={buildBranchFormValuesFromBranch(branchTarget)}
+              mode="edit"
+              formTitle={`Edit ${branchTarget.school_name ?? 'branch'}`}
+              formDescription="Update the branch contact details and location."
+              submitLabel="Save changes"
+            />
+          </div>
+        ) : isBranchDetailsView && branchParent && branchTarget ? (
+          <div className="w-full max-w-4xl">
+            <BranchForm
+              parentSchool={branchParent}
+              submitting={branchSubmitting}
+              onSubmit={async () => {}}
+              onCancel={handleBranchCancel}
+              initialValues={buildBranchFormValuesFromBranch(branchTarget)}
+              mode="view"
+              formTitle={`${branchTarget.school_name} details`}
+              formDescription="Review the branch information."
             />
           </div>
         ) : (

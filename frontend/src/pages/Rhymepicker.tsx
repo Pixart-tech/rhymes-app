@@ -3280,21 +3280,26 @@ export function RhymesWorkflowApp() {
     setIsEditingSchoolProfile(false);
   }, [school, clearCoverWorkflowForSchool]);
 
+  const handleReturnToHome = useCallback(() => {
+    setIsEditingSchoolProfile(false);
+    navigate('/');
+  }, [navigate, setIsEditingSchoolProfile]);
+
   return (
     <div className="App">
       <Toaster position="top-right" />
       {!school ? (
         <AuthPage onAuth={handleAuth} onLogout={handleLogout} />
       ) : isEditingSchoolProfile ? (
-        <SchoolForm
-          mode="edit"
-          initialValues={schoolFormInitialValues}
-          submitting={schoolFormSubmitting}
-          onSubmit={handleSchoolProfileSubmit}
-          onCancel={() => setIsEditingSchoolProfile(false)}
-          onBackToHome={!isSuperAdminUser ? () => navigate('/') : undefined}
-          isSuperAdmin={isSuperAdminUser}
-        />
+          <SchoolForm
+            mode="edit"
+            initialValues={schoolFormInitialValues}
+            submitting={schoolFormSubmitting}
+            onSubmit={handleSchoolProfileSubmit}
+            onCancel={() => setIsEditingSchoolProfile(false)}
+            onBackToHome={!isSuperAdminUser ? handleReturnToHome : undefined}
+            isSuperAdmin={isSuperAdminUser}
+          />
       ) : !selectedMode ? (
         <ModeSelectionPage
           school={school}
