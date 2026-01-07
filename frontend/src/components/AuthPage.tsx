@@ -53,6 +53,7 @@ import {
   DropdownMenuTrigger
 } from './ui/dropdown-menu';
 import { ID_CARD_FIELD_OPTIONS, MAX_ID_CARD_FIELDS } from '@/constants/idCardFields';
+import { loadWorkspaceCache, saveWorkspaceCache, clearWorkspaceCache } from '../lib/storage';
 
 const API = API_BASE_URL || '/api';
 type AuthViewState = 'list' | 'create' | 'edit' | 'branch' | 'branch-edit' | 'branch-view';
@@ -71,6 +72,14 @@ const matchesParentId = (branchParentId: string | undefined | null, parent?: Sch
   const normalizedParentId = normalizeSchoolId(parent.school_id) || normalizeSchoolId(parent.id);
   const normalizedBranchId = normalizeSchoolId(branchParentId);
   return Boolean(normalizedParentId && normalizedBranchId && normalizedParentId === normalizedBranchId);
+};
+
+const resolveUserId = (value?: { uid?: string; schoolId?: string; email?: string | null }): string => {
+  if (!value) {
+    return '';
+  }
+  const raw = value.uid || value.schoolId || value.email || '';
+  return raw ? raw.toString().trim() : '';
 };
 
 const SERVICE_KEYS: SchoolServiceType[] = ['id_cards', 'report_cards', 'certificates'];
@@ -287,6 +296,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
 
   const workspaceFetchInFlight = useRef(false);
   const lastFetchedWorkspaceUserId = useRef<string | null>(null);
+  const workspaceCacheRef = useRef<{ userId: string; session: WorkspaceSession; updatedAt: number } | null>(null);
   const allSchoolsForLogos = useMemo(() => {
     const deduped: Record<string, SchoolProfile> = {};
     [...schools, ...adminSchools].forEach((school) => {
@@ -351,49 +361,89 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     return null;
   }, []);
 
-  const fetchWorkspace = useCallback(async (options?: { force?: boolean }) => {
-    if (!user) {
-      return;
-    }
+  const hydrateWorkspace = useCallback(
+    (session: WorkspaceSession) => {
+      const nextUser = session.user;
+      setWorkspaceUser(nextUser);
+      setSchools(session.schools);
+      const shouldStartInCreate =
+        nextUser.role !== 'super-admin' && session.schools.length === 0;
+      setView(shouldStartInCreate ? 'create' : 'list');
+    },
+    []
+  );
 
-    if (workspaceFetchInFlight.current) {
-      return;
-    }
-
-    const currentUserId = user.uid;
-    if (!options?.force && lastFetchedWorkspaceUserId.current === currentUserId) {
-      return;
-    }
-
-    workspaceFetchInFlight.current = true;
-    setWorkspaceLoading(true);
-    setWorkspaceError(null);
-
-    try {
-      const token = await getIdToken();
-      if (!token) {
-        throw new Error('Unable to fetch Firebase token');
+  const fetchWorkspace = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (!user) {
+        return;
       }
 
-      const response = await axios.get<WorkspaceSession>(`${API}/users/me`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const nextUser = response.data.user;
-      setWorkspaceUser(nextUser);
-      setSchools(response.data.schools);
-      const shouldStartInCreate = nextUser.role !== 'super-admin' && response.data.schools.length === 0;
-      setView(shouldStartInCreate ? 'create' : 'list');
-      lastFetchedWorkspaceUserId.current = currentUserId;
-    } catch (error) {
-      console.error('Failed to load workspace', error);
-      setWorkspaceError('Unable to load your workspace. Please try again.');
-      toast.error('Unable to load your workspace. Please try again.');
-      lastFetchedWorkspaceUserId.current = null;
-    } finally {
-      setWorkspaceLoading(false);
-      workspaceFetchInFlight.current = false;
-    }
-  }, [user, getIdToken]);
+      const currentUserId = resolveUserId(user);
+      if (!currentUserId) {
+        return;
+      }
+
+      const cachedPayload =
+        workspaceCacheRef.current ?? loadWorkspaceCache();
+      const canUseCache =
+        cachedPayload &&
+        cachedPayload.userId === currentUserId &&
+        cachedPayload.session &&
+        cachedPayload.session.user &&
+        Array.isArray(cachedPayload.session.schools);
+
+      if (!options?.force && lastFetchedWorkspaceUserId.current === currentUserId) {
+        if (canUseCache) {
+          workspaceCacheRef.current = cachedPayload;
+          hydrateWorkspace(cachedPayload.session);
+        }
+        setWorkspaceLoading(false);
+        return;
+      }
+
+      if (!options?.force && canUseCache) {
+        workspaceCacheRef.current = cachedPayload;
+        hydrateWorkspace(cachedPayload.session);
+      }
+
+      if (workspaceFetchInFlight.current) {
+        return;
+      }
+
+      workspaceFetchInFlight.current = true;
+      setWorkspaceLoading(true);
+      setWorkspaceError(null);
+
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+
+        const response = await axios.get<WorkspaceSession>(`${API}/users/me`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const session = response.data;
+        hydrateWorkspace(session);
+        lastFetchedWorkspaceUserId.current = currentUserId;
+        const payload = { userId: currentUserId, session, updatedAt: Date.now() };
+        workspaceCacheRef.current = payload;
+        saveWorkspaceCache(payload);
+      } catch (error) {
+        console.error('Failed to load workspace', error);
+        setWorkspaceError('Unable to load your workspace. Please try again.');
+        toast.error('Unable to load your workspace. Please try again.');
+        lastFetchedWorkspaceUserId.current = null;
+        workspaceCacheRef.current = null;
+        clearWorkspaceCache();
+      } finally {
+        setWorkspaceLoading(false);
+        workspaceFetchInFlight.current = false;
+      }
+    },
+    [user, getIdToken, hydrateWorkspace]
+  );
 
   useEffect(() => {
     if (!user) {
@@ -402,10 +452,26 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       setView('list');
       setEditingSchool(null);
       lastFetchedWorkspaceUserId.current = null;
+      workspaceCacheRef.current = null;
+      clearWorkspaceCache();
       return;
     }
+
+    const cached = loadWorkspaceCache();
+    const currentUserId = resolveUserId(user);
+    const hasValidCache =
+      cached &&
+      cached.userId === currentUserId &&
+      cached.session &&
+      cached.session.user &&
+      Array.isArray(cached.session.schools);
+
+    if (hasValidCache) {
+      workspaceCacheRef.current = cached;
+      hydrateWorkspace(cached.session);
+    }
     void fetchWorkspace();
-  }, [user, fetchWorkspace]);
+  }, [user, fetchWorkspace, hydrateWorkspace]);
 
   useEffect(() => {
     if (workspaceUser) {
@@ -503,28 +569,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     setCurrentPage(1);
     setSchoolsPerPage(nextSize);
   }, []);
-
-  useEffect(() => {
-    if (!user) {
-      return;
-    }
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const syncDashboards = () => {
-      void fetchWorkspace({ showLoading: false });
-      if (workspaceUser?.role === 'super-admin') {
-        void fetchAdminSchools(undefined, undefined, { showLoading: false });
-      }
-    };
-
-    window.addEventListener('focus', syncDashboards);
-
-    return () => {
-      window.removeEventListener('focus', syncDashboards);
-    };
-  }, [user, workspaceUser?.role, fetchWorkspace, fetchAdminSchools]);
 
   useEffect(() => {
     if (allSchoolsForLogos.length === 0) {
@@ -727,6 +771,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       });
       setWorkspaceUser(response.data);
       toast.success('Profile updated');
+      await fetchWorkspace({ force: true });
       setProfileDialogOpen(false);
     } catch (error) {
       console.error('Failed to update profile', error);
@@ -734,7 +779,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     } finally {
       setProfileSubmitting(false);
     }
-  }, [workspaceUser, profileForm, getIdToken]);
+  }, [workspaceUser, profileForm, getIdToken, fetchWorkspace]);
 
   const handleSchoolSelect = (school: SchoolProfile) => {
     if (!workspaceUser) {
@@ -982,6 +1027,29 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       }
     },
     [workspaceUser, getIdToken]
+  );
+
+  const handleUnapproveSelections = useCallback(
+    (school: SchoolProfile) => {
+      if (!workspaceUser || workspaceUser.role !== 'super-admin') {
+        return;
+      }
+      setApprovingSchoolId(school.school_id);
+      const updatedSchool = {
+        ...school,
+        selections_approved: false,
+        selection_status: 'active',
+      };
+      setAdminSchools((prev) =>
+        prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))
+      );
+      setSchools((prev) =>
+        prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))
+      );
+      setApprovingSchoolId(null);
+      toast.success('Selections are unfrozen for this school.');
+    },
+    [workspaceUser]
   );
 
   const handleBranchSubmit = useCallback(
@@ -1910,6 +1978,17 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                   >
                                     {isApproved ? 'Selections approved' : isApproving ? 'Approving...' : 'Approve selections'}
                                   </DropdownMenuItem>
+                                  {isApproved && (
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        void handleUnapproveSelections(school);
+                                      }}
+                                      disabled={isApproving}
+                                      className="text-rose-600"
+                                    >
+                                      {isApproving ? 'Updating...' : 'Unapprove selections'}
+                                    </DropdownMenuItem>
+                                  )}
                                   {school.branch_parent_id ? (
                                     branchStatus === 'inactive' ? (
                                       <DropdownMenuItem

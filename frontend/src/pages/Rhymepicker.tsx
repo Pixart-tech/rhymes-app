@@ -343,7 +343,7 @@ const ModeSelectionPage = ({
                           type="button"
                           onClick={() => onModeSelect(option.id)}
                           disabled={modePending && option.id === 'books'}
-                          className={`w-full text-[11px] sm:text-sm leading-tight bg-gradient-to-r from-orange-400 to-red-400 text-white shadow hover:from-orange-500 hover:to-red-500 ${
+                          className={`w-full min-h-[44px] px-3 py-2 text-xs sm:text-sm whitespace-normal leading-snug flex items-center justify-center bg-gradient-to-r from-orange-400 to-red-400 text-white shadow hover:from-orange-500 hover:to-red-500 ${
                             modePending && option.id === 'books' ? 'opacity-50 pointer-events-none' : ''
                           }`}
                         >
@@ -2917,10 +2917,28 @@ export function RhymesWorkflowApp() {
   const [isEditingSchoolProfile, setIsEditingSchoolProfile] = useState(false);
   const [schoolFormSubmitting, setSchoolFormSubmitting] = useState(false);
   const isSuperAdminUser = workspaceUser?.role === 'super-admin';
+  const coverStatus = useMemo(() => {
+    const rank: Record<string, number> = { '1': 1, '2': 2, '3': 3, '4': 4 };
+    let status = (school?.cover_status || '1').toString();
+    const schoolId = school?.school_id;
+    if (schoolId) {
+      let best = status;
+      GRADE_OPTIONS.forEach((grade) => {
+        const state = loadCoverWorkflowState(schoolId, grade.id);
+        const s = (state?.status || '').toString();
+        if (rank[s] && (!rank[best] || rank[s] > rank[best])) {
+          best = s;
+        }
+      });
+      status = best || status || '1';
+    }
+    return status;
+  }, [school?.cover_status, school?.school_id]);
+
   const selectionsFrozen = useMemo(() => {
-    const status = (school?.selection_status || '').toString().toLowerCase();
-    return school?.selections_approved === true || status === 'approved';
-  }, [school]);
+    const status = (coverStatus || '1').toString();
+    return status === '4' || status === 'finished';
+  }, [coverStatus]);
   const freezeNoticeShown = useRef(false);
   const lastNavigationStateRef = useRef<string | null>(null);
 
@@ -3238,6 +3256,10 @@ export function RhymesWorkflowApp() {
     if (currentSchoolId) {
       clearCoverWorkflowForSchool(currentSchoolId);
     }
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('bookSelectionSchoolId');
+      window.localStorage.removeItem('bookSelectionSchoolName');
+    }
     clearPersistedAppState();
     setWorkspaceUser(null);
     setSelectedGrade(null);
@@ -3259,6 +3281,10 @@ export function RhymesWorkflowApp() {
     if (currentSchoolId) {
       clearCoverWorkflowForSchool(currentSchoolId);
     }
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('bookSelectionSchoolId');
+      window.localStorage.removeItem('bookSelectionSchoolName');
+    }
     clearPersistedAppState();
     setSelectedGrade(null);
     setSelectedMode(null);
@@ -3271,6 +3297,10 @@ export function RhymesWorkflowApp() {
     const currentSchoolId = school?.school_id;
     if (currentSchoolId) {
       clearCoverWorkflowForSchool(currentSchoolId);
+    }
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('bookSelectionSchoolId');
+      window.localStorage.removeItem('bookSelectionSchoolName');
     }
     clearPersistedAppState();
     setSelectedGrade(null);

@@ -1872,22 +1872,6 @@ async def save_cover_selection(
 
     doc_ref = _cover_collection_for_school(school_id).document(_cover_doc_id(grade, admin=False))
     doc_ref.set(record)
-
-    # Anchor client theme at the root doc for the school (immutable once set)
-    if record.get("theme_id"):
-        root_ref = _cover_root_doc(school_id)
-        root_snapshot = root_ref.get()
-        root_data = root_snapshot.to_dict() or {}
-        if not root_data.get("client_theme_id"):
-            root_ref.set(
-                {
-                    "client_theme_id": record.get("theme_id"),
-                    "client_theme_label": record.get("theme_label"),
-                    "updated_at": now,
-                },
-                merge=True,
-            )
-
     return {"ok": True, "updated_at": now.isoformat()}
 
 
