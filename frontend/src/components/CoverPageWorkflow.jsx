@@ -257,7 +257,8 @@ const CoverPageWorkflow = ({
   const [workflowStatus, setWorkflowStatus] = useState(initialWorkflowStatus); // 1=explore,2=preparing,3=view,4=frozen
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [hasHydratedFromServer, setHasHydratedFromServer] = useState(false);
-  const effectiveReadOnly = isReadOnly || (!isAdmin && workflowStatus === '4');
+  const viewReadOnly = isAdmin ? false : isReadOnly;
+  const effectiveReadOnly = viewReadOnly || (!isAdmin && workflowStatus === '4');
   const [hasStatusDoc, setHasStatusDoc] = useState(false);
   const colourSectionRef = useRef(null);
   const [openSelectKey, setOpenSelectKey] = useState(null);
@@ -1020,14 +1021,7 @@ const CoverPageWorkflow = ({
                 ) : null}
                 <span className="font-semibold text-slate-800 truncate">{item.name}</span>
               </div>
-              <span
-                className={cn(
-                  'rounded-full px-2 py-0.5 text-[11px] font-semibold',
-                  item.exists ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                )}
-              >
-                {item.exists ? 'Uploaded' : 'Missing'}
-              </span>
+            
             </div>
           </div>
         ))}
@@ -1438,7 +1432,7 @@ const CoverPageWorkflow = ({
           <CardContent className="space-y-4">
             {isLoadingThemes && (
               <div className="rounded-2xl border border-dashed border-orange-200 bg-white/70 p-6 text-center text-sm font-medium text-orange-500">
-                Loading theme thumbnails...
+                Loading themes
               </div>
             )}
 
