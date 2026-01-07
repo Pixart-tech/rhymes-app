@@ -194,30 +194,30 @@ export const SCHOOL_DATA: ClassData[] = [
       {
         name: "English",
         options: [
-          { typeId: generateId(), label: "without cursive+ long vowels + blends + diaphrams + simple sentences", coreId: "100000403", coreCover: "0401", coreSpine: "U2", defaultCoreCoverTitle: "English Skillbook", workId: "100000404", workCover: "CU2", workSpine: "U3", defaultWorkCoverTitle: "English Workbook", isRecommended: true, link: "pdf_u_eng_1" },
-          { typeId: generateId(), label: "With cursive+ long vowels + blends + diaphrams + simple sentences", coreId: "100000403", coreCover: "0401", coreSpine: "U2", defaultCoreCoverTitle: "English Skillbook", workId: "100000404", workCover: "CU2", workSpine: "U3", defaultWorkCoverTitle: "English Workbook", addOnId: "100000406", addOnCover: "CU3", addOnSpine: "U12", defaultAddonCoverTitle: "Cursive", isRecommended: false, link: "pdf_u_eng_2" },
+          { typeId: generateId(), label: "without cursive+ long vowels + blends + diaphrams + simple sentences", coreId: "100000403", coreCover: "0401", coreSpine: "U2", defaultCoreCoverTitle: "English Skillbook", workId: "100000404", workCover: "0402", workSpine: "U3", defaultWorkCoverTitle: "English Workbook", isRecommended: true, link: "pdf_u_eng_1" },
+          { typeId: generateId(), label: "With cursive+ long vowels + blends + diaphrams + simple sentences", coreId: "100000403", coreCover: "0401", coreSpine: "U2", defaultCoreCoverTitle: "English Skillbook", workId: "100000404", workCover: "0402", workSpine: "U3", defaultWorkCoverTitle: "English Workbook", addOnId: "100000406", addOnCover: "0403", addOnSpine: "U12", defaultAddonCoverTitle: "Cursive", isRecommended: false, link: "pdf_u_eng_2" },
           { typeId: generateId(), label: "Jolly phonics", coreId: "100000405", coreCover: "0401", coreSpine: "U13", defaultCoreCoverTitle: "English Phonics", isRecommended: false, link: "pdf_u_eng_3" },
-          { typeId: generateId(), label: "Jolly phonics + Cursive", coreId: "100000405", coreCover: "0401", coreSpine: "U13", defaultCoreCoverTitle: "English Phonics", addOnId: "100000406", addOnCover: "CU3", addOnSpine: "U12", defaultAddonCoverTitle: "Cursive", isRecommended: false, link: "pdf_u_eng_4", info: "Similar learning outcome of Jolly phonics book + Cursive practice" },
+          { typeId: generateId(), label: "Jolly phonics + Cursive", coreId: "100000405", coreCover: "0401", coreSpine: "U13", defaultCoreCoverTitle: "English Phonics", addOnId: "100000406", addOnCover: "0403", addOnSpine: "U12", defaultAddonCoverTitle: "Cursive", isRecommended: false, link: "pdf_u_eng_4", info: "Similar learning outcome of Jolly phonics book + Cursive practice" },
         ]
       },
       {
         name: "Maths",
         options: [
-          { typeId: generateId(), label: "1-100 and 1-100 number names", coreId: "100000407", coreCover: "CU4", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "CU5", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link: "pdf_u_math_1", info: "1-50 recap , 51-100 numbers and number names upto 100, Post math concepts , single digit addition and subtraction, introduction to time and division" },
-          { typeId: generateId(), label: "101-200", coreId: "100000407", coreCover: "CU4", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "CU5", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000409", addOnCover: "CU6", addOnSpine: "U14", defaultAddonCoverTitle: "Maths 101-200", isRecommended: false, link: "pdf_u_math_2", info: "Add on book - From 101-200" },
-          { typeId: generateId(), label: "101-500", coreId: "100000407", coreCover: "CU4", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "CU5", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000410", addOnCover: "CU6", addOnSpine: "U15", defaultAddonCoverTitle: "Maths 101-500", isRecommended: false, link: "pdf_u_math_3", info: "Add on book - From 101-500" },
+          { typeId: generateId(), label: "1-100 and 1-100 number names", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link: "pdf_u_math_1", info: "1-50 recap , 51-100 numbers and number names upto 100, Post math concepts , single digit addition and subtraction, introduction to time and division" },
+          { typeId: generateId(), label: "101-200", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000409", addOnCover: "0406", addOnSpine: "U14", defaultAddonCoverTitle: "Maths 101-200", isRecommended: false, link: "pdf_u_math_2", info: "Add on book - From 101-200" },
+          { typeId: generateId(), label: "101-500", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000410", addOnCover: "0414", addOnSpine: "U15", defaultAddonCoverTitle: "Maths 101-500", isRecommended: false, link: "pdf_u_math_3", info: "Add on book - From 101-500" },
         ]
       },
       {
         name: "EVS",
         options: [
-          { typeId: generateId(), label: "EVS", coreId: "100000401", coreCover: "CU7", coreSpine: "U1", defaultCoreCoverTitle: "EVS", isRecommended: true, link: "pdf_u_evs", info: "All About Me, Sense Organs, Internal Body Parts, Daily Routine and Good Habits, My Family, Safety at Home, Types of Houses, My School, Healthy and Unhealthy Food, Types of Plants, Germination of Plants, Things We Get from Trees, Things the Plant Needs to Grow, Fruits, Vegetables, Flowers, Animals and Their Young Ones, Animal Homes, Animal Sounds, Types of Animals, Types of Birds, Lifecycle of a Butterfly, Emergency Vehicles, Traffic Rules, My Neighbourhood, Worship Places and Festivals, Community Helpers, Water Cycle, Reduce Reuse Recycle, Machines, Parts of a Computer, Living and Non-living Things, Monuments of India, Our National Leaders, Seasons, Games and Sports" },
+          { typeId: generateId(), label: "EVS", coreId: "100000401", coreCover: "0407", coreSpine: "U1", defaultCoreCoverTitle: "EVS", isRecommended: true, link: "pdf_u_evs", info: "All About Me, Sense Organs, Internal Body Parts, Daily Routine and Good Habits, My Family, Safety at Home, Types of Houses, My School, Healthy and Unhealthy Food, Types of Plants, Germination of Plants, Things We Get from Trees, Things the Plant Needs to Grow, Fruits, Vegetables, Flowers, Animals and Their Young Ones, Animal Homes, Animal Sounds, Types of Animals, Types of Birds, Lifecycle of a Butterfly, Emergency Vehicles, Traffic Rules, My Neighbourhood, Worship Places and Festivals, Community Helpers, Water Cycle, Reduce Reuse Recycle, Machines, Parts of a Computer, Living and Non-living Things, Monuments of India, Our National Leaders, Seasons, Games and Sports" },
         ]
       },
       {
         name: "Rhymes & stories",
         options: [
-          { typeId: generateId(), label: "Rhymes & Stories (Customisable)", coreId: "100000402", coreCover: "CU9", coreSpine: "U8", defaultCoreCoverTitle: "Rhymes & Stories", isRecommended: true, link: "pdf_u_rhymes", info: "24 Rhymes & 5 stories" },
+          { typeId: generateId(), label: "Rhymes & Stories (Customisable)", coreId: "100000402", coreCover: "0409", coreSpine: "U8", defaultCoreCoverTitle: "Rhymes & Stories", isRecommended: true, link: "pdf_u_rhymes", info: "24 Rhymes & 5 stories" },
         ]
       },
       {
@@ -414,7 +414,7 @@ export const getAssessmentForClass = (
   if (className === "UKG") {
      if (!mathsOpt) return null;
      const mat = mathsOpt.label;
-     const coreCover = "CU8";
+     const coreCover = "0408";
      if (mat.includes("1-100") && mat.includes("number names")) {
          return { 
             label: `1-100${isWithMarks ? '' : ' (NM)'}`, 

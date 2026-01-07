@@ -6,7 +6,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
-import { CheckCircle2, ImageOff } from 'lucide-react';
+import { CheckCircle2, ImageOff, X } from 'lucide-react';
 
 import { API_BASE_URL, cn, normalizeAssetUrl } from '../lib/utils';
 import { COVER_COLOUR_OPTIONS, COVER_THEME_CATALOGUE, COVER_THEME_SLOT_COUNT } from '../theme';
@@ -202,8 +202,23 @@ const CoverPageWorkflow = ({
   const persistedApp = loadPersistedAppState?.();
   const persistedIsAdmin = persistedApp?.workspaceUser?.role === 'super-admin';
   const isAdmin = user?.role === 'super-admin' || persistedIsAdmin;
+  const rootStatusCacheKey = useMemo(() => {
+    const schoolId = school?.school_id;
+    return schoolId ? `cover-status-${schoolId}` : null;
+  }, [school?.school_id]);
+
   const initialWorkflowStatus = (() => {
     const schoolId = school?.school_id;
+    if (schoolId && rootStatusCacheKey) {
+      try {
+        const cachedStatus = sessionStorage.getItem(rootStatusCacheKey);
+        if (cachedStatus) {
+          return cachedStatus.toString();
+        }
+      } catch (err) {
+        // ignore cache errors
+      }
+    }
     if (schoolId && grade) {
       const stored = loadCoverWorkflowState(schoolId, grade);
       const statusValue = stored?.status?.toString();
@@ -242,10 +257,11 @@ const CoverPageWorkflow = ({
   const [workflowStatus, setWorkflowStatus] = useState(initialWorkflowStatus); // 1=explore,2=preparing,3=view,4=frozen
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [hasHydratedFromServer, setHasHydratedFromServer] = useState(false);
-  const effectiveReadOnly = isReadOnly || (!isAdmin && workflowStatus !== '1');
+  const effectiveReadOnly = isReadOnly || (!isAdmin && workflowStatus === '4');
+  const [hasStatusDoc, setHasStatusDoc] = useState(false);
   const colourSectionRef = useRef(null);
   const [openSelectKey, setOpenSelectKey] = useState(null);
-  const [fetchedGrades, setFetchedGrades] = useState({ client: {}, admin: {} });
+  const [fetchedGrades, setFetchedGrades] = useState({ client: {} });
   const [clientGrades, setClientGrades] = useState({});
   const [baselineByGrade, setBaselineByGrade] = useState({});
   const summaryCacheKey = useMemo(() => {
@@ -259,6 +275,12 @@ const CoverPageWorkflow = ({
   const [approvalError, setApprovalError] = useState('');
   const fetchInFlightRef = useRef(false);
   const [serverVersion, setServerVersion] = useState(0);
+  const normalizeGradeKey = useCallback((value) => {
+    if (!value) return '';
+    const trimmed = value.toString().trim().toLowerCase();
+    if (trimmed === 'pg') return 'playgroup';
+    return trimmed;
+  }, []);
 
   const getThemeLabel = useCallback(
     (themeId, fallbackLabel) => {
@@ -419,7 +441,7 @@ const CoverPageWorkflow = ({
 
   const hydrateSelectionsFromServer = useCallback(async () => {
     const schoolId = school?.school_id;
-    if (!schoolId || !grade) {
+    if (!schoolId) {
       setHasHydratedFromServer(true);
       return;
     }
@@ -452,6 +474,7 @@ const CoverPageWorkflow = ({
       const token = await getIdToken?.();
       if (!token) {
         // wait for auth to resolve; do not mark hydrated yet
+        fetchInFlightRef.current = false;
         return;
       }
       attempted = true;
@@ -464,14 +487,15 @@ const CoverPageWorkflow = ({
         return;
       }
       const clientGrades = response.data?.client_grades || response.data?.grades || {};
-      // No separate admin doc; we drive summary from client doc only.
-      const adminGrades = {};
+      const rawStatus = response.data?.status;
+      const rootStatus = (rawStatus ?? '').toString().trim();
       const library = response.data?.library;
       const loadedColours = {};
       let loadedThemeId = selectedThemeId;
       let loadedColourId = selectedColourId;
       let loadedFinished = isFinished;
       let loadedUpdatedAt = lastSavedAt;
+      let loadedWorkflowStatus = rootStatus || workflowStatus;
 
       if (library) {
         const normalizedLibrary = normalizeLibraryPayload(library);
@@ -511,26 +535,36 @@ const CoverPageWorkflow = ({
             loadedColourId = baselineColour;
           }
         }
-        if (normalizedGrade === grade && entry?.status) {
+        if (normalizedGrade === grade && entry?.status && !rootStatus) {
           const statusStr = entry.status?.toString() || '1';
+          loadedWorkflowStatus = statusStr;
           loadedFinished = statusStr !== '1';
-          setWorkflowStatus(statusStr);
         }
         if (entry?.updated_at) {
           loadedUpdatedAt = entry.updated_at;
         }
       });
 
-      setFetchedGrades({ client: clientGrades, admin: adminGrades });
+      setFetchedGrades({ client: clientGrades });
       setClientGrades(clientGrades);
       setServerVersion((prev) => prev + 1);
+      setHasStatusDoc(rawStatus !== undefined && rawStatus !== null && rawStatus !== '');
       if (Object.keys(baselineUpdates).length > 0) {
         setBaselineByGrade((prev) => ({ ...prev, ...baselineUpdates }));
       }
       setSelectedColoursByGrade((prev) => ({ ...loadedColours, ...prev }));
       setPngAssignments({});
       // Do not auto-select theme/colour; admin can pick freely
-      setIsFinished(loadedFinished);
+      const nextStatus = rootStatus || loadedWorkflowStatus || '1';
+      setWorkflowStatus(nextStatus);
+      setIsFinished(nextStatus !== '1' ? true : loadedFinished);
+      if (rootStatusCacheKey) {
+        try {
+          sessionStorage.setItem(rootStatusCacheKey, nextStatus);
+        } catch (err) {
+          // ignore cache errors
+        }
+      }
       setLastSavedAt(loadedUpdatedAt);
 
       // Cache summary for refresh resilience
@@ -603,30 +637,14 @@ const CoverPageWorkflow = ({
 
   useEffect(() => {
     const schoolId = school?.school_id;
-    if (!schoolId || !grade) {
+    if (!schoolId) {
       return;
     }
 
     if (!hasHydratedFromServer && !authLoading) {
-      // For non-admins in status 2, rely on cached state and skip network fetch.
-      if (!isAdmin && workflowStatus === '2') {
-        setHasHydratedFromServer(true);
-        return;
-      }
       void hydrateSelectionsFromServer();
     }
-  }, [grade, hasHydratedFromServer, school?.school_id, hydrateSelectionsFromServer, authLoading, isAdmin, workflowStatus]);
-
-  // Poll for status changes to refresh non-admin UI with low latency
-  useEffect(() => {
-    if (isAdmin) return;
-    if (!school?.school_id) return;
-    const interval = setInterval(() => {
-      setHasHydratedFromServer(false);
-      void hydrateSelectionsFromServer();
-    }, 8000); // lightweight poll every 8s
-    return () => clearInterval(interval);
-  }, [hydrateSelectionsFromServer, isAdmin, school?.school_id, serverVersion]);
+  }, [hasHydratedFromServer, school?.school_id, hydrateSelectionsFromServer, authLoading]);
 
   useEffect(() => {
     const fetchThemeImages = async () => {
@@ -707,8 +725,8 @@ const CoverPageWorkflow = ({
   ]);
 
   const persistStatus = useCallback(
-    async (nextStatus) => {
-      if (effectiveReadOnly) return false;
+    async (nextStatus, { force = false, suppressToast = false } = {}) => {
+      if (effectiveReadOnly && !force) return false;
       const previousStatus = workflowStatus;
       setWorkflowStatus(nextStatus);
       const schoolId = school?.school_id;
@@ -719,20 +737,13 @@ const CoverPageWorkflow = ({
       }
 
       const hasAssignments = Object.keys(pngAssignments || {}).length > 0;
-      const existingSelection = (fetchedGrades?.client && fetchedGrades.client[grade]) || null;
-      const hasSavedDoc = !!existingSelection;
-      const statusPayload = {
-        school_id: schoolId,
-        grade,
-        status: nextStatus,
-      };
+      const statusMethod = hasStatusDoc ? 'patch' : 'post';
 
       try {
         const token = await getIdToken?.();
         const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-
         if (hasAssignments && selectedThemeId) {
-          // Save assignments + status
+          // Save assignments (upsert) for each grade via POST
           const assignedEntries = Object.values(pngAssignments || {})
             .filter((entry) => entry?.gradeKey && entry?.src)
             .map((entry) => {
@@ -742,6 +753,7 @@ const CoverPageWorkflow = ({
             });
           if (!assignedEntries.length) {
             toast.error('Pick a theme and colour before saving.');
+            setWorkflowStatus(previousStatus);
             return false;
           }
           const themeLabel = selectedTheme?.label;
@@ -750,26 +762,22 @@ const CoverPageWorkflow = ({
               `${API_BASE_URL}/cover-selections`,
               {
                 school_id: schoolId,
-                grade: gradeKey,
+                grade: normalizeGradeKey(gradeKey),
                 theme_id: selectedThemeId,
                 theme_label: themeLabel,
                 colour_id: colourId,
                 colour_label: colourOptions.find((c) => c.id === colourId)?.label || null,
-                status: nextStatus,
+                is_selected: true,
               },
               { headers }
             )
           );
           await Promise.all(tasks);
-        } else {
-          // Status-only update: write directly to client doc; skip if nothing exists for this grade.
-          if (!hasSavedDoc && !selectedThemeId) {
-            toast.warning('No saved cover selection to update for this grade.');
-            setWorkflowStatus(previousStatus);
-            return false;
-          }
-          await axios.post(`${API_BASE_URL}/cover-selections`, statusPayload, { headers });
         }
+
+        // Status lives separately; POST for first write, PATCH thereafter.
+        await axios[statusMethod](`${API_BASE_URL}/cover-status/${schoolId}`, { status: nextStatus }, { headers });
+        setHasStatusDoc(true);
 
         setWorkflowStatus(nextStatus);
         setIsFinished(nextStatus !== '1');
@@ -783,27 +791,17 @@ const CoverPageWorkflow = ({
           selectedThemeLabel: selectedTheme?.label || '',
           selectedColourLabel: selectedColour?.label || '',
         });
-        setFetchedGrades((prev) => ({
-          ...prev,
-          client: {
-            ...(prev?.client || {}),
-            [grade]: {
-              ...(prev?.client?.[grade] || {}),
-              status: nextStatus,
-              theme: selectedThemeId || prev?.client?.[grade]?.theme,
-              theme_id: selectedThemeId || prev?.client?.[grade]?.theme_id,
-              colour_id: selectedColourId || prev?.client?.[grade]?.colour_id,
-              theme_colour: selectedColourId || prev?.client?.[grade]?.theme_colour,
-            },
-          },
-        }));
+        // Do not mutate grade docs on status-only updates
+        setFetchedGrades((prev) => ({ ...(prev || {}) }));
         // Clear local selections and reload fresh data to avoid auto-selecting the previous theme on grade switches.
         setSelectedThemeId('');
         setSelectedColourId('');
         setPngAssignments({});
         setHasHydratedFromServer(false);
         void hydrateSelectionsFromServer();
-        toast.success('Status updated');
+        if (!suppressToast) {
+          toast.success(nextStatus === '4' ? 'Covers approved.' : 'Status updated');
+        }
         return true;
       } catch (error) {
         console.warn('Unable to persist cover selections', error);
@@ -817,6 +815,7 @@ const CoverPageWorkflow = ({
       colourOptions,
       effectiveReadOnly,
       grade,
+      hasStatusDoc,
       school?.school_id,
       selectedTheme?.label,
       selectedThemeId,
@@ -831,7 +830,7 @@ const CoverPageWorkflow = ({
 
   const handleFinishSave = async () => {
     // status 2 = preparing after selections
-    const ok = await persistStatus('2');
+    const ok = await persistStatus('2', { suppressToast: true });
     if (ok) {
       toast.success('Cover page selections are successfully saved to DB.');
       setSelectedThemeId('');
@@ -886,6 +885,90 @@ const CoverPageWorkflow = ({
     void handleFinishSave();
   };
 
+  const handleRemoveGradeSelection = useCallback(
+    async (gradeKey) => {
+      const schoolId = school?.school_id;
+      const normalizedGrade = normalizeGradeKey(gradeKey);
+      if (!isAdmin) {
+        toast.error('Only admins can remove cover selections.');
+        return;
+      }
+      if (!schoolId || !normalizedGrade) {
+        toast.error('Missing school or grade.');
+        return;
+      }
+
+      try {
+        const token = await getIdToken?.();
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+        await axios.delete(`${API_BASE_URL}/cover-selections/${schoolId}/${normalizedGrade}`, { headers });
+
+        setFetchedGrades((prev) => {
+          const nextClient = { ...(prev?.client || {}) };
+          delete nextClient[normalizedGrade];
+          return { ...prev, client: nextClient };
+        });
+        setClientGrades((prev) => {
+          const next = { ...(prev || {}) };
+          delete next[normalizedGrade];
+          return next;
+        });
+        setBaselineByGrade((prev) => {
+          const next = { ...(prev || {}) };
+          delete next[normalizedGrade];
+          return next;
+        });
+        setSelectedColoursByGrade((prev) => {
+          const next = { ...(prev || {}) };
+          delete next[normalizedGrade];
+          return next;
+        });
+        setPngAssignments((prev) => {
+          const next = { ...(prev || {}) };
+          Object.entries(next).forEach(([key, entry]) => {
+            if (entry?.gradeKey === normalizedGrade) {
+              delete next[key];
+            }
+          });
+          return next;
+        });
+
+        if (grade === normalizedGrade) {
+          setSelectedThemeId('');
+          setSelectedColourId('');
+        }
+
+        if (summaryCacheKey) {
+          try {
+            const cached = JSON.parse(sessionStorage.getItem(summaryCacheKey) || '{}');
+            if (cached?.client) {
+              delete cached.client[normalizedGrade];
+              sessionStorage.setItem(summaryCacheKey, JSON.stringify(cached));
+            }
+          } catch (err) {
+            // ignore cache parse errors
+          }
+        }
+
+        toast.success(`Removed ${resolveGradeLabel(normalizedGrade, resolvedGradeNames[normalizedGrade])} selection.`);
+      } catch (error) {
+        console.warn('Unable to delete cover selection', error);
+        toast.error('Unable to remove this grade selection.');
+      }
+    },
+    [
+      API_BASE_URL,
+      grade,
+      isAdmin,
+      getIdToken,
+      normalizeGradeKey,
+      resolveGradeLabel,
+      resolvedGradeNames,
+      school?.school_id,
+      summaryCacheKey,
+    ]
+  );
+
   const renderApprovalGallery = (readonly = false) => {
     if (approvalLoading) {
       return (
@@ -912,18 +995,31 @@ const CoverPageWorkflow = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {approvalCovers.map((item) => (
           <div key={item.name} className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div className="aspect-[4/3] bg-slate-50 flex items-center justify-center">
+            <div
+              className="bg-slate-50 flex items-center justify-center"
+              style={{ aspectRatio: '8 / 11', minHeight: '240px', maxHeight: '420px' }}
+            >
               <img
                 src={item.uploadedUrl || item.url}
                 alt={item.name}
                 className="h-full w-full object-contain"
+                width={1000}
+                height={1400}
+                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                 onError={(e) => {
                   e.currentTarget.style.opacity = '0.3';
                 }}
               />
             </div>
             <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
-              <span className="font-semibold text-slate-800 truncate">{item.name}</span>
+              <div className="flex flex-col min-w-0">
+                {item.gradeLabel ? (
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 truncate">
+                    {item.gradeLabel}
+                  </span>
+                ) : null}
+                <span className="font-semibold text-slate-800 truncate">{item.name}</span>
+              </div>
               <span
                 className={cn(
                   'rounded-full px-2 py-0.5 text-[11px] font-semibold',
@@ -964,36 +1060,44 @@ const CoverPageWorkflow = ({
     try {
       const token = await getIdToken?.();
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-      const [booksRes, uploadsRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/book-selections/${school.school_id}`, {
-          headers,
-          validateStatus: () => true
+
+      // Fetch cover uploads (includes class labels from server-side mapping).
+      const uploadsRes = await axios.get(`${API_BASE_URL}/cover-uploads/${school.school_id}`, {
+        headers,
+        validateStatus: () => true
+      });
+      if (uploadsRes.status >= 400) {
+        setApprovalCovers([]);
+        setApprovalError('Unable to load uploaded covers. Please try again.');
+        return;
+      }
+
+      const files = Array.isArray(uploadsRes.data?.files) ? uploadsRes.data.files : [];
+      const missing = Array.isArray(uploadsRes.data?.missing) ? uploadsRes.data.missing : [];
+      const gallery = [
+        ...files.map((f) => ({
+          name: f.name,
+          url: normalizeAssetUrl(f.url || `${API_BASE_URL}/cover-uploads/${school.school_id}/${encodeURIComponent(f.name)}`),
+          exists: true,
+          uploadedUrl: normalizeAssetUrl(f.url || `${API_BASE_URL}/cover-uploads/${school.school_id}/${encodeURIComponent(f.name)}`),
+          gradeLabel: f.class_label || ''
+        })),
+        ...missing.map((entry) => {
+          const code = typeof entry === 'string' ? entry : entry?.code;
+          const classLabel = typeof entry === 'string' ? '' : entry?.class_label;
+          return {
+            name: `${code}.png`,
+            url: normalizeAssetUrl(`/public/Assets/covers/${school.school_id}/${encodeURIComponent(code)}.png`),
+            exists: false,
+            uploadedUrl: null,
+            gradeLabel: classLabel || ''
+          };
         }),
-        axios.get(`${API_BASE_URL}/cover-uploads/${school.school_id}`, {
-          headers,
-          validateStatus: () => true
-        })
-      ]);
-      const classes = booksRes.status < 400 ? booksRes.data?.classes || [] : [];
-      const uploadFiles = uploadsRes.status < 400 ? uploadsRes.data?.files || [] : [];
-      const desiredNames = extractCoverNamesFromSelections(classes);
-      const uploadedMap = new Map(
-        uploadFiles.map((f) => {
-          const url =
-            f.url ||
-            `${API_BASE_URL}/cover-uploads/${school.school_id}/${encodeURIComponent(f.name)}`;
-          return [f.name, url];
-        })
-      );
-      const gallery = desiredNames.map((name) => ({
-        name,
-        url: normalizeAssetUrl(`/public/Assets/covers/${school.school_id}/${name}`),
-        exists: uploadedMap.has(name),
-        uploadedUrl: uploadedMap.get(name)
-      }));
+      ];
+
       setApprovalCovers(gallery);
-      if (!desiredNames.length) {
-        setApprovalError('No cover files referenced by book selections yet.');
+      if (!gallery.length) {
+        setApprovalError('No uploaded covers found for the current book selections.');
       }
     } catch (error) {
       console.warn('Unable to load cover approval assets', error);
@@ -1002,68 +1106,80 @@ const CoverPageWorkflow = ({
     } finally {
       setApprovalLoading(false);
     }
-  }, [API_BASE_URL, extractCoverNamesFromSelections, getIdToken, school?.school_id]);
+  }, [API_BASE_URL, getIdToken, school?.school_id]);
+
+  const refreshRootStatus = useCallback(async () => {
+    const schoolId = school?.school_id;
+    if (!schoolId) return;
+    try {
+      const token = await getIdToken?.();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const response = await axios.get(`${API_BASE_URL}/cover-status/${schoolId}`, { headers, validateStatus: () => true });
+      if (response.status >= 400) return;
+      const nextStatus = (response.data?.status ?? '').toString().trim() || '1';
+      setWorkflowStatus(nextStatus);
+      setHasStatusDoc(true);
+      if (rootStatusCacheKey) {
+        try {
+          sessionStorage.setItem(rootStatusCacheKey, nextStatus);
+        } catch (err) {
+          // ignore cache errors
+        }
+      }
+    } catch (error) {
+      // ignore; lightweight status refresh
+    }
+  }, [API_BASE_URL, getIdToken, rootStatusCacheKey, school?.school_id]);
 
   useEffect(() => {
     if (workflowStatus === '3' || workflowStatus === '4') {
       void fetchApprovalAssets();
+      if (!isAdmin) {
+        void refreshRootStatus();
+      }
     }
-  }, [fetchApprovalAssets, workflowStatus]);
+  }, [fetchApprovalAssets, isAdmin, refreshRootStatus, workflowStatus]);
+
+  const [clientApproved, setClientApproved] = useState(false);
 
   const handleClientApprove = useCallback(async () => {
-    const ok = await persistStatus('3');
-    if (ok) {
-      toast.success('Covers approved.');
+    const schoolId = school?.school_id;
+    if (!schoolId) {
+      toast.error('Missing school id.');
+      return;
     }
-  }, [persistStatus]);
+    try {
+      const token = await getIdToken?.();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const statusMethod = hasStatusDoc ? 'patch' : 'post';
+      const response = await axios[statusMethod](`${API_BASE_URL}/cover-status/${schoolId}`, { status: '4' }, { headers });
+      if (response.status >= 400) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      setHasStatusDoc(true);
+      setWorkflowStatus('4');
+      setIsFinished(false); // approved view, not frozen
+      setClientApproved(true);
+      const timestamp = Date.now();
+      setLastSavedAt(timestamp);
+      saveCoverWorkflowState(schoolId, grade, {
+        selectedThemeId: selectedThemeId || '',
+        selectedColourId: selectedColourId || '',
+        status: '4',
+        updatedAt: timestamp,
+        selectedThemeLabel: selectedTheme?.label || '',
+        selectedColourLabel: selectedColour?.label || '',
+      });
+      toast.success('Order of cover selections is approved.');
+    } catch (error) {
+      console.warn('Unable to approve covers', error);
+      toast.error('Could not approve covers.');
+    }
+  }, [API_BASE_URL, grade, getIdToken, hasStatusDoc, saveCoverWorkflowState, school?.school_id, selectedColourId, selectedTheme?.label, selectedThemeId]);
 
   const handleAdminStatusChange = (nextStatus) => {
     void persistStatus(nextStatus);
   };
-
-  const handleRemoveOverride = useCallback(
-    async (gradeKey) => {
-      if (!isAdmin || !school?.school_id || !gradeKey) {
-        return;
-      }
-      const safeGrade = gradeKey.toString().trim().toLowerCase();
-      try {
-        const token = await getIdToken?.();
-        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-        await axios.delete(`${API_BASE_URL}/cover-selections/${school.school_id}/${safeGrade}`, {
-          headers,
-        });
-        toast.success(`${resolveGradeLabel(safeGrade, resolvedGradeNames[safeGrade])} selection removed successfully`);
-        setSelectedColoursByGrade((prev) => {
-          const next = { ...prev };
-          delete next[safeGrade];
-          return next;
-        });
-        if (grade === safeGrade) {
-          setSelectedColourId('');
-        }
-        setPngAssignments((prev) => {
-          const next = { ...prev };
-          Object.entries(next).forEach(([key, entry]) => {
-            if (
-              entry?.gradeKey === safeGrade ||
-              entry?.gradeId === GRADE_CODE_MAP[safeGrade] ||
-              entry?.gradeId === safeGrade
-            ) {
-              delete next[key];
-            }
-          });
-          return next;
-        });
-        setHasHydratedFromServer(false);
-        void hydrateSelectionsFromServer();
-      } catch (error) {
-        console.warn('Unable to remove override', error);
-        toast.error('Unable to remove override');
-      }
-    },
-    [API_BASE_URL, getIdToken, hydrateSelectionsFromServer, isAdmin, school?.school_id]
-  );
 
   const completionDisabled =
     !selectedThemeId || effectiveReadOnly || Object.keys(pngAssignments).length === 0;
@@ -1076,6 +1192,8 @@ const CoverPageWorkflow = ({
     finished: 'Selections are frozen',
     'in-progress': 'Cover pages are being prepared'
   }[workflowStatus] || 'Explore cover pages';
+  const approvedMessage =
+    'Order of cover selections is approved and frozen. Please contact the admin for further changes.';
 
   const clientGradeEntries = useMemo(() => {
     const entries = [];
@@ -1115,55 +1233,8 @@ const CoverPageWorkflow = ({
     }
   }, [buildClientAssignmentsForTheme, getClientBaseline, grade, isAdmin, pngAssignments, selectedThemeId]);
 
-  // For non-admin users, once status moves beyond 1, show status-only UI.
+  // For non-admin users, show status-specific views when status > 1.
   if (!isAdmin && workflowStatus !== '1') {
-    if (workflowStatus === '3' || workflowStatus === '4') {
-      return (
-        <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-slate-50 to-slate-100 py-10 px-6">
-          <div className="mx-auto max-w-5xl space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-indigo-500">Cover pages approval</p>
-                <h1 className="text-2xl font-semibold text-slate-900">{school.school_name}</h1>
-                <p className="text-sm text-slate-600">School ID: {school.school_id}</p>
-                <p className="text-sm font-semibold text-indigo-700">
-                  {workflowStatus === '3'
-                    ? 'Review uploaded covers and approve.'
-                    : 'Covers are frozen. Contact admin for changes.'}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={onBackToMode} className="bg-white/80 hover:bg-white">
-                  Back to menu
-                </Button>
-                <Button variant="outline" onClick={onLogout} className="bg-white/80 hover:bg-white">
-                  Logout
-                </Button>
-              </div>
-            </div>
-
-            <Card className="border-none bg-white/80 shadow-md shadow-indigo-100/60">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xl font-semibold text-slate-900">
-                  {workflowStatus === '4' ? 'Approved covers' : 'Uploaded covers'}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {renderApprovalGallery(workflowStatus === '4')}
-                {workflowStatus === '3' && (
-                  <div className="flex justify-end">
-                    <Button type="button" onClick={handleClientApprove} disabled={approvalLoading}>
-                      Approve covers
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      );
-    }
-
     if (workflowStatus === '2') {
       return (
         <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
@@ -1205,6 +1276,9 @@ const CoverPageWorkflow = ({
               <p className="text-sm font-medium text-orange-500">Cover pages workflow</p>
               <h1 className="text-2xl font-semibold text-slate-900">{school.school_name}</h1>
               <p className="text-sm text-slate-600">School ID: {school.school_id}</p>
+              {workflowStatus === '4' && (
+                <p className="text-sm font-semibold text-indigo-700">{approvedMessage}</p>
+              )}
               {workflowStatus === '2' && (
                 <p className="text-sm font-semibold text-amber-700">Cover pages are being prepared. Please wait.</p>
               )}
@@ -1221,70 +1295,36 @@ const CoverPageWorkflow = ({
 
           <Card className="border-none bg-white/80 shadow-md shadow-orange-100/50">
             <CardHeader className="pb-4">
-              <CardTitle className="text-xl font-semibold text-slate-900">Saved cover selection</CardTitle>
-              <p className="text-sm text-slate-600">Theme and colour PNGs that were saved for this school.</p>
-            </CardHeader>
-            <CardContent>
-              <div className="mb-4 flex items-center gap-4 rounded-xl border border-slate-200 bg-white/80 p-3 shadow-sm">
-                <div className="h-16 w-16 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center">
-                  {selectedTheme && buildThemeSources(selectedTheme)?.cover ? (
-                    <img
-                      src={buildThemeSources(selectedTheme).cover}
-                      alt={`${selectedTheme.label} cover`}
-                      width={256}
-                      height={256}
-                      className="h-full w-full object-contain"
-                      loading="lazy"
-                      decoding="async"
-                    />
-                  ) : (
-                    <span className="text-xs text-slate-400">No theme</span>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-slate-800">Theme</p>
-                  <p className="text-base font-semibold text-slate-900">{selectedTheme?.label || 'Not selected'}</p>
-                  <p className="text-xs text-slate-500">Workflow status: {statusLabel}</p>
-                </div>
-              </div>
-
-              {assignedGradeSummaries.length === 0 ? (
-                <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                  No cover PNGs have been assigned yet.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {assignedGradeSummaries.map((entry) => (
-                    <div
-                      key={entry.gradeKey}
-                      className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white/80 p-3 shadow-sm"
-                    >
-                      <div className="h-16 w-16 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center">
-                        {entry.imageUrl ? (
-                          <img
-                            src={entry.imageUrl}
-                            alt={`${entry.gradeLabel} cover`}
-                            width={256}
-                            height={256}
-                            className="h-full w-full object-contain"
-                          />
-                        ) : (
-                          <span className="text-xs text-slate-400">No PNG</span>
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-semibold text-slate-800">{entry.gradeLabel}</p>
-                        <p className="text-xs text-slate-500">Colour: {entry.colourId}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              <CardTitle className="text-xl font-semibold text-slate-900">
+                {workflowStatus === '4' ? 'View approved covers' : 'Uploaded cover pages'}
+              </CardTitle>
+              <p className="text-sm text-slate-600">
+                {workflowStatus === '4'
+                  ? 'Review the approved covers for this school.'
+                  : 'Review the uploaded covers for this school.'}
+              </p>
+              {workflowStatus === '4' && (
+                <p className="text-xs font-semibold text-indigo-700">{approvedMessage}</p>
               )}
-            </CardContent>
+            </CardHeader>
+            <CardContent>{renderApprovalGallery(true)}</CardContent>
           </Card>
 
+          {workflowStatus === '3' && (
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                onClick={handleClientApprove}
+                disabled={approvalLoading || clientApproved}
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                {clientApproved ? 'Approved' : 'Approve covers'}
+              </Button>
+            </div>
+          )}
+
           <Card className="border-none bg-white/80 shadow-lg">
-            <CardContent className="p-6 space-y-3">
+            <CardContent className="px-4 py-3 space-y-3">
               <p className="text-lg font-semibold text-slate-900">{statusLabel}</p>
               <p className="text-sm text-slate-600">
                 {workflowStatus === '2'
@@ -1314,10 +1354,10 @@ const CoverPageWorkflow = ({
                   <CheckCircle2 className="h-4 w-4" /> Finished
                 </span>
               )}
+              <span className="inline-flex items-center gap-1 text-indigo-700 font-semibold">
+                Present status: {statusLabel}
+              </span>
             </div>
-            <p className="text-sm text-slate-700">
-              Theme: {selectedThemeDisplay}
-            </p>
             {workflowStatus === '2' && (
               <p className="text-sm font-semibold text-amber-700">Cover pages are being prepared. Please wait.</p>
             )}
@@ -1340,9 +1380,6 @@ const CoverPageWorkflow = ({
                 <Button size="sm" variant="outline" onClick={() => handleAdminStatusChange('3')} className="text-indigo-700 border-indigo-200 hover:bg-indigo-50">
                   Set status: View pages (3)
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => handleAdminStatusChange('4')} className="text-rose-700 border-rose-200 hover:bg-rose-50">
-                  Set status: Freeze (4)
-                </Button>
               </div>
             )}
           </div>
@@ -1364,30 +1401,31 @@ const CoverPageWorkflow = ({
               </div>
             </div>
             <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="flex flex-wrap gap-2">
                 {clientGradeEntries.map((entry) => (
-                  <div key={entry.gradeKey} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
-                    <div className="flex flex-col">
+                  <div
+                    key={entry.gradeKey}
+                    className="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 shadow-sm hover:border-orange-300 hover:shadow transition"
+                  >
+                    <div className="flex flex-col leading-tight">
                       <span className="text-sm font-semibold text-slate-800">{entry.label}</span>
-                      <span className="text-xs text-slate-500">Theme: {entry.themeLabel}</span>
-                      {entry.colourLabel && (
-                        <span className="text-xs text-slate-500">Colour: {entry.colourLabel}</span>
-                      )}
+                      <span className="text-[11px] text-slate-500">
+                        Theme: {entry.themeLabel || '-'} | Colour: {entry.colourLabel || '-'}
+                      </span>
                     </div>
                     {isAdmin && (
                       <button
                         type="button"
-                        onClick={() => handleRemoveOverride(entry.gradeKey)}
-                        className="text-rose-600 hover:text-rose-700 text-xs font-semibold"
-                        aria-label={`Remove ${entry.label}`}
+                        onClick={() => handleRemoveGradeSelection(entry.gradeKey)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+                        aria-label={`Remove ${entry.label} selection`}
                       >
-                        x
+                        <X className="h-4 w-4" />
                       </button>
                     )}
                   </div>
                 ))}
               </div>
-              {adminOverrideEntries.length > 0 && null}
             </div>
           </CardContent>
         </Card>
@@ -1423,10 +1461,10 @@ const CoverPageWorkflow = ({
                     className={cn(
                       'group relative block w-full max-w-[900px] mx-auto overflow-hidden border border-slate-200 bg-white/80 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md active:scale-[0.99] focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-300 aspect-[5009/3473]',
                       isSelected ? 'border-orange-500 ring-2 ring-orange-400' : '',
-                      isReadOnly ? 'cursor-not-allowed opacity-60' : ''
+                      effectiveReadOnly ? 'cursor-not-allowed opacity-60' : ''
                     )}
                     aria-pressed={isSelected}
-                    disabled={isReadOnly}
+                    disabled={effectiveReadOnly}
                   >
                     <div className="h-full w-full overflow-hidden">
                       {cardSrc ? (
@@ -1476,7 +1514,7 @@ const CoverPageWorkflow = ({
                       className={cn(
                         'flex h-full flex-col gap-4 rounded-2xl border bg-white p-4 text-left shadow-sm transition duration-200',
                         fullyAssigned ? 'border-orange-500 ring-2 ring-orange-400 ring-offset-2' : 'border-slate-200',
-                        isReadOnly ? 'cursor-not-allowed opacity-60' : '',
+                        effectiveReadOnly ? 'cursor-not-allowed opacity-60' : '',
                         'w-full sm:min-w-[360px]'
                       )}
                     >
@@ -1552,12 +1590,12 @@ const CoverPageWorkflow = ({
                     {workflowStatus === '1'
                       ? 'Select a theme and colour, then click Finish to save this grade.'
                       : workflowStatus === '2'
-                      ? 'Cover pages are being prepared. You can adjust selections until an admin freezes them.'
+                      ? 'Cover pages are being prepared. You can adjust selections until an admin locks them.'
                       : workflowStatus === '3'
                       ? 'View the uploaded cover pages and approve when ready.'
                       : 'Selections are frozen. Contact admin for changes.'}
                   </p>
-                  {isReadOnly && <p className="text-xs text-slate-500">Viewing mode is enabled because selections are frozen.</p>}
+                  {effectiveReadOnly && <p className="text-xs text-slate-500">Viewing mode is enabled because selections are frozen.</p>}
                 </div>
                 {!isFinished && !effectiveReadOnly && (
                   <div className="flex gap-2">

@@ -1,4 +1,5 @@
 const APP_STATE_KEY = 'rhymes-app::state';
+const WORKSPACE_CACHE_KEY = 'rhymes-app::workspace-cache';
 const COVER_WORKFLOW_KEY_PREFIX = 'rhymes-app::cover::';
 const BOOK_WORKFLOW_KEY_PREFIX = 'rhymes-app::books::';
 
@@ -49,6 +50,36 @@ export const clearPersistedAppState = () => {
     return;
   }
   window.localStorage.removeItem(APP_STATE_KEY);
+};
+
+export const loadWorkspaceCache = () => {
+  if (!isBrowser()) {
+    return null;
+  }
+  return safeParseJson(window.localStorage.getItem(WORKSPACE_CACHE_KEY));
+};
+
+export const saveWorkspaceCache = (payload) => {
+  if (!isBrowser()) {
+    return;
+  }
+  if (!payload) {
+    window.localStorage.removeItem(WORKSPACE_CACHE_KEY);
+    return;
+  }
+  try {
+    const serialized = JSON.stringify(payload);
+    window.localStorage.setItem(WORKSPACE_CACHE_KEY, serialized);
+  } catch (error) {
+    console.warn('Unable to persist workspace cache:', error);
+  }
+};
+
+export const clearWorkspaceCache = () => {
+  if (!isBrowser()) {
+    return;
+  }
+  window.localStorage.removeItem(WORKSPACE_CACHE_KEY);
 };
 
 const createWorkflowStorage = (keyPrefix) => {

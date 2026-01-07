@@ -53,6 +53,9 @@ export const buildFinalBookSelections = (
   coverSelections: Record<string, CoverSelectionMeta> = {}
 ): FinalOutputItem[] => {
   const selectionsByClass: Record<string, SelectionRecord[]> = {};
+  const excludedSet = new Set(
+    (excludedAssessments || []).map((value) => (value || '').toString().trim().toLowerCase())
+  );
 
   selections.forEach((selection) => {
     if (!selectionsByClass[selection.className]) {
@@ -69,8 +72,9 @@ export const buildFinalBookSelections = (
       selectedOption: mergeWithCanonicalOption(selection.selectedOption),
     }));
     const gradeKey = className.toLowerCase();
-    const normalizedKey = gradeKey === 'playgroup' ? 'pg' : gradeKey;
-    const gradeLabel = gradeNames[normalizedKey] || className;
+    const classKey = gradeKey;
+    const gradeLabel = gradeNames[gradeKey] || className;
+    const displayLabel = gradeLabel || className;
     const coverMeta = coverSelections[className] || null;
 
     const hasActive = (selection: SelectionRecord): boolean => {
@@ -81,10 +85,34 @@ export const buildFinalBookSelections = (
       return coreActive || workActive || addonActive;
     };
 
+    const englishSelection =
+      classSelections.find(
+        (item) =>
+          (item.subjectName || '').toString().trim().toLowerCase() === 'english' && hasActive(item)
+      )?.selectedOption || null;
+    const mathsSelection =
+      classSelections.find(
+        (item) =>
+          (item.subjectName || '').toString().trim().toLowerCase() === 'maths' && hasActive(item)
+      )?.selectedOption || null;
+    const evsSelection =
+      classSelections.find(
+        (item) => (item.subjectName || '').toString().trim().toLowerCase() === 'evs' && hasActive(item)
+      )?.selectedOption || null;
+    const hasCoreSubjects =
+      Boolean(englishSelection || mathsSelection || evsSelection) ||
+      classSelections.some((item) => {
+        const subject = (item.subjectName || '').toString().trim().toLowerCase();
+        return ['english', 'maths', 'evs'].includes(subject) && !!item.selectedOption;
+      });
+
     classSelections.forEach((selection) => {
       if (!selection.selectedOption) return;
 
-      if (selection.skipCore && selection.skipWork && selection.skipAddon) return;
+      const hasActiveCore = !!selection.selectedOption.coreId && !selection.skipCore;
+      const hasActiveWork = !!selection.selectedOption.workId && !selection.skipWork;
+      const hasActiveAddon = !!selection.selectedOption.addOnId && !selection.skipAddon;
+      if (!hasActiveCore && !hasActiveWork && !hasActiveAddon) return;
 
       const coreTitle =
         selection.customCoreTitle ||
@@ -100,8 +128,9 @@ export const buildFinalBookSelections = (
         selection.selectedOption.label;
 
       const base = {
-        class: gradeLabel,
-        class_label: selection.className,
+        class: classKey,
+        class_label: displayLabel,
+        class_name: selection.className,
         subject: selection.selectedOption.jsonSubject || selection.subjectName,
         type: selection.selectedOption.label,
         cover_theme_id: coverMeta?.themeId ?? null,
@@ -111,11 +140,11 @@ export const buildFinalBookSelections = (
         cover_status: coverMeta?.status ?? null
       };
 
-      if (!selection.skipCore && selection.selectedOption.coreId) {
+      if (hasActiveCore) {
         finalData.push({
           ...base,
           component: 'core',
-          grade_subject: `${gradeLabel} : ${coreTitle}`,
+          grade_subject: `${displayLabel} : ${coreTitle}`,
           core: selection.selectedOption.coreId,
           core_cover: selection.selectedOption.coreCover,
           core_cover_title: selection.customCoreTitle || selection.selectedOption.defaultCoreCoverTitle,
@@ -125,11 +154,11 @@ export const buildFinalBookSelections = (
         });
       }
 
-      if (!selection.skipWork && selection.selectedOption.workId) {
+      if (hasActiveWork) {
         finalData.push({
           ...base,
           component: 'work',
-          grade_subject: `${gradeLabel} : ${workTitle}`,
+          grade_subject: `${displayLabel} : ${workTitle}`,
           core: undefined,
           work: selection.selectedOption.workId,
           work_cover: selection.selectedOption.workCover,
@@ -139,11 +168,11 @@ export const buildFinalBookSelections = (
         });
       }
 
-      if (!selection.skipAddon && selection.selectedOption.addOnId) {
+      if (hasActiveAddon) {
         finalData.push({
           ...base,
           component: 'addon',
-          grade_subject: `${gradeLabel} : ${addonTitle}`,
+          grade_subject: `${displayLabel} : ${addonTitle}`,
           core: undefined,
           work: undefined,
           addOn: selection.selectedOption.addOnId,
@@ -154,23 +183,12 @@ export const buildFinalBookSelections = (
       }
     });
 
-    if (!excludedAssessments.includes(className)) {
-      const englishSelection =
-        classSelections.find(
-          (item) =>
-            (item.subjectName || '').toString().trim().toLowerCase() === 'english' && hasActive(item)
-        )?.selectedOption || null;
-      const mathsSelection =
-        classSelections.find(
-          (item) =>
-            (item.subjectName || '').toString().trim().toLowerCase() === 'maths' && hasActive(item)
-        )?.selectedOption || null;
-      const evsSelection =
-        classSelections.find(
-          (item) => (item.subjectName || '').toString().trim().toLowerCase() === 'evs' && hasActive(item)
-        )?.selectedOption || null;
-      // Skip assessment if all core subjects are absent
-      if (!englishSelection && !mathsSelection && !evsSelection) {
+    const normalizedClassName = (className || '').toString().trim().toLowerCase();
+    const isPlaygroup = normalizedClassName === 'playgroup' || normalizedClassName === 'pg';
+
+    if (!excludedSet.has(normalizedClassName) && !isPlaygroup) {
+      // Skip assessment only when all three subjects are absent
+      if (!hasCoreSubjects) {
         return;
       }
       const assessment = getAssessmentForClass(
@@ -183,10 +201,11 @@ export const buildFinalBookSelections = (
         if (assessment) {
           const assessmentTitle = customAssessmentTitles[className] || assessment.defaultCoreCoverTitle || assessment.label;
           finalData.push({
-            class: gradeLabel,
-            class_label: className,
+            class: classKey,
+            class_label: displayLabel,
+            class_name: className,
             subject: 'Assessment',
-            grade_subject: `${gradeLabel} : ${assessmentTitle}`,
+            grade_subject: `${displayLabel} : ${assessmentTitle}`,
             type: assessment.label,
             core: assessment.coreId,
             core_cover: assessment.coreCover,
@@ -204,5 +223,39 @@ export const buildFinalBookSelections = (
     }
   });
 
-  return finalData;
+  // Deduplicate entries per class/subject/component by keeping the record with more populated fields.
+  const pickScore = (item: FinalOutputItem): number => {
+    const fields = [
+      item.core_cover,
+      item.core_cover_title,
+      item.core_spine,
+      item.work_cover,
+      item.work_cover_title,
+      item.work_spine,
+      item.addon_cover,
+      item.addon_cover_title,
+      item.addon_spine,
+      item.cover_theme_id,
+      item.cover_colour_id,
+      item.cover_status,
+    ];
+    return fields.reduce((acc, val) => acc + (val ? 1 : 0), 0);
+  };
+
+  const deduped: Record<string, FinalOutputItem> = {};
+  finalData.forEach((item) => {
+    const classKey = (item.class || item.class_label || '').toString().trim().toLowerCase();
+    const key = [
+      classKey,
+      item.subject || '',
+      item.component || '',
+      item.core || item.work || item.addOn || '',
+    ].join('|');
+    const current = deduped[key];
+    if (!current || pickScore(item) >= pickScore(current)) {
+      deduped[key] = item;
+    }
+  });
+
+  return Object.values(deduped);
 };

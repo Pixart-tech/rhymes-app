@@ -75,40 +75,19 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const { user, getIdToken } = useAuth();
   const [viewState, setViewState] = useState<ViewState>(initialView);
   
-  const defaultGradeNames: Record<string, string> = {
-    pg: 'Playgroup',
-    playgroup: 'Playgroup',
-    nursery: 'Nursery',
-    lkg: 'LKG',
-    ukg: 'UKG'
-  };
-  const gradeKeyToClassKey: Record<string, string> = {
-    toddler: 'pg',
-    playgroup: 'pg',
-    nursery: 'nursery',
-    lkg: 'lkg',
-    ukg: 'ukg'
-  };
-  const deriveGradeLabelsFromSchool = (grades?: Record<string, { label?: string }> | null) => {
+  const defaultGradeNames: Record<string, string> = {};
+  const deriveGradeLabelsFromSchool = (grades?: Record<string, { label?: string; enabled?: boolean }> | null) => {
     const merged: Record<string, string> = { ...defaultGradeNames };
     if (!grades) {
       return merged;
     }
     Object.entries(grades).forEach(([rawKey, value]) => {
-      const key = rawKey.toLowerCase();
-      const mapped = gradeKeyToClassKey[key] || key;
+      const enabled = value && typeof value === 'object' ? Boolean(value.enabled) : false;
+      if (!enabled) return;
+      const key = rawKey.toLowerCase().trim();
       const label = typeof value?.label === 'string' ? value.label.trim() : '';
-      if (mapped && label) {
-        merged[mapped] = label;
-        if (mapped === 'pg' || mapped === 'playgroup') {
-          merged.pg = label;
-          merged.playgroup = label;
-        }
-      }
+      merged[key] = label || key;
     });
-    if (!merged.pg && merged.playgroup) {
-      merged.pg = merged.playgroup;
-    }
     return merged;
   };
   const persistedState = loadPersistedAppState() || {};
@@ -165,6 +144,20 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const [assessmentVariants, setAssessmentVariants] = useState<Record<string, AssessmentVariant>>({});
   const [customAssessmentTitles, setCustomAssessmentTitles] = useState<Record<string, string>>({});
   const [gradeNames, setGradeNames] = useState<Record<string, string>>(initialGradeNames);
+  const gradeLabelLookup = useMemo(() => {
+    const map: Record<string, string> = {};
+    Object.entries(gradeNames || {}).forEach(([key, label]) => {
+      const norm = key.toLowerCase();
+      const resolved = (label || '').trim() || key;
+      map[norm] = resolved;
+      if (norm === 'playgroup') {
+        map.pg = resolved;
+      }
+      const labelKey = resolved.toLowerCase();
+      map[labelKey] = resolved;
+    });
+    return map;
+  }, [gradeNames]);
   const [viewingInfoForOption, setViewingInfoForOption] = useState<string | null>(null);
   const [skipWorkMap, setSkipWorkMap] = useState<Record<string, boolean>>({});
   const [bookSelectionSchoolId, setBookSelectionSchoolId] = useState<string | null>(null);
@@ -210,6 +203,8 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     completedClasses.forEach((name) => combined.add(name));
     return combined;
   }, [selections, completedClasses]);
+  const normalizeClassKey = useCallback((value: string) => (value || '').trim().toLowerCase(), []);
+
   const isClassReadOnly = useCallback(
     (_className: string) => isFinalized,
     [isFinalized]
@@ -274,6 +269,8 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
   const calculateBookCount = (className: string) => {
     const classSelections = selections.filter(s => s.className === className);
+    const normalizedClass = (className || '').toString().trim().toLowerCase();
+    const isPlaygroup = normalizedClass === 'playgroup' || normalizedClass === 'pg';
     let count = 0;
 
     const hasActive = (s: SelectionRecord): boolean => {
@@ -292,7 +289,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       }
     });
 
-    if (!excludedAssessments.includes(className)) {
+    if (!excludedAssessments.includes(className) && !isPlaygroup) {
         const { englishSelection, mathsSelection, evsSelection, hasAny } = getActiveCoreSelections(classSelections);
         if (hasAny) {
           const assessment = getAssessmentForClass(
@@ -332,7 +329,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     (finalItems: FinalOutputItem[]) => {
       const grouped: Record<string, FinalOutputItem[]> = {};
       finalItems.forEach((item) => {
-        const classKey = item.class_label || item.class || '';
+        const classKey = normalizeClassKey(item.class || item.class_label || '');
         if (!classKey) {
           return;
         }
@@ -349,13 +346,12 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
       return signatures;
     },
-    [computeClassSignature]
+    [computeClassSignature, normalizeClassKey]
   );
 
   const getGradeLabelForClass = (className: string): string => {
     const key = className.toLowerCase();
-    const mappedKey = key === 'playgroup' ? 'pg' : key;
-    return gradeNames[mappedKey] || className;
+    return gradeLabelLookup[key] || className;
   };
 
   const findOptionForSavedItem = (className: string, item: any): { option: BookOption; subjectName: string } | null => {
@@ -785,20 +781,58 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     const latestGradeNames = resolveLatestGradeNames();
     setGradeNames(latestGradeNames);
 
+    // Build a lookup from any known grade key/label to the canonical enabled key (no hooks inside save).
+    const gradeKeyLookup: Record<string, string> = {};
+    Object.entries(latestGradeNames || {}).forEach(([key, label]) => {
+      const canon = key.toLowerCase();
+      gradeKeyLookup[canon] = canon;
+      if (canon === 'playgroup') {
+        gradeKeyLookup.pg = canon;
+      }
+      const labelKey = (label || '').toString().trim().toLowerCase();
+      if (labelKey) {
+        gradeKeyLookup[labelKey] = canon;
+      }
+    });
+
+    const normalizeClassNameToEnabled = (value: string): string => {
+      const key = (value || '').toString().trim().toLowerCase();
+      return gradeKeyLookup[key] || key;
+    };
+
+    // Remove any subject with no active core/work/addon before building payload
+    const cleanedSelections = selections
+      .map((s) => ({ ...s, className: normalizeClassNameToEnabled(s.className) }))
+      .filter((s) => {
+        if (!s.selectedOption) return false;
+        const hasActiveCore = !!s.selectedOption.coreId && !s.skipCore;
+        const hasActiveWork = !!s.selectedOption.workId && !s.skipWork;
+        const hasActiveAddon = !!s.selectedOption.addOnId && !s.skipAddon;
+        return hasActiveCore || hasActiveWork || hasActiveAddon;
+      });
+
+    const normalizedExcluded = excludedAssessments.map(normalizeClassNameToEnabled);
+
     const finalSelections = buildFinalBookSelections(
-      selections,
-      excludedAssessments,
+      cleanedSelections,
+      normalizedExcluded,
       assessmentVariants,
       customAssessmentTitles,
       latestGradeNames
     );
 
-    const currentSignatures = buildPayloadClassSignatures(finalSelections);
-    const removedClasses = Object.keys(savedClassSignatures).filter(
-      (className) => !(className in currentSignatures)
+    const sanitizedSelections = finalSelections.map(
+      ({ cover_theme_id, cover_theme_label, cover_colour_id, cover_colour_label, cover_status, ...rest }) => rest
     );
 
-    const normalizeClassKey = (value: string) => (value || '').trim().toLowerCase();
+    const currentSignatures = buildPayloadClassSignatures(sanitizedSelections);
+    const selectedClassSet = new Set(selections.map((s) => normalizeClassKey(s.className)));
+    const removedClasses = Object.keys(savedClassSignatures).filter((className) => {
+      const normalized = normalizeClassKey(className);
+      // Only delete if the class truly no longer exists in current signatures AND is not present in current selections.
+      return !(className in currentSignatures) && !selectedClassSet.has(normalized);
+    });
+
     const savedSignatureMap: Record<string, string> = {};
     Object.entries(savedClassSignatures).forEach(([key, signature]) => {
       savedSignatureMap[normalizeClassKey(key)] = signature;
@@ -825,8 +859,8 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       }
     });
 
-    const filteredSelections = finalSelections.filter((item) =>
-      dirtyClassKeys.has(normalizeClassKey(item.class_label || item.class || ''))
+    const filteredSelections = sanitizedSelections.filter((item) =>
+      dirtyClassKeys.has(normalizeClassKey(item.class || item.class_label || ''))
     );
 
     if (filteredSelections.length === 0 && removedClasses.length === 0) {
@@ -944,6 +978,16 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         }
         const normalizedClass = resolveClassName(rawClass);
         const items = Array.isArray(entry.items) ? entry.items : [];
+        const lower = (val: any) => (val || '').toString().trim().toLowerCase();
+        const hasCoreSubjects = items.some((item: any) => {
+          const subj = lower(item?.subject);
+          const comp = lower(item?.component);
+          if (!['english', 'maths', 'evs'].includes(subj)) return false;
+          return ['core', 'work', 'addon'].includes(comp);
+        });
+        const sanitizedItems = hasCoreSubjects
+          ? items
+          : items.filter((item: any) => lower(item?.subject) !== 'assessment');
         const excludedList = Array.isArray(entry.excluded_assessments) ? entry.excluded_assessments : [];
         excludedList.forEach((c) => {
           if (typeof c === 'string') {
@@ -951,11 +995,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             nextExcluded.add(mapped || c);
           }
         });
-        nextSignatures[normalizedClass] = computeClassSignature(items);
+        nextSignatures[normalizedClass] = computeClassSignature(sanitizedItems);
 
         // Merge separate component rows (core/work/addon) back into a single selection per subject/type.
         const grouped: Record<string, any> = {};
-        items.forEach((item: any) => {
+        sanitizedItems.forEach((item: any) => {
           const subjectKey = (item.subject || '').toString().trim().toLowerCase();
           const typeKey = (item.type || '').toString().trim().toLowerCase();
           const key = [subjectKey, typeKey].join('||');
@@ -1098,7 +1142,28 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   }
 
   if (viewState === 'SUMMARY' && currentClassData) {
-    const readOnlySummary = isClassReadOnly(currentClassData.name);
+    const latestGradeNames = resolveLatestGradeNames();
+    const cleanedSelections = selections.filter((s) => {
+      if (!s.selectedOption) return false;
+      const hasCore = !!s.selectedOption.coreId && !s.skipCore;
+      const hasWork = !!s.selectedOption.workId && !s.skipWork;
+      const hasAddon = !!s.selectedOption.addOnId && !s.skipAddon;
+      return hasCore || hasWork || hasAddon;
+    });
+    const currentFinal = buildFinalBookSelections(
+      cleanedSelections,
+      excludedAssessments,
+      assessmentVariants,
+      customAssessmentTitles,
+      latestGradeNames
+    );
+    const currentClassSignature = computeClassSignature(
+      currentFinal.filter(
+        (item) => normalizeClassKey(item.class || item.class_label || '') === normalizeClassKey(currentClassData.name)
+      )
+    );
+    const savedSig = savedClassSignatures[normalizeClassKey(currentClassData.name)];
+    const readOnlySummary = isFinalized || (savedSig && savedSig === currentClassSignature);
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
           <Header
@@ -1475,6 +1540,7 @@ type HeaderProps = {
 
 // HEADER Component
 const Header = ({ onHome, hasFinish, onFinish, showReturnToMenu = false, onReturnToMenu, finishStatus = 'idle' }: HeaderProps) => {
+    const API = API_BASE_URL || '/api';
     const isSaving = finishStatus === 'saving';
     const isSaved = finishStatus === 'success';
     const showFinish = hasFinish && finishStatus !== 'success';
@@ -1484,7 +1550,7 @@ const Header = ({ onHome, hasFinish, onFinish, showReturnToMenu = false, onRetur
         <header className="bg-white border-b py-3 px-6 shadow-sm sticky top-0">
             <div className="max-w-6xl mx-auto flex items-center justify-between">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={onHome}>
-                    <img src="/public/Edplore%20book%20selector%20logo.png" alt="Logo" className="w-8 h-8" />
+                    <img src={`${API}/public/Edplorebookselectorlogo.png`} alt="Logo" className="w-8 h-8" />
 
                     <h1 className="text-xl font-bold">Edplore Book Selector</h1>
                 </div>

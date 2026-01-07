@@ -300,7 +300,7 @@ const ModeSelectionPage = ({
           </div>
         </div>
 
-        {isFrozen && (
+        {isFrozen && coverStatus === '4' && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-sm">
             Selections are approved and frozen. You can only view existing books, covers, and rhymes.
           </div>
@@ -1544,7 +1544,7 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
   );
 };
 // Main Rhyme Selection Interface
-const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, isReadOnly = false }) => {
+const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, isReadOnly = false, isFrozen = false }) => {
   const [availableRhymes, setAvailableRhymes] = useState({});
   const [reusableRhymes, setReusableRhymes] = useState({});
   const [selectedRhymes, setSelectedRhymes] = useState([]);
@@ -1570,11 +1570,11 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
 
   const ensureEditable = useCallback(() => {
     if (isReadOnly) {
-      toast.info('Selections are approved and frozen. Viewing only.');
+      toast.info(isFrozen ? 'Selections are frozen. Viewing only.' : 'Viewing only.');
       return false;
     }
     return true;
-  }, [isReadOnly]);
+  }, [isReadOnly, isFrozen]);
 
   const normalizeSvgPages = useCallback((svgContent) => {
     if (Array.isArray(svgContent)) {
@@ -2997,7 +2997,7 @@ export function RhymesWorkflowApp() {
       return;
     }
     if (!freezeNoticeShown.current) {
-      toast.info('Selections are approved and frozen. You can only view them.');
+      toast.info('Selections are frozen. You can only view them.');
       freezeNoticeShown.current = true;
     }
   }, [isSuperAdminUser, selectionsFrozen]);
@@ -3128,7 +3128,7 @@ export function RhymesWorkflowApp() {
         return '';
       }
 
-      const stored = coverDefaults?.gradeNames?.[gradeId] || (gradeId === 'playgroup' ? coverDefaults?.gradeNames?.pg : undefined);
+      const stored = coverDefaults?.gradeNames?.[gradeId];
       if (typeof stored === 'string' && stored.trim().length > 0) {
         return stored.trim();
       }
@@ -3360,6 +3360,7 @@ export function RhymesWorkflowApp() {
           onBack={handleBackToGrades}
           onLogout={handleLogout}
           isReadOnly={selectionsFrozen}
+          isFrozen={selectionsFrozen}
         />
       ) : selectedMode === 'cover' && selectedGrade ? (
         <CoverPageWorkflow

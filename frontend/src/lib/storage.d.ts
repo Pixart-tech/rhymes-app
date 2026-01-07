@@ -1,6 +1,9 @@
 export function loadPersistedAppState(): any | null;
 export function savePersistedAppState(state: any): void;
 export function clearPersistedAppState(): void;
+export function loadWorkspaceCache(): any | null;
+export function saveWorkspaceCache(state: any): void;
+export function clearWorkspaceCache(): void;
 
 export function loadCoverWorkflowState(schoolId: string, grade: string): any | null;
 export function saveCoverWorkflowState(schoolId: string, grade: string, state: any): void;

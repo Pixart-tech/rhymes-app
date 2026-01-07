@@ -33,12 +33,13 @@ from pathlib import Path, PureWindowsPath
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile, Form, Request, Query
 from fastapi.staticfiles import StaticFiles
-
 from pydantic import BaseModel, EmailStr, Field
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
 from urllib.parse import quote
 from shutil import copy2
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse
+from firebase_admin import firestore
+from motor.motor_asyncio import AsyncIOMotorClient
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -105,6 +106,19 @@ LIBRARY_GRADE_CODES = ["P", "N", "L", "U"]
 DEFAULT_COLOUR_VERSIONS = [f"V{i}" for i in range(1, 17)]
 PUBLIC_URL_PREFIX = "/public"
 SUBJECT_PDF_DIR = PUBLIC_DIR / "subject-pdfs"
+
+
+class CachedStaticFiles(StaticFiles):
+    """Serve static assets with long-lived cache headers for immutable files."""
+
+    def __init__(self, *args, cache_control: str = "public, max-age=31536000, immutable", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cache_control = cache_control
+
+    def set_headers(self, response: Response, path: str, stat_result):  # type: ignore[override]
+        super().set_headers(response, path, stat_result)
+        if self.cache_control:
+            response.headers.setdefault("Cache-Control", self.cache_control)
 
 # try:
 #     COVER_THEME_PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -868,7 +882,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount(PUBLIC_URL_PREFIX, StaticFiles(directory=PUBLIC_DIR, check_dir=True), name="public")
+# Allow required scripts (including localhost dev auth iframe) while keeping a CSP in place.
+@app.middleware("http")
+async def add_csp_header(request, call_next):
+    response = await call_next(request)
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:3000 https://cdn.tailwindcss.com https://aistudiocdn.com https://us.i.posthog.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
+        "img-src 'self' data: blob: http://localhost:3000 https://*; "
+        "font-src 'self' data: https://aistudiocdn.com; "
+        "connect-src 'self' http://localhost:3000 https://us.i.posthog.com; "
+        "frame-src 'self' http://localhost:3000; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self';"
+    )
+    response.headers["Content-Security-Policy"] = csp
+    return response
+
+app.mount(
+    PUBLIC_URL_PREFIX,
+    CachedStaticFiles(directory=PUBLIC_DIR, check_dir=True),
+    name="public",
+)
+# Also expose the same static files under /api/public for callers that prefix API routes.
+app.mount(
+    f"/api{PUBLIC_URL_PREFIX}",
+    CachedStaticFiles(directory=PUBLIC_DIR, check_dir=True),
+    name="public_api_prefix",
+)
 
 
 class PDFDependencyUnavailableError(RuntimeError):
@@ -1056,15 +1099,17 @@ class RhymeSelectionCreate(BaseModel):
 
 class BookSelectionPayload(BaseModel):
     school_id: str
-    selections: List[Dict[str, Any]]
+    selections: List[Dict[str, Any]] = Field(default_factory=list)
     excluded_assessments: List[str] = Field(default_factory=list)
+    grade_names: Dict[str, str] = Field(default_factory=dict)
     source: Optional[str] = None
     deleted_classes: List[str] = Field(default_factory=list)
 
 
 class CoverSelectionPayload(BaseModel):
     school_id: str
-    grade: str
+    # Grade can be omitted for status-only updates; selection changes must include it.
+    grade: Optional[str] = None
     theme_id: Optional[str] = None
     theme_label: Optional[str] = None
     colour_id: Optional[str] = None
@@ -1098,7 +1143,6 @@ def _merge_cover_entries(
         return {
             "theme": admin_theme,
             "theme_colour": _format_cover_colour(admin_theme, admin_colour_raw, admin_entry.get("grade")),
-            "status": admin_entry.get("status"),
             "is_selected": admin_entry.get("is_selected", True),
         }
 
@@ -1107,7 +1151,6 @@ def _merge_cover_entries(
     return {
         "theme": client_theme,
         "theme_colour": _format_cover_colour(client_theme, client_colour_raw, client_entry.get("grade")),
-        "status": client_entry.get("status"),
         "is_selected": client_entry.get("is_selected", True),
     }
 
@@ -1217,6 +1260,178 @@ def _cover_collection_for_school(school_id: str):
 def _cover_root_doc(school_id: str):
     return db.collection("cover_selections").document(school_id)
 
+def _normalize_cover_status(value: Optional[Any]) -> Optional[str]:
+    """Return a trimmed status string or None."""
+    if value is None:
+        return None
+    try:
+        normalized = str(value).strip()
+    except Exception:
+        return None
+    return normalized or None
+
+def _set_cover_status_for_school(
+    school_id: str,
+    status_value: Optional[str],
+    *,
+    now: datetime,
+    decoded_token: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Persist cover status at the school root document (applies to all grades)."""
+    status_payload: Dict[str, Any] = {"status_updated_at": now}
+    status_payload["status"] = status_value if status_value is not None else firestore.DELETE_FIELD
+
+    if decoded_token:
+        status_payload["status_updated_by"] = decoded_token.get("uid") or decoded_token.get("user_id")
+        if decoded_token.get("email"):
+            status_payload["status_updated_by_email"] = decoded_token.get("email")
+
+    _cover_root_doc(school_id).set(status_payload, merge=True)
+
+
+class CoverStatusPayload(BaseModel):
+    status: str
+    updated_by: Optional[str] = None
+    updated_by_email: Optional[str] = None
+    freeze: Optional[bool] = None
+
+
+@api_router.post("/cover-status/{school_id}")
+async def create_cover_status(school_id: str, payload: CoverStatusPayload, authorization: Optional[str] = Header(None)):
+    """Create or initialize cover status for a school."""
+    _verify_and_decode_token(authorization)
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    now = datetime.utcnow()
+    status_value = _normalize_cover_status(payload.status)
+    if payload.freeze is not None:
+        freeze_payload = {
+            "freeze": bool(payload.freeze),
+            "freeze_updated_at": now,
+        }
+        if payload.updated_by:
+            freeze_payload["freeze_updated_by"] = payload.updated_by
+        if payload.updated_by_email:
+            freeze_payload["freeze_updated_by_email"] = payload.updated_by_email
+        _cover_root_doc(safe_school).set(freeze_payload, merge=True)
+    _set_cover_status_for_school(
+        safe_school,
+        status_value,
+        now=now,
+        decoded_token={"uid": payload.updated_by, "email": payload.updated_by_email} if payload.updated_by else None,
+    )
+    return {"ok": True, "status": status_value, "updated_at": now.isoformat()}
+
+
+@api_router.patch("/cover-status/{school_id}")
+async def update_cover_status(school_id: str, payload: CoverStatusPayload, authorization: Optional[str] = Header(None)):
+    """Update cover status for a school."""
+    _verify_and_decode_token(authorization)
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    now = datetime.utcnow()
+    status_value = _normalize_cover_status(payload.status)
+    if payload.freeze is not None:
+        freeze_payload = {
+            "freeze": bool(payload.freeze),
+            "freeze_updated_at": now,
+        }
+        if payload.updated_by:
+            freeze_payload["freeze_updated_by"] = payload.updated_by
+        if payload.updated_by_email:
+            freeze_payload["freeze_updated_by_email"] = payload.updated_by_email
+        _cover_root_doc(safe_school).set(freeze_payload, merge=True)
+    _set_cover_status_for_school(
+        safe_school,
+        status_value,
+        now=now,
+        decoded_token={"uid": payload.updated_by, "email": payload.updated_by_email} if payload.updated_by else None,
+    )
+    return {"ok": True, "status": status_value, "updated_at": now.isoformat()}
+
+
+class CoverFreezePayload(BaseModel):
+    freeze: bool
+    updated_by: Optional[str] = None
+    updated_by_email: Optional[str] = None
+
+
+@api_router.patch("/cover-status/{school_id}/freeze")
+async def update_cover_freeze(school_id: str, payload: CoverFreezePayload, authorization: Optional[str] = Header(None)):
+    """Toggle freeze flag for a school's cover selections."""
+    _verify_and_decode_token(authorization)
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    now = datetime.utcnow()
+    freeze_payload: Dict[str, Any] = {
+        "freeze": bool(payload.freeze),
+        "freeze_updated_at": now,
+    }
+    if payload.updated_by:
+        freeze_payload["freeze_updated_by"] = payload.updated_by
+    if payload.updated_by_email:
+        freeze_payload["freeze_updated_by_email"] = payload.updated_by_email
+
+    _cover_root_doc(safe_school).set(freeze_payload, merge=True)
+    return {"ok": True, "freeze": bool(payload.freeze), "updated_at": now.isoformat()}
+
+
+@api_router.get("/cover-status/{school_id}")
+async def get_cover_status(school_id: str, authorization: Optional[str] = Header(None)):
+    """Fetch cover status for a school."""
+    _verify_and_decode_token(authorization)
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    root_data = _cover_root_doc(safe_school).get().to_dict() or {}
+    return {
+        "status": _normalize_cover_status(root_data.get("status")),
+        "status_updated_at": root_data.get("status_updated_at"),
+        "status_updated_by": root_data.get("status_updated_by"),
+        "status_updated_by_email": root_data.get("status_updated_by_email"),
+        "freeze": bool(root_data.get("freeze")) if "freeze" in root_data else False,
+        "freeze_updated_at": root_data.get("freeze_updated_at"),
+        "freeze_updated_by": root_data.get("freeze_updated_by"),
+        "freeze_updated_by_email": root_data.get("freeze_updated_by_email"),
+    }
+
+def _ensure_cover_status_default(
+    school_id: str,
+    *,
+    now: datetime,
+    decoded_token: Optional[Dict[str, Any]] = None,
+    default_status: str = "1",
+) -> None:
+    """Set a default status once per school if none exists."""
+    root_snapshot = _cover_root_doc(school_id).get()
+    root_data = root_snapshot.to_dict() or {}
+    if _normalize_cover_status(root_data.get("status")):
+        return
+
+    status_payload: Dict[str, Any] = {
+        "status": default_status,
+        "status_updated_at": now,
+    }
+    if decoded_token:
+        status_payload["status_updated_by"] = decoded_token.get("uid") or decoded_token.get("user_id")
+        if decoded_token.get("email"):
+            status_payload["status_updated_by_email"] = decoded_token.get("email")
+
+    _cover_root_doc(school_id).set(status_payload, merge=True)
+
+def _normalize_field(value: Optional[Any]) -> Optional[str]:
+    """Trim string-like values and return None when empty or not provided."""
+    if value is None:
+        return None
+    try:
+        trimmed = str(value).strip()
+    except Exception:
+        return None
+    return trimmed or None
+
 def _resolve_cover_upload_dir(school_id: str) -> Path:
     safe_school = re.sub(r"[^A-Za-z0-9_-]", "_", (school_id or "").strip())
     if not safe_school:
@@ -1232,28 +1447,61 @@ def _resolve_backend_cover_dir(school_id: str) -> Path:
 
 @api_router.get("/cover-uploads/{school_id}")
 def list_cover_uploads(school_id: str, authorization: Optional[str] = Header(None)):
-    """List uploaded cover files for a school from backend/Assets/covers/<school_id>."""
-    # Auth optional for GUI convenience
+    """List uploaded cover files for a school from backend/Assets/covers/<school_id>.
+
+    The response groups covers by the class label found in book selections
+    so the frontend can render sections per grade.
+    """
     base_dir = _resolve_backend_cover_dir(school_id)
     try:
         base_dir.relative_to(BACKEND_COVERS_DIR)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid school id")
 
-    if not base_dir.exists() or not base_dir.is_dir():
-        return {"files": []}
+    # Map cover code -> class label from book selections
+    cover_class_map: Dict[str, str] = {}
+    try:
+        class_docs = list(_book_collection_for_school(school_id).stream())
+        for doc in class_docs:
+            data = doc.to_dict() or {}
+            class_label = (
+                data.get("class_label")
+                or data.get("class")
+                or doc.id
+            )
+            items = data.get("items") or []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                for key in ("core_cover", "work_cover", "addon_cover"):
+                    value = (item.get(key) or "").strip()
+                    if value:
+                        cover_class_map[value] = class_label
+    except Exception:
+        cover_class_map = {}
 
-    files: List[Dict[str, str]] = []
+    files: List[Dict[str, Any]] = []
+    present_codes: Set[str] = set()
     for entry in sorted(base_dir.iterdir()):
         if entry.is_file() and entry.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            code = entry.stem
+            present_codes.add(code)
             files.append(
                 {
                     "name": entry.name,
                     "path": str(entry),
                     "url": f"/api/cover-uploads/{school_id}/{entry.name}",
+                    "class_label": cover_class_map.get(code, ""),
                 }
             )
-    return {"files": files}
+
+    # Covers expected from book selections but missing on disk
+    missing_codes = []
+    for code, label in cover_class_map.items():
+        if code not in present_codes:
+            missing_codes.append({"code": code, "class_label": label})
+
+    return {"files": files, "missing": missing_codes}
 
 
 @api_router.get("/cover-uploads/{school_id}/{file_name}")
@@ -1573,9 +1821,13 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
 
     rhyme_selections = get_selected_rhymes(school_id)
 
+    root_cover_snapshot = _cover_root_doc(school_id).get()
+    root_cover_data = root_cover_snapshot.to_dict() or {}
+    cover_status = _normalize_cover_status(root_cover_data.get("status"))
+
     cover_docs = list(
         _cover_collection_for_school(school_id)
-        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "status", "is_selected", "updated_at"])
+        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "is_selected", "updated_at"])
         .stream()
     )
     cover_client_grades: Dict[str, Any] = {}
@@ -1590,6 +1842,10 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
         updated_at = data.get("updated_at")
         if updated_at and (latest_cover_update is None or updated_at > latest_cover_update):
             latest_cover_update = updated_at
+
+    status_updated_at = root_cover_data.get("status_updated_at")
+    if status_updated_at and (latest_cover_update is None or status_updated_at > latest_cover_update):
+        latest_cover_update = status_updated_at
 
     cover_grades: Dict[str, Any] = {}
     for grade_key, client_entry in cover_client_grades.items():
@@ -1607,6 +1863,10 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
         "Coverpage": {
             "grades": cover_grades,
             "updated_at": _format_timestamp(latest_cover_update),
+            "status": cover_status,
+            "status_updated_at": _format_timestamp(root_cover_data.get("status_updated_at")),
+            "status_updated_by": root_cover_data.get("status_updated_by"),
+            "status_updated_by_email": root_cover_data.get("status_updated_by_email"),
         },
         "books": {
             "selections": book_selections,
@@ -1701,37 +1961,77 @@ async def save_book_selections(
     decoded_token = _verify_and_decode_token(authorization)
 
     now = datetime.utcnow()
+    # Build lookup maps from grade_names (keyed by canonical grade id) to stabilize document ids and labels.
+    # Use grade names from the school profile (payload.grade_names) as canonical document ids and labels.
+    grade_names_map = {
+        (key or "").strip(): (value or "").strip() or (key or "").strip()
+        for key, value in (payload.grade_names or {}).items()
+    }
+    # Build lookup maps for normalized keys/labels -> canonical key.
+    normalized_grade_map: Dict[str, str] = {}
+    label_to_grade: Dict[str, str] = {}
+    for canonical_key, label in grade_names_map.items():
+        norm_key = _normalize_class_doc_id(canonical_key)
+        normalized_grade_map[norm_key] = canonical_key
+        label_to_grade[(label or "").strip().lower()] = canonical_key
     class_groups: Dict[str, List[Dict[str, Any]]] = {}
     for item in payload.selections:
         # Prefer the underlying grade key (class / class_name) over display labels.
-        class_name = (
+        raw_class = (
             item.get("class")
             or item.get("class_name")
             or item.get("class_label")
             or ""
         ).strip()
-        if not class_name:
+        if not raw_class:
             continue
-        key = class_name.lower()
-        class_groups.setdefault(key, []).append(item)
+        normalized_raw = _normalize_class_doc_id(raw_class)
+        mapped_key = normalized_grade_map.get(normalized_raw) or label_to_grade.get(raw_class.strip().lower())
+        # Prefer canonical key from grade_names_map; otherwise skip to avoid creating new docs.
+        if grade_names_map:
+            if not mapped_key:
+                continue
+            if mapped_key not in grade_names_map:
+                continue
+        class_groups.setdefault(mapped_key or normalized_raw, []).append(item)
 
     for class_key, items in class_groups.items():
-        doc_id = _normalize_class_doc_id(class_key)
+        doc_id = class_key if class_key in grade_names_map else _normalize_class_doc_id(class_key)
         doc_ref = _book_collection_for_school(payload.school_id).document(doc_id)
         existing_doc = doc_ref.get()
         existing_data: Dict[str, Any] = existing_doc.to_dict() if existing_doc.exists else {}
 
-        merged_items = items
-        merged_excluded = list(
-            {
-                *existing_data.get("excluded_assessments", []),
-                *payload.excluded_assessments,
-            }
+        # De-duplicate incoming items for this class; replace existing items entirely.
+        def _item_key(entry: Dict[str, Any]) -> str:
+            raw_subject = entry.get("subject") or ""
+            subject = raw_subject.strip().lower() if isinstance(raw_subject, str) else str(raw_subject).strip().lower()
+            raw_component = entry.get("component") or ""
+            component = raw_component.strip().lower() if isinstance(raw_component, str) else str(raw_component).strip().lower()
+            unique_id = entry.get("core") or entry.get("work") or entry.get("addOn") or entry.get("add_on") or entry.get("type") or ""
+            return "|".join([subject, component, str(unique_id)])
+
+        merged_map: Dict[str, Dict[str, Any]] = {}
+        for entry in items:
+            if not isinstance(entry, dict):
+                continue
+            merged_map[_item_key(entry)] = entry
+
+        merged_items = list(merged_map.values())
+        merged_excluded = [
+            _normalize_class_doc_id(entry) for entry in (payload.excluded_assessments or [])
+        ]
+        grade_label = (
+            grade_names_map.get(doc_id)
+            or payload.grade_names.get(class_key, "")
+            or items[0].get("class_label")
+            or items[0].get("class_name")
+            or items[0].get("class")
+            or class_key
         )
 
         class_record: Dict[str, Any] = {
-            "class": class_key,
-            "class_label": class_name,
+            "class": doc_id,
+            "class_label": grade_label,
             "items": merged_items,
             "excluded_assessments": merged_excluded,
             "updated_at": now,
@@ -1847,31 +2147,59 @@ async def save_cover_selection(
     """Persist cover theme/colour selection per grade for a school."""
     decoded_token = _verify_and_decode_token(authorization)
 
-    school_id = payload.school_id.strip()
-    grade = payload.grade.strip().lower()
-    if not school_id or not grade:
+    school_id = (payload.school_id or "").strip()
+    grade = (payload.grade or "").strip().lower()
+    is_status_only = payload.status is not None and not any(
+        [
+            _normalize_field(payload.theme_id),
+            _normalize_field(payload.theme_label),
+            _normalize_field(payload.colour_id),
+            _normalize_field(payload.colour_label),
+        ]
+    )
+    if not school_id:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    if not grade and not is_status_only:
         raise HTTPException(status_code=400, detail="school_id and grade are required")
 
     now = datetime.utcnow()
-    record: Dict[str, Any] = {
-        "school_id": school_id,
-        "grade": grade,
-        "theme_id": (payload.theme_id or "").strip() or None,
-        "theme_label": (payload.theme_label or "").strip() or None,
-        "colour_id": (payload.colour_id or "").strip() or None,
-        "colour_label": (payload.colour_label or "").strip() or None,
-        "status": (payload.status or "").strip() or None,
-        "is_selected": True if payload.is_selected is None else bool(payload.is_selected),
-        "updated_at": now,
-    }
+    status_value = _normalize_cover_status(payload.status)
+    theme_id = _normalize_field(payload.theme_id)
+    theme_label = _normalize_field(payload.theme_label)
+    colour_id = _normalize_field(payload.colour_id)
+    colour_label = _normalize_field(payload.colour_label)
 
-    if decoded_token:
-        record["updated_by"] = decoded_token.get("uid")
-        if decoded_token.get("email"):
-            record["updated_by_email"] = decoded_token.get("email")
+    is_selection_payload = any([theme_id, theme_label, colour_id, colour_label])
 
-    doc_ref = _cover_collection_for_school(school_id).document(_cover_doc_id(grade, admin=False))
-    doc_ref.set(record)
+    if is_selection_payload and grade:
+        record: Dict[str, Any] = {
+            "school_id": school_id,
+            "grade": grade,
+            "status": firestore.DELETE_FIELD,
+            "is_selected": True if payload.is_selected is None else bool(payload.is_selected),
+            "updated_at": now,
+        }
+        if theme_id is not None:
+            record["theme_id"] = theme_id
+        if theme_label is not None:
+            record["theme_label"] = theme_label
+        if colour_id is not None:
+            record["colour_id"] = colour_id
+        if colour_label is not None:
+            record["colour_label"] = colour_label
+
+        if decoded_token:
+            record["updated_by"] = decoded_token.get("uid")
+            if decoded_token.get("email"):
+                record["updated_by_email"] = decoded_token.get("email")
+
+        doc_ref = _cover_collection_for_school(school_id).document(_cover_doc_id(grade, admin=False))
+        doc_ref.set(record, merge=True)
+
+    if payload.status is not None:
+        _set_cover_status_for_school(school_id, status_value, now=now, decoded_token=decoded_token)
+    else:
+        _ensure_cover_status_default(school_id, now=now, decoded_token=decoded_token)
     return {"ok": True, "updated_at": now.isoformat()}
 
 
@@ -1883,32 +2211,54 @@ async def patch_cover_selection(
     decoded_token = _verify_and_decode_token(authorization)
     safe_school = (school_id or "").strip()
     safe_grade = (grade or "").strip().lower()
-    if not safe_school or not safe_grade:
+    is_status_only = payload.status is not None and not any(
+        [
+            _normalize_field(payload.theme_id),
+            _normalize_field(payload.theme_label),
+            _normalize_field(payload.colour_id),
+            _normalize_field(payload.colour_label),
+        ]
+    )
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    if not safe_grade and not is_status_only:
         raise HTTPException(status_code=400, detail="school_id and grade are required")
 
     now = datetime.utcnow()
-    record: Dict[str, Any] = {"updated_at": now}
+    status_value = _normalize_cover_status(payload.status)
+    theme_id = _normalize_field(payload.theme_id)
+    theme_label = _normalize_field(payload.theme_label)
+    colour_id = _normalize_field(payload.colour_id)
+    colour_label = _normalize_field(payload.colour_label)
 
-    if payload.theme_id is not None:
-        record["theme_id"] = (payload.theme_id or "").strip() or None
-    if payload.theme_label is not None:
-        record["theme_label"] = (payload.theme_label or "").strip() or None
-    if payload.colour_id is not None:
-        record["colour_id"] = (payload.colour_id or "").strip() or None
-    if payload.colour_label is not None:
-        record["colour_label"] = (payload.colour_label or "").strip() or None
+    is_selection_payload = any([theme_id, theme_label, colour_id, colour_label, payload.is_selected is not None])
+
+    if is_selection_payload:
+        record: Dict[str, Any] = {"updated_at": now, "status": firestore.DELETE_FIELD}
+        if theme_id is not None:
+            record["theme_id"] = theme_id
+        if theme_label is not None:
+            record["theme_label"] = theme_label
+        if colour_id is not None:
+            record["colour_id"] = colour_id
+        if colour_label is not None:
+            record["colour_label"] = colour_label
+        if payload.is_selected is not None:
+            record["is_selected"] = bool(payload.is_selected)
+
+        if decoded_token:
+            record["updated_by"] = decoded_token.get("uid") or decoded_token.get("user_id")
+            if decoded_token.get("email"):
+                record["updated_by_email"] = decoded_token.get("email")
+
+        # Write directly to the client selection document (no separate admin override)
+        doc_ref = _cover_collection_for_school(safe_school).document(_cover_doc_id(safe_grade, admin=False))
+        doc_ref.set(record, merge=True)
+
     if payload.status is not None:
-        record["status"] = (payload.status or "").strip() or None
-    if payload.is_selected is not None:
-        record["is_selected"] = bool(payload.is_selected)
-
-    if decoded_token:
-        record["updated_by"] = decoded_token.get("uid") or decoded_token.get("user_id")
-        if decoded_token.get("email"):
-            record["updated_by_email"] = decoded_token.get("email")
-
-    doc_ref = _cover_collection_for_school(safe_school).document(_cover_doc_id(safe_grade, admin=True))
-    doc_ref.set(record, merge=True)
+        _set_cover_status_for_school(safe_school, status_value, now=now, decoded_token=decoded_token)
+    else:
+        _ensure_cover_status_default(safe_school, now=now, decoded_token=decoded_token)
 
     return {"ok": True, "updated_at": now.isoformat()}
 
@@ -1943,10 +2293,11 @@ def get_cover_selections(school_id: str, authorization: Optional[str] = Header(N
 
     root_snapshot = _cover_root_doc(school_id).get()
     root_data = root_snapshot.to_dict() or {}
+    root_status = _normalize_cover_status(root_data.get("status"))
 
     docs = list(
         _cover_collection_for_school(school_id)
-        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "status", "is_selected", "updated_at"])
+        .select(["grade", "theme_id", "theme_label", "colour_id", "colour_label", "is_selected", "updated_at"])
         .stream()
     )
 
@@ -1965,7 +2316,6 @@ def get_cover_selections(school_id: str, authorization: Optional[str] = Header(N
             "theme_label": data.get("theme_label"),
             "theme_colour": data.get("colour_id"),
             "theme_colour_label": data.get("colour_label"),
-            "status": data.get("status"),
             "is_selected": data.get("is_selected", True),
             "updated_at": data.get("updated_at"),
         }
@@ -1976,6 +2326,10 @@ def get_cover_selections(school_id: str, authorization: Optional[str] = Header(N
         "admin_grades": admin_grades,
         "client_theme_id": root_data.get("client_theme_id"),
         "client_theme_label": root_data.get("client_theme_label"),
+        "status": root_status,
+        "status_updated_at": root_data.get("status_updated_at"),
+        "status_updated_by": root_data.get("status_updated_by"),
+        "status_updated_by_email": root_data.get("status_updated_by_email"),
         "library": _build_library_manifest(request),
     }
 

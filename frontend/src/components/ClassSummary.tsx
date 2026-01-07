@@ -72,7 +72,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   const classSelections = selections.filter(s => s.className === classData.name);
   const theme = CLASS_THEMES[classData.name] || DEFAULT_THEME;
   const currentAssessmentVariant = assessmentVariants[classData.name] || 'WITH_MARKS';
-  const hasCoreSubjects = useMemo(() => {
+  const hasActiveCoreSubjects = useMemo(() => {
     const lower = (value: string) => value?.toString().trim().toLowerCase();
     const presence = classSelections.reduce(
       (acc, selection) => {
@@ -225,17 +225,19 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
             const fullTitle = `${titleBase}${coreSuffix}`;
 
             if (s.skipCore) {
-                // Dropped Core Book
-                list.push({
-                    id: `${s.subjectName}-${opt.typeId}-core-dropped`,
-                    title: fullTitle,
-                    type: 'Core',
-                    subjectName: displaySubject,
-                    className: s.className,
-                    canDrop: false,
-                    isExcluded: true,
-                    onRestore: (e) => handleRestoreCore(e, s.subjectName, opt.typeId)
-                });
+                // Dropped Core Book; show undo only in editable mode
+                if (canMutate) {
+                    list.push({
+                        id: `${s.subjectName}-${opt.typeId}-core-dropped`,
+                        title: fullTitle,
+                        type: 'Core',
+                        subjectName: displaySubject,
+                        className: s.className,
+                        canDrop: false,
+                        isExcluded: true,
+                        onRestore: (e) => handleRestoreCore(e, s.subjectName, opt.typeId)
+                    });
+                }
             } else {
                 // Active Core Book
                 list.push({
@@ -254,16 +256,18 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         // Workbook
         if (opt.workId) {
             if (s.skipWork) {
-                list.push({
-                    id: `${s.subjectName}-${opt.typeId}-work-dropped`,
-                    title: `${opt.label} (Workbook)`,
-                    type: 'Work',
-                    subjectName: displaySubject,
-                    className: s.className,
-                    canDrop: false,
-                    isExcluded: true,
-                    onRestore: (e) => handleRestoreWorkbook(e, s.subjectName, opt.typeId)
-                });
+                if (canMutate) {
+                    list.push({
+                        id: `${s.subjectName}-${opt.typeId}-work-dropped`,
+                        title: `${opt.label} (Workbook)`,
+                        type: 'Work',
+                        subjectName: displaySubject,
+                        className: s.className,
+                        canDrop: false,
+                        isExcluded: true,
+                        onRestore: (e) => handleRestoreWorkbook(e, s.subjectName, opt.typeId)
+                    });
+                }
             } else {
                 list.push({
                     id: `${s.subjectName}-${opt.typeId}-work`,
@@ -281,16 +285,18 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         // Add-on
         if (opt.addOnId) {
             if (s.skipAddon) {
-                list.push({
-                    id: `${s.subjectName}-${opt.typeId}-addon-dropped`,
-                    title: `${opt.label} (Add-on)`,
-                    type: 'Addon',
-                    subjectName: displaySubject,
-                    className: s.className,
-                    canDrop: false,
-                    isExcluded: true,
-                    onRestore: (e) => handleRestoreAddon(e, s.subjectName, opt.typeId)
-                });
+                if (canMutate) {
+                    list.push({
+                        id: `${s.subjectName}-${opt.typeId}-addon-dropped`,
+                        title: `${opt.label} (Add-on)`,
+                        type: 'Addon',
+                        subjectName: displaySubject,
+                        className: s.className,
+                        canDrop: false,
+                        isExcluded: true,
+                        onRestore: (e) => handleRestoreAddon(e, s.subjectName, opt.typeId)
+                    });
+                }
             } else {
                 list.push({
                     id: `${s.subjectName}-${opt.typeId}-addon`,
@@ -306,8 +312,12 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
     });
 
-    // 2. Assessment (only when core subjects are present)
-    if (hasCoreSubjects) {
+    // 2. Assessment (only when core subjects are present and not Playgroup)
+    const isPlaygroup =
+      (classData.name || '').toString().trim().toLowerCase() === 'playgroup' ||
+      (classData.name || '').toString().trim().toLowerCase() === 'pg';
+
+    if (hasActiveCoreSubjects && !isPlaygroup) {
       const lower = (value: string) => value?.toString().trim().toLowerCase();
       const englishSelection = classSelections.find(
         (s) => lower(s.subjectName) === "english" && hasActiveBook(s)
@@ -329,8 +339,8 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                   onDrop: canMutate ? handleDropAssessment : undefined,
                   link: assessment.link
               });
-          } else {
-              // Excluded state for undo
+          } else if (canMutate) {
+              // Excluded state for undo (edit mode only)
               list.push({
                   id: 'assessment-dropped',
                   title: `${assessment.label} (Assessment)`,
@@ -339,12 +349,12 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                   className: classData.name,
                   canDrop: false,
                   isExcluded: true,
-              onRestore: canMutate ? handleRestoreAssessment : undefined
-          });
-        }
+                  onRestore: canMutate ? handleRestoreAssessment : undefined
+              });
+          }
       }
-      // If we have core subjects but assessment payload is missing, still render a placeholder entry
-      if (!assessment && !excludedAssessments.includes(classData.name)) {
+      // If we have core subjects but assessment payload is missing, render placeholder only in edit mode
+      if (!assessment && !excludedAssessments.includes(classData.name) && canMutate) {
         list.push({
           id: 'assessment-placeholder',
           title: `Assessment`,
@@ -358,8 +368,8 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
     }
 
     // If no core subjects remain, strip any assessment entries defensively
-    return hasCoreSubjects ? list : list.filter((item) => item.type !== 'Assessment');
-  }, [selections, classData, excludedAssessments, currentAssessmentVariant, readOnly, hasCoreSubjects]);
+    return hasActiveCoreSubjects ? list : list.filter((item) => item.type !== 'Assessment');
+  }, [selections, classData, excludedAssessments, currentAssessmentVariant, readOnly, hasActiveCoreSubjects]);
 
   return (
     <div className="max-w-4xl mx-auto w-full p-4 md:p-6 pb-24">
