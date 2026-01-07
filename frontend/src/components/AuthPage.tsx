@@ -41,8 +41,9 @@ import {
   buildSchoolFormData,
   buildSchoolFormValuesFromProfile
 } from './SchoolProfileForm';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
+import { Checkbox } from './ui/checkbox';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import {
@@ -51,6 +52,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from './ui/dropdown-menu';
+import { ID_CARD_FIELD_OPTIONS, MAX_ID_CARD_FIELDS } from '@/constants/idCardFields';
 
 const API = API_BASE_URL || '/api';
 type AuthViewState = 'list' | 'create' | 'edit' | 'branch' | 'branch-edit' | 'branch-view';
@@ -245,6 +247,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [addonsDialogZohoId, setAddonsDialogZohoId] = useState('');
   const [addonsDialogEditingZohoId, setAddonsDialogEditingZohoId] = useState(false);
   const [addonsDialogSaving, setAddonsDialogSaving] = useState(false);
+  const [addonsDialogIdCardFields, setAddonsDialogIdCardFields] = useState<string[]>([]);
+  const [idFieldDialogOpen, setIdFieldDialogOpen] = useState(false);
+  const [showCustomFieldInput, setShowCustomFieldInput] = useState(false);
+  const [customIdField, setCustomIdField] = useState('');
   const [gradeDefaultValues, setGradeDefaultValues] = useState<Record<GradeKey, string>>(() =>
     GRADE_KEYS_ORDER.reduce<Record<GradeKey, string>>((acc, grade) => {
       acc[grade] = GRADE_LABELS[grade];
@@ -777,6 +783,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     setAddonsDialogServiceStatus(buildDialogServiceStatus(school));
     setAddonsDialogZohoId(school.zoho_customer_id ?? '');
     setAddonsDialogEditingZohoId(!school.zoho_customer_id);
+    setAddonsDialogIdCardFields(school.id_card_fields ?? []);
+    setIdFieldDialogOpen(false);
+    setShowCustomFieldInput(false);
+    setCustomIdField('');
   }, [buildDialogServiceStatus]);
 
   const handleCloseAddonsDialog = useCallback(() => {
@@ -784,6 +794,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     setAddonsDialogServiceStatus(DEFAULT_SERVICE_STATUS);
     setAddonsDialogZohoId('');
     setAddonsDialogEditingZohoId(false);
+    setAddonsDialogIdCardFields([]);
+    setIdFieldDialogOpen(false);
+    setShowCustomFieldInput(false);
+    setCustomIdField('');
   }, []);
 
   useEffect(() => {
@@ -815,6 +829,45 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     setAddonsDialogServiceStatus((prev) => ({ ...prev, [service]: status }));
   }, []);
 
+  const toggleAddonsIdCardField = useCallback((field: string) => {
+    setAddonsDialogIdCardFields((prev) => {
+      const exists = prev.includes(field);
+      if (exists) {
+        return prev.filter((name) => name !== field);
+      }
+      if (prev.length >= MAX_ID_CARD_FIELDS) {
+        toast.error(`You can select up to ${MAX_ID_CARD_FIELDS} fields.`);
+        return prev;
+      }
+      return [...prev, field];
+    });
+  }, []);
+
+  const handleAddonsCustomIdField = useCallback(() => {
+    const trimmed = customIdField.trim();
+    if (!trimmed) {
+      return;
+    }
+    setAddonsDialogIdCardFields((prev) => {
+      if (prev.includes(trimmed)) {
+        toast.error('Field already selected.');
+        return prev;
+      }
+      if (prev.length >= MAX_ID_CARD_FIELDS) {
+        toast.error(`You can select up to ${MAX_ID_CARD_FIELDS} fields.`);
+        return prev;
+      }
+      return [...prev, trimmed];
+    });
+    setCustomIdField('');
+  }, [customIdField]);
+
+  const handleIdFieldDialogDone = useCallback(() => {
+    setIdFieldDialogOpen(false);
+    setShowCustomFieldInput(false);
+    setCustomIdField('');
+  }, []);
+
   const handleGradeDefaultChange = useCallback((grade: GradeKey, value: string) => {
     setGradeDefaultValues((prev) => ({ ...prev, [grade]: value }));
     const matchingCode = GRADE_UNIQUE_CODES[value] || '';
@@ -837,11 +890,13 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       formData.append('zoho_customer_id', submittedZohoId);
       formData.append('grade_default_labels', JSON.stringify(gradeDefaultValues));
       formData.append('grade_unique_values', JSON.stringify(gradeUniqueValues));
+      formData.append('id_card_fields', JSON.stringify(addonsDialogIdCardFields));
       formData.append('update_zoho_details', 'true');
       const response = await axios.patch<SchoolProfile>(`${API}/schools/${addonsDialogSchool.school_id}/addons`, formData, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const serverSchool = response.data;
+      const updatedIdCardFields = serverSchool.id_card_fields ?? addonsDialogIdCardFields;
       const updatedZohoId = serverSchool.zoho_customer_id ?? '';
       const updatedServiceType = serverSchool.service_type ?? SERVICE_KEYS.filter(
         (service) => addonsDialogServiceStatus[service] === 'yes'
@@ -852,9 +907,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         service_status: serverSchool.service_status ?? addonsDialogServiceStatus,
         service_type: updatedServiceType,
         zoho_customer_id: updatedZohoId || null,
+        id_card_fields: updatedIdCardFields,
       };
       setAddonsDialogSchool(updatedSchool);
       setAddonsDialogZohoId(updatedZohoId);
+      setAddonsDialogIdCardFields(updatedIdCardFields);
       setSchools((prev) =>
         prev.map((school) => (school.school_id === updatedSchool.school_id ? { ...school, ...updatedSchool } : school))
       );
@@ -874,6 +931,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     addonsDialogSchool,
     addonsDialogServiceStatus,
     addonsDialogZohoId,
+    addonsDialogIdCardFields,
     gradeDefaultValues,
     gradeUniqueValues,
     getIdToken,
@@ -1615,9 +1673,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                   <Plus className="h-4 w-4" />
                   Create school
                 </Button>
+              </div>
             </div>
-          </div>
-        </CardHeader>
+          </CardHeader>
             <div className="h-1 w-32 rounded-full bg-gradient-to-r from-sky-300 via-cyan-100 to-emerald-200" aria-hidden="true" />
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5">
@@ -2279,6 +2337,34 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                 </div>
               ))}
             </div>
+            {addonsDialogServiceStatus.id_cards === 'yes' && (
+              <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">ID card fields</span>
+                  <span>
+                    {addonsDialogIdCardFields.length}/{MAX_ID_CARD_FIELDS}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Select up to {MAX_ID_CARD_FIELDS} fields you'd like to show on ID cards.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShowCustomFieldInput(false);
+                    setCustomIdField('');
+                    setIdFieldDialogOpen(true);
+                  }}
+                >
+                  Configure ID card fields
+                </Button>
+                {!addonsDialogIdCardFields.length && (
+                  <p className="text-xs text-slate-500">No fields selected yet. Open configuration to choose fields.</p>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter className="flex justify-end gap-3">
             <Button variant="outline" onClick={handleCloseAddonsDialog}>
@@ -2297,6 +2383,92 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
               disabled={!addonsDialogSchool}
             >
               Open workspace
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={idFieldDialogOpen}
+        onOpenChange={(open) => {
+          setIdFieldDialogOpen(open);
+          if (!open) {
+            setShowCustomFieldInput(false);
+            setCustomIdField('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-xl">
+          <DialogHeader className="space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <DialogTitle>Select ID card fields</DialogTitle>
+                <p className="text-xs text-slate-500">
+                  Selected fields will be collected further—kindly cooperate with us.
+                </p>
+              </div>
+              <Button type="button" variant="ghost" size="sm" onClick={handleIdFieldDialogDone}>
+                Close
+              </Button>
+            </div>
+            <DialogDescription>
+              Choose up to {MAX_ID_CARD_FIELDS} fields you'd like to show on ID cards.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 max-h-72 overflow-y-auto pb-4">
+            {ID_CARD_FIELD_OPTIONS.map((field) => {
+              const checked = addonsDialogIdCardFields.includes(field);
+              const isDisabled = !checked && addonsDialogIdCardFields.length >= MAX_ID_CARD_FIELDS;
+              return (
+                <label
+                  key={field}
+                  className={`flex items-center gap-3 rounded-lg border px-3 py-2 hover:border-slate-300 ${
+                    isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={isDisabled}
+                    onChange={() => toggleAddonsIdCardField(field)}
+                  />
+                  <span className={`text-sm ${checked ? 'font-semibold' : ''}`}>{field}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="space-y-3 border-t border-slate-100 pt-4">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="addons-id-card-custom-field"
+                checked={showCustomFieldInput}
+                onCheckedChange={(checked) => setShowCustomFieldInput(Boolean(checked))}
+              />
+              <Label htmlFor="addons-id-card-custom-field">Add custom field</Label>
+            </div>
+            {showCustomFieldInput && (
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Custom field name (e.g. House name)"
+                  value={customIdField}
+                  onChange={(event) => setCustomIdField(event.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleAddonsCustomIdField}
+                  disabled={!customIdField.trim() || addonsDialogIdCardFields.length >= MAX_ID_CARD_FIELDS}
+                >
+                  Add
+                </Button>
+              </div>
+            )}
+            <p className="text-xs text-slate-500">
+              Selected {addonsDialogIdCardFields.length}/{MAX_ID_CARD_FIELDS} fields.
+            </p>
+          </div>
+          <DialogFooter className="pt-4">
+            <Button type="button" onClick={handleIdFieldDialogDone}>
+              Done
             </Button>
           </DialogFooter>
         </DialogContent>

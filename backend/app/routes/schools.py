@@ -38,6 +38,7 @@ class SchoolAddonsPayload(BaseModel):
     grade_unique_values: Optional[Dict[str, str]] = None
     zoho_customer_id: Optional[str] = None
     update_zoho_details: Optional[bool] = None
+    id_card_fields: Optional[List[str]] = None
 
     @field_validator("service_status", mode="before")
     @classmethod
@@ -108,6 +109,13 @@ class SchoolAddonsPayload(BaseModel):
             return trimmed or None
         return None
 
+    @field_validator("id_card_fields", mode="before")
+    @classmethod
+    def _coerce_id_card_fields(cls, value: Any) -> Optional[List[str]]:
+        if value is None or value == "":
+            return None
+        return school_profiles._normalize_id_card_fields(value)
+
     @classmethod
     async def as_form(
         cls,
@@ -117,6 +125,7 @@ class SchoolAddonsPayload(BaseModel):
         grade_default_labels: Optional[Any] = Form(default=school_profiles.FORM_UNSET),
         grade_unique_values: Optional[Any] = Form(default=school_profiles.FORM_UNSET),
         zoho_customer_id: Optional[str] = Form(default=school_profiles.FORM_UNSET),
+        id_card_fields: Optional[Any] = Form(default=school_profiles.FORM_UNSET),
         update_zoho_details: Optional[str] = Form(default=school_profiles.FORM_UNSET),
     ) -> "SchoolAddonsPayload":
         if school_profiles._is_json_content_type(request):
@@ -128,6 +137,7 @@ class SchoolAddonsPayload(BaseModel):
             "grade_unique_values": grade_unique_values,
             "zoho_customer_id": zoho_customer_id,
             "update_zoho_details": update_zoho_details,
+            "id_card_fields": id_card_fields,
         }
         provided = {key: value for key, value in field_values.items() if value is not school_profiles.FORM_UNSET}
         if "update_zoho_details" in provided:
@@ -466,6 +476,9 @@ async def update_school_addons(
         }
         updates["service_status"] = status_map
         service_type_value = normalized_type
+
+    if payload.id_card_fields is not None:
+        updates["id_card_fields"] = payload.id_card_fields
 
     now = datetime.utcnow()
     if updates:
