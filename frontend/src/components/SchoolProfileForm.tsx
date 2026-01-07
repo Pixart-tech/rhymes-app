@@ -21,6 +21,7 @@ import {
 } from '../types/types';
 import ImageCropperDialog from './ImageCropper';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { ID_CARD_FIELD_OPTIONS, MAX_ID_CARD_FIELDS } from '@/constants/idCardFields';
 
 const getLogoPreview = (vals: SchoolFormValues) => vals.logo_url || '';
 const DEFAULT_GRADE_LABELS: Record<GradeKey, string> = {
@@ -42,25 +43,6 @@ const SERVICE_OPTIONS: { value: SchoolServiceType; prompt: string }[] = [
   { value: 'report_cards', prompt: 'Are you taking report cards?'},
   { value: 'certificates', prompt: 'Are you taking certificates?' }
 ];
-
-const ID_CARD_FIELD_OPTIONS = [
-  'Student Name',
-  'Class',
-  'Student Image',
-  'Date of Birth',
-  'Father name',
-  'Father number',
-  'Father image',
-  'Mother name',
-  'Mother number',
-  'Mother image',
-  'Address',
-  'Student Age',
-  'Student Blood group',
-  'Admission Number',
-  'Roll number'
-];
-const MAX_ID_CARD_FIELDS = 10;
 
 export const SCHOOL_SERVICE_KEYS: SchoolServiceType[] = ['id_cards', 'report_cards', 'certificates'];
 
