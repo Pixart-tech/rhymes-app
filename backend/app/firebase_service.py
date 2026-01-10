@@ -20,7 +20,8 @@ def _initialize_firestore_client() -> firestore.Client:
 
     emulator_host = os.environ.get("FIRESTORE_EMULATOR_HOST")
     credentials_json = os.environ.get("FIREBASE_CREDENTIALS")
-    credentials_path = "D:/rhymes app/rhymes-app/backend/firebase_key.json"
+    credentials_path  = "/opt/curriculum-customisation/rhymes-app/secure/firebase_key.json"
+
 
     if emulator_host:
         cred = credentials.AnonymousCredentials()
