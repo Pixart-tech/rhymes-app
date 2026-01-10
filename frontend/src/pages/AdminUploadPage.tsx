@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { CATALOG } from '../data/catalog';
-import { Book } from '../types';
+import { Book } from '../types/types';
 import { savePdf, deletePdf, listPdfKeys, clearPdfs } from '../services/api';
 
 interface UploadState {

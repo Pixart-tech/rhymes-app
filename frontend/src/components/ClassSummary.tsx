@@ -41,6 +41,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
     onUpdateSelections, onExcludeAssessment, onRestoreAssessment, onAssessmentVariantChange, onAddManualSubject,
     onConfirm, onBack 
 }) => {
+  const canMutate = !readOnly;
   const [expandedPdf, setExpandedPdf] = useState<string | null>(null);
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [manualForm, setManualForm] = useState({ subject: '', coreCode: '', coreCover: '', coreSpine: '' });
@@ -193,13 +194,18 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   // Process selections into a flat list of physical books
   const books: PhysicalBookItem[] = useMemo(() => {
     const list: PhysicalBookItem[] = [];
-    const canMutate = !readOnly;
+    let hasExplicitAssessment = false;
 
     // 1. Regular Selections
     classSelections.forEach(s => {
         if (!s.selectedOption) return;
         const opt = s.selectedOption;
         const displaySubject = opt.jsonSubject || s.subjectName;
+        const subjectKey = (s.subjectName || '').toString().trim().toLowerCase();
+        const isAssessmentSubject = subjectKey === 'assessment';
+        if (isAssessmentSubject) {
+          hasExplicitAssessment = true;
+        }
 
         // Core Book
         if (opt.coreId) {
@@ -244,6 +250,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                     id: `${s.subjectName}-${opt.typeId}-core`,
                     title: fullTitle,
                     type: 'Core',
+                    isAssessment: isAssessmentSubject,
                     link: opt.link,
                     subjectName: displaySubject,
                     className: s.className,
@@ -261,6 +268,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                         id: `${s.subjectName}-${opt.typeId}-work-dropped`,
                         title: `${opt.label} (Workbook)`,
                         type: 'Work',
+                        isAssessment: isAssessmentSubject,
                         subjectName: displaySubject,
                         className: s.className,
                         canDrop: false,
@@ -273,6 +281,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                     id: `${s.subjectName}-${opt.typeId}-work`,
                     title: `${opt.label} (Workbook)`,
                     type: 'Work',
+                    isAssessment: isAssessmentSubject,
                     link: opt.link, // Assuming same PDF link for now
                     subjectName: displaySubject,
                     className: s.className,
@@ -290,6 +299,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                         id: `${s.subjectName}-${opt.typeId}-addon-dropped`,
                         title: `${opt.label} (Add-on)`,
                         type: 'Addon',
+                        isAssessment: isAssessmentSubject,
                         subjectName: displaySubject,
                         className: s.className,
                         canDrop: false,
@@ -302,6 +312,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                     id: `${s.subjectName}-${opt.typeId}-addon`,
                     title: `${opt.label} (Add-on)`,
                     type: 'Addon',
+                    isAssessment: isAssessmentSubject,
                     link: opt.link,
                     subjectName: displaySubject,
                     className: s.className,
@@ -327,49 +338,33 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
       )?.selectedOption || null;
       const assessment = getAssessmentForClass(classData.name, englishSelection, mathsSelection, currentAssessmentVariant);
 
-      if (assessment) {
-          if (!excludedAssessments.includes(classData.name)) {
-              list.push({
-                  id: 'assessment',
-                  title: `${assessment.label} (Assessment)`,
-                  type: 'Assessment',
-                  subjectName: 'General',
-                  className: classData.name,
-                  canDrop: canMutate,
-                  onDrop: canMutate ? handleDropAssessment : undefined,
-                  link: assessment.link
-              });
-          } else if (canMutate) {
-              // Excluded state for undo (edit mode only)
-              list.push({
-                  id: 'assessment-dropped',
-                  title: `${assessment.label} (Assessment)`,
-                  type: 'Assessment',
-                  subjectName: 'General',
-                  className: classData.name,
-                  canDrop: false,
-                  isExcluded: true,
-                  onRestore: canMutate ? handleRestoreAssessment : undefined
-              });
-          }
-      }
-      // If we have core subjects but assessment payload is missing, render placeholder only in edit mode
-      if (!assessment && !excludedAssessments.includes(classData.name) && canMutate) {
+      // Render assessment only when not explicitly excluded
+      if (assessment && !excludedAssessments.includes(classData.name) && !hasExplicitAssessment) {
         list.push({
-          id: 'assessment-placeholder',
-          title: `Assessment`,
-          type: 'Assessment',
-          subjectName: 'General',
+          id: 'assessment',
+          title: assessment.label,
+          type: 'Core',
+          displayType: 'Core',
+          subjectName: 'Assessment',
           className: classData.name,
+          isAssessment: true,
           canDrop: canMutate,
           onDrop: canMutate ? handleDropAssessment : undefined,
+          link: assessment.link
         });
       }
     }
 
     // If no core subjects remain, strip any assessment entries defensively
-    return hasActiveCoreSubjects ? list : list.filter((item) => item.type !== 'Assessment');
+    return hasActiveCoreSubjects ? list : list.filter((item) => !item.isAssessment);
   }, [selections, classData, excludedAssessments, currentAssessmentVariant, readOnly, hasActiveCoreSubjects]);
+
+  const visibleBooks = books.filter((b) => !b.isExcluded);
+  const hasAssessmentBook = visibleBooks.some((b) => b.isAssessment);
+  const lowerClassName = (classData.name || '').toString().trim().toLowerCase();
+  const isPlaygroup = lowerClassName === 'playgroup' || lowerClassName === 'pg';
+  const canRestoreAssessment =
+    canMutate && hasActiveCoreSubjects && !isPlaygroup && !hasAssessmentBook;
 
   return (
     <div className="max-w-4xl mx-auto w-full p-4 md:p-6 pb-24">
@@ -394,6 +389,19 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         </div>
 
         <div className="p-2 md:p-6 bg-slate-50/50">
+          {canRestoreAssessment && (
+            <div className="mb-3 flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs md:text-sm text-blue-800">
+              <span>Assessment is missing for this class. Restore it to include in selections.</span>
+              <button
+                type="button"
+                onClick={handleRestoreAssessment}
+                className="px-3 py-1 rounded-md border border-blue-300 bg-white text-blue-700 font-semibold text-xs hover:bg-blue-100 transition-colors"
+              >
+                Restore Assessment
+              </button>
+            </div>
+          )}
+
           {books.length === 0 ? (
              <div className="text-center py-10 text-slate-500 italic text-sm">
                  No books selected for this class yet.
@@ -446,9 +454,9 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                                         ${book.type === 'Core' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : ''}
                                         ${book.type === 'Work' ? 'bg-green-50 text-green-700 border-green-100' : ''}
                                         ${book.type === 'Addon' ? 'bg-purple-50 text-purple-700 border-purple-100' : ''}
-                                        ${book.type === 'Assessment' ? 'bg-blue-50 text-blue-700 border-blue-100' : ''}
+                                        ${book.isAssessment ? 'bg-blue-50 text-blue-700 border-blue-100' : ''}
                                     `}>
-                                        {book.type}
+                                        {book.isAssessment ? 'Core' : book.type}
                                     </span>
                                 </div>
                                 
@@ -457,12 +465,12 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                                 
                                 {/* Title */}
                                 <div className="font-semibold text-slate-800 text-sm md:text-base flex items-start md:items-center gap-2 leading-tight">
-                                    <Book size={16} className={`hidden md:block shrink-0 ${book.type === 'Assessment' ? 'text-blue-500' : 'text-slate-400'}`} />
+                                    <Book size={16} className={`hidden md:block shrink-0 ${book.isAssessment ? 'text-blue-500' : 'text-slate-400'}`} />
                                     <span>{book.title}</span>
                                 </div>
                                 
                                 {/* Assessment Variant Selector */}
-                                {book.type === 'Assessment' && !book.isExcluded && (
+                                {book.isAssessment && !book.isExcluded && (
                                     <div className="mt-2 flex items-center gap-3">
                                         <label className="flex items-center gap-1.5 cursor-pointer">
                                             <input 
@@ -496,9 +504,9 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                                     ${book.type === 'Core' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : ''}
                                     ${book.type === 'Work' ? 'bg-green-50 text-green-700 border-green-100' : ''}
                                     ${book.type === 'Addon' ? 'bg-purple-50 text-purple-700 border-purple-100' : ''}
-                                    ${book.type === 'Assessment' ? 'bg-blue-50 text-blue-700 border-blue-100' : ''}
+                                    ${book.isAssessment ? 'bg-blue-50 text-blue-700 border-blue-100' : ''}
                                 `}>
-                                    {book.type}
+                                    {book.isAssessment ? 'Core' : book.type}
                                 </span>
                             </div>
 

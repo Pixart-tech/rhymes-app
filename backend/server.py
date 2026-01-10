@@ -4,13 +4,13 @@ from __future__ import annotations
 import os, sys
 
 # Force working directory to the folder where EXE is running
-if getattr(sys, "frozen", False):
-    exe_dir = os.path.dirname(sys.executable)
-    os.chdir(exe_dir)
-else:
-    exe_dir = os.path.dirname(os.path.abspath(__file__))
+# if getattr(sys, "frozen", False):
+#     exe_dir = os.path.dirname(sys.executable)
+#     os.chdir(exe_dir)
+# else:
+#     exe_dir = os.path.dirname(os.path.abspath(__file__))
 
-print("Forced working directory:", os.getcwd())
+# print("Forced working directory:", os.getcwd())
 
 
 import base64
@@ -888,12 +888,12 @@ async def add_csp_header(request, call_next):
     response = await call_next(request)
     csp = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:3000 https://cdn.tailwindcss.com https://aistudiocdn.com https://us.i.posthog.com; "
-        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
-        "img-src 'self' data: blob: http://localhost:3000 https://*; "
-        "font-src 'self' data: https://aistudiocdn.com; "
-        "connect-src 'self' http://localhost:3000 https://us.i.posthog.com; "
-        "frame-src 'self' http://localhost:3000; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob: https:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' https:; "
+        "frame-src 'self'; "
         "object-src 'none'; "
         "base-uri 'self'; "
         "form-action 'self';"
@@ -1448,7 +1448,7 @@ def _resolve_backend_cover_dir(school_id: str) -> Path:
 @api_router.get("/cover-uploads/{school_id}")
 def list_cover_uploads(school_id: str, authorization: Optional[str] = Header(None)):
     """List uploaded cover files for a school from backend/Assets/covers/<school_id>.
-
+    
     The response groups covers by the class label found in book selections
     so the frontend can render sections per grade.
     """

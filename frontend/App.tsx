@@ -285,6 +285,9 @@ export default function App() {
             onExcludeAssessment={handleExcludeAssessment}
             onRestoreAssessment={handleRestoreAssessment}
             onAssessmentVariantChange={handleAssessmentVariantChange}
+            pendingRemovals={[]}
+            onUndoRemovedSubject={() => {}}
+            classHasUnsavedChanges={true}
             onConfirm={handleGoHome}
             onBack={() => {
                 setViewState('TITLES');

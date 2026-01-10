@@ -992,36 +992,76 @@ const CoverPageWorkflow = ({
         </div>
       );
     }
+    // Group covers by grade for clarity
+    const grouped = approvalCovers.reduce((acc, item) => {
+      const gradeKey = (item.gradeLabel || 'Unknown').toString().trim() || 'Unknown';
+      if (!acc[gradeKey]) acc[gradeKey] = [];
+      acc[gradeKey].push(item);
+      return acc;
+    }, {});
+
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {approvalCovers.map((item) => (
-          <div key={item.name} className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div
-              className="bg-slate-50 flex items-center justify-center"
-              style={{ aspectRatio: '8 / 11', minHeight: '240px', maxHeight: '420px' }}
-            >
-              <img
-                src={item.uploadedUrl || item.url}
-                alt={item.name}
-                className="h-full w-full object-contain"
-                width={1000}
-                height={1400}
-                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                onError={(e) => {
-                  e.currentTarget.style.opacity = '0.3';
-                }}
-              />
+      <div className="space-y-4">
+        {Object.entries(grouped).map(([gradeLabel, items]) => (
+          <div key={gradeLabel} className="space-y-2">
+            <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-xs uppercase tracking-wide">{gradeLabel}</span>
+              <span className="text-xs text-slate-500">({items.length} cover{items.length !== 1 ? 's' : ''})</span>
             </div>
-            <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
-              <div className="flex flex-col min-w-0">
-                {item.gradeLabel ? (
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 truncate">
-                    {item.gradeLabel}
-                  </span>
-                ) : null}
-                <span className="font-semibold text-slate-800 truncate">{item.name}</span>
-              </div>
-            
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {items.map((item) => {
+                const component = (item.component || '').toString().trim().toLowerCase();
+                const subject = (item.subject || '').toString().trim().toLowerCase();
+                const coreTitle = item.core_cover_title && item.core_cover_title.toString().trim();
+                const workTitle = item.work_cover_title && item.work_cover_title.toString().trim();
+                const addonTitle = item.addon_cover_title && item.addon_cover_title.toString().trim();
+                const displayTitle = (() => {
+                  if (component === 'work' && workTitle) return workTitle;
+                  if ((component === 'core' || subject === 'assessment') && coreTitle) return coreTitle;
+                  if (workTitle) return workTitle;
+                  if (coreTitle) return coreTitle;
+                  if (addonTitle) return addonTitle;
+                  if (item.title && item.title.toString().trim()) return item.title.toString().trim();
+                  return item.name ? item.name.replace(/\.[^.]+$/, '') : 'Cover';
+                })();
+                const imageUrl = item.uploadedUrl || item.url;
+                return (
+                <div key={`${gradeLabel}-${item.name}`} className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  <div
+                    className="bg-slate-50 flex items-center justify-center"
+                    style={{ aspectRatio: '8 / 11', minHeight: '240px', maxHeight: '420px' }}
+                  >
+                    <img
+                      src={imageUrl}
+                      alt={displayTitle}
+                      className="h-full w-full object-contain"
+                      width={1000}
+                      height={1400}
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                      onError={(e) => {
+                        e.currentTarget.style.opacity = '0.3';
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 truncate">
+                        {gradeLabel}
+                      </span>
+                      <span className="font-semibold text-slate-800 truncate">{displayTitle}</span>
+                    </div>
+                    {imageUrl ? (
+                      <button
+                        type="button"
+                        className="text-indigo-600 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded text-[11px] font-semibold"
+                        onClick={() => window.open(imageUrl, '_blank', 'noopener')}
+                      >
+                        Zoom
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              )})}
             </div>
           </div>
         ))}
@@ -1074,7 +1114,13 @@ const CoverPageWorkflow = ({
           url: normalizeAssetUrl(f.url || `${API_BASE_URL}/cover-uploads/${school.school_id}/${encodeURIComponent(f.name)}`),
           exists: true,
           uploadedUrl: normalizeAssetUrl(f.url || `${API_BASE_URL}/cover-uploads/${school.school_id}/${encodeURIComponent(f.name)}`),
-          gradeLabel: f.class_label || ''
+          gradeLabel: f.class_label || '',
+          component: f.component,
+          core_cover_title: f.core_cover_title,
+          work_cover_title: f.work_cover_title,
+          addon_cover_title: f.addon_cover_title,
+          subject: f.subject,
+          code: (f.code || f.name || '').toString().replace(/\.[^.]+$/, '').trim(),
         })),
         ...missing.map((entry) => {
           const code = typeof entry === 'string' ? entry : entry?.code;
@@ -1084,7 +1130,13 @@ const CoverPageWorkflow = ({
             url: normalizeAssetUrl(`/public/Assets/covers/${school.school_id}/${encodeURIComponent(code)}.png`),
             exists: false,
             uploadedUrl: null,
-            gradeLabel: classLabel || ''
+            gradeLabel: classLabel || '',
+            component: entry?.component,
+            core_cover_title: entry?.core_cover_title,
+            work_cover_title: entry?.work_cover_title,
+            addon_cover_title: entry?.addon_cover_title,
+            subject: entry?.subject,
+            code: (typeof code === 'string' ? code : '').toString().trim(),
           };
         }),
       ];

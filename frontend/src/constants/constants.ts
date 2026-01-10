@@ -276,10 +276,10 @@ export const getAssessmentForClass = (
 ): { label: string, coreId: string, coreCover: string, coreSpine: string, defaultCoreCoverTitle: string, link: string } | null => {
   if (!englishOpt && !mathsOpt) return null;
   
+  const normalizedClassName = (className || '').trim().toLowerCase();
   const isWithMarks = variant === 'WITH_MARKS';
   const defaultCoreCoverTitle = "Assessment";
-  
-  if (className === "Nursery") {
+  if (normalizedClassName === "nursery") {
      if (!englishOpt || !mathsOpt) return null;
      const eng = englishOpt.label.toLowerCase();
      const mat = mathsOpt.label;
@@ -385,7 +385,7 @@ export const getAssessmentForClass = (
      }
   }
 
-  if (className === "LKG") {
+  if (normalizedClassName === "lkg") {
      if (!englishOpt) return null;
      const eng = englishOpt.label.toLowerCase();
      const coreCover = "0307";
@@ -411,7 +411,7 @@ export const getAssessmentForClass = (
      }
   }
 
-  if (className === "UKG") {
+  if (normalizedClassName === "ukg") {
      if (!mathsOpt) return null;
      const mat = mathsOpt.label;
      const coreCover = "0408";

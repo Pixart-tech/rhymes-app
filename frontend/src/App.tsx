@@ -3,10 +3,10 @@ import React from 'react';
 import { HashRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import HomePage from './pages/HomePage';
-import QuestionnairePage from './pages/QuestionnairePage';
+
 import AdminUploadPage from './pages/AdminUploadPage';
-import PdfViewerPage from './pages/PdfViewerPage';
-import GridPage from './pages/GridPage';
+
+
 import { RhymesWorkflowApp } from './pages/Rhymepicker';
 import WizardApp, { ViewState as WizardViewState } from './pages/WizardApp';
 
@@ -70,23 +70,9 @@ const App: React.FC = () => {
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="/questionnaire"
-                element={
-                  <ProtectedRoute>
-                    <QuestionnairePage />
-                  </ProtectedRoute>
-                }
-              />
+             
               {/* <Route path="/rhymes" element={<RhymesWorkflowApp />} /> */}
-              <Route
-                path="/grid"
-                element={
-                  <ProtectedRoute>
-                    <GridPage />
-                  </ProtectedRoute>
-                }
-              />
+              
               <Route
                 path="/admin/upload"
                 element={
@@ -95,14 +81,7 @@ const App: React.FC = () => {
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="/pdf/:id"
-                element={
-                  <ProtectedRoute>
-                    <PdfViewerPage />
-                  </ProtectedRoute>
-                }
-              />
+              
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
 

@@ -204,6 +204,7 @@ export const buildFinalBookSelections = (
             class: classKey,
             class_label: displayLabel,
             class_name: className,
+            component: 'core', // keep parity with legacy payloads for assessment
             subject: 'Assessment',
             grade_subject: `${displayLabel} : ${assessmentTitle}`,
             type: assessment.label,

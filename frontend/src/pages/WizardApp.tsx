@@ -601,11 +601,16 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   };
   
   const handleExcludeAssessment = (className: string) => {
-      setExcludedAssessments(prev => [...prev, className]);
+      setExcludedAssessments((prev) => {
+        const next = new Set(prev.map((c) => c.trim().toLowerCase()));
+        next.add(className.trim().toLowerCase());
+        return Array.from(next);
+      });
   };
   
   const handleRestoreAssessment = (className: string) => {
-      setExcludedAssessments(prev => prev.filter(c => c !== className));
+      const target = className.trim().toLowerCase();
+      setExcludedAssessments(prev => prev.filter(c => c.trim().toLowerCase() !== target));
   };
 
   const handleAssessmentVariantChange = (className: string, variant: AssessmentVariant) => {
@@ -615,6 +620,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const handleUpdateAssessmentTitle = (className: string, title: string) => {
       setCustomAssessmentTitles(prev => ({ ...prev, [className]: title }));
   };
+
+  // Safety: clear accidental exclusions on fresh selection (no saved exclusions, but local exclusions exist)
+  useEffect(() => {
+    if (savedExcludedAssessments.length === 0 && excludedAssessments.length > 0 && selections.length > 0) {
+      setExcludedAssessments([]);
+    }
+  }, [savedExcludedAssessments.length, excludedAssessments.length, selections.length]);
 
   const handleAddManualSubject = (
     className: string,
@@ -863,7 +875,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       dirtyClassKeys.has(normalizeClassKey(item.class || item.class_label || ''))
     );
 
-    if (filteredSelections.length === 0 && removedClasses.length === 0) {
+    if (filteredSelections.length === 0 && removedClasses.length === 0 && dirtyClassKeys.size === 0) {
       toast.info('No changes to save.');
       return true;
     }
@@ -871,7 +883,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     const payload = {
       school_id: resolvedSchoolId,
       selections: filteredSelections,
-      excluded_assessments: excludedAssessments,
+      excluded_assessments: normalizedExcluded,
       grade_names: latestGradeNames,
       source: 'wizard',
       deleted_classes: removedClasses,
@@ -995,6 +1007,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             nextExcluded.add(mapped || c);
           }
         });
+        // If the server still has an assessment row, clear stale exclusion for this class
+        const hasAssessmentRow = items.some(
+          (item: any) => lower(item?.subject) === 'assessment' && lower(item?.component) === 'assessment'
+        );
+        if (hasAssessmentRow) {
+          nextExcluded.delete(normalizedClass);
+        }
         nextSignatures[normalizedClass] = computeClassSignature(sanitizedItems);
 
         // Merge separate component rows (core/work/addon) back into a single selection per subject/type.

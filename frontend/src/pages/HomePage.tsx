@@ -57,7 +57,7 @@ const HomePage: React.FC<HomePageProps> = ({ onBackToMode, school, onStartBookSe
   return (
     <div className="container mx-auto max-w-4xl text-center py-16">
       <Button onClick={handleBackToMenu}>Back to  menu </Button>
-      <br></br>
+      <br></br><br></br>
       <h1 className="text-4xl md:text-5xl font-extrabold text-primary-800 mb-4">Welcome to the Book Selector</h1>
       <p className="text-lg text-gray-600 mb-8">
         Your one-stop solution for customizing school book packages for Nursery, LKG, and UKG.
