@@ -888,10 +888,12 @@ async def add_csp_header(request, call_next):
     response = await call_next(request)
     csp = (
         "default-src 'self'; "
-        "script-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "script-src-elem 'self' https://cdn.jsdelivr.net; "
         "style-src 'self' 'unsafe-inline'; "
+        "style-src-elem 'self' https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "
-        "font-src 'self' data:; "
+        "font-src 'self' data: https://cdn.jsdelivr.net; "
         "connect-src 'self' https:; "
         "frame-src 'self'; "
         "object-src 'none'; "
@@ -900,6 +902,7 @@ async def add_csp_header(request, call_next):
     )
     response.headers["Content-Security-Policy"] = csp
     return response
+
 
 app.mount(
     PUBLIC_URL_PREFIX,
