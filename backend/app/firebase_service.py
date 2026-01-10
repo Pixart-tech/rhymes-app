@@ -13,38 +13,35 @@ DEFAULT_USER_ROLE = "user"
 
 
 def _initialize_firestore_client() -> firestore.Client:
-    """Initialize Firestore using explicit credentials when possible."""
+    """Initialize Firestore using env-based credentials."""
 
-    if firebase_admin._apps:  # pragma: no cover - defensive guard
+    # Prevent double initialization
+    if firebase_admin._apps:
         return firestore.client()
 
     emulator_host = os.environ.get("FIRESTORE_EMULATOR_HOST")
-    credentials_json = os.environ.get("FIREBASE_CREDENTIALS")
-    credentials_path  = "/opt/curriculumcustomisation/rhymes-app/backend/secure/firebase_key.json"
 
+    # ✅ SINGLE SOURCE OF TRUTH
+    credentials_path = os.environ.get(
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "secure/firebase_key.json"  # local fallback
+    )
 
     if emulator_host:
         cred = credentials.AnonymousCredentials()
-    elif credentials_json:
-        try:
-            cred_data = json.loads(credentials_json)
-        except json.JSONDecodeError:
-            cred_data = credentials_json
-        cred = credentials.Certificate(cred_data)
-    elif credentials_path:
-        cred = credentials.Certificate(credentials_path)
     else:
-        raise RuntimeError(
-            "Firebase credentials are not configured. Set FIREBASE_CREDENTIALS to"
-            " a JSON blob or GOOGLE_APPLICATION_CREDENTIALS to a service account"
-            " path."
-        )
+        if not os.path.exists(credentials_path):
+            raise RuntimeError(
+                f"Firebase credentials not found at {credentials_path}"
+            )
+        cred = credentials.Certificate(credentials_path)
 
     firebase_admin.initialize_app(cred)
     return firestore.client()
 
 
 db = _initialize_firestore_client()
+
 
 
 def verify_and_decode_token(authorization: Optional[str]) -> Dict[str, Any]:
