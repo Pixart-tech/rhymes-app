@@ -174,19 +174,6 @@ const mapLibraryToThemes = (library) => {
   }));
 };
 
-const buildStaticLibrary = () => {
-  const versions = Array.from({ length: 16 }, (_, idx) => `V${idx + 1}`);
-  const gradeCodes = ['P', 'N', 'L', 'U'];
-  const colours = {};
-  versions.forEach((version) => {
-    colours[version] = {};
-    gradeCodes.forEach((grade) => {
-      colours[version][grade] = normalizeAssetUrl(`/cover-library/colours/${version}/${grade}.png`);
-    });
-  });
-  return { themes: [], colours, colour_versions: versions };
-};
-
 const buildThemeSources = (theme) => {
   let cover = theme?.coverUrl || '';
   // If only preview is present, derive the original cover path
@@ -665,11 +652,18 @@ const CoverPageWorkflow = ({
       setIsLoadingThemes(true);
       setThemeError('');
       try {
-        // Prefer static library served by frontend (public/cover-library).
-        const library = buildStaticLibrary();
-        const normalizedLibrary = normalizeLibraryPayload(library);
-        setThemes(mapLibraryToThemes(normalizedLibrary));
-        setLibraryColours(normalizedLibrary.colours || {});
+        const response = await axios.get(`${API_BASE_URL}/cover-library`, { validateStatus: () => true });
+        if (response.status >= 400) {
+          throw new Error(`Server responded with status ${response.status}`);
+        }
+        const library = response.data?.library || response.data;
+        if (library) {
+          const normalizedLibrary = normalizeLibraryPayload(library);
+          setThemes(mapLibraryToThemes(normalizedLibrary));
+          setLibraryColours(normalizedLibrary.colours || {});
+        } else {
+          setThemes(buildFallbackThemes());
+        }
       } catch (error) {
         console.error('Unable to load cover theme thumbnails', error);
         setThemeError('Unable to load theme thumbnails. Uploaded PNGs will appear when the server is reachable.');
