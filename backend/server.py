@@ -93,7 +93,8 @@ _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
 _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
 _localize_svg_image_assets = svg_processing.localize_svg_image_assets
 
-PUBLIC_DIR = (ROOT_DIR / "public").resolve()
+PUBLIC_DIR = ROOT_DIR = Path(__file__).resolve().parent
+PUBLIC_DIR = ROOT_DIR / "public"
 COVER_THEME_PUBLIC_DIR = PUBLIC_DIR / "cover-themes"
 LIBRARY_ROOT_DIR = PUBLIC_DIR / "cover-library"
 UPLOAD_COVERS_DIR = (PUBLIC_DIR / "Assets" / "covers").resolve()
@@ -108,18 +109,7 @@ PUBLIC_URL_PREFIX = "/public"
 SUBJECT_PDF_DIR = PUBLIC_DIR / "subject-pdfs"
 
 
-class CachedStaticFiles(StaticFiles):
-    """Serve static assets with long-lived cache headers for immutable files."""
-
-    def __init__(self, *args, cache_control: str = "public, max-age=31536000, immutable", **kwargs):
-        super().__init__(*args, **kwargs)
-        self.cache_control = cache_control
-
-    def set_headers(self, response: Response, path: str, stat_result):  # type: ignore[override]
-        super().set_headers(response, path, stat_result)
-        if self.cache_control:
-            response.headers.setdefault("Cache-Control", self.cache_control)
-
+# we s
 # try:
 #     COVER_THEME_PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
 #     LIBRARY_THEMES_DIR.mkdir(parents=True, exist_ok=True)
@@ -786,7 +776,7 @@ def _resolve_rhyme_image_path(rhyme_code: str, file_name: str) -> Path:
 
 
 def _ensure_cover_assets_base_path() -> Path:
-    return config.ensure_cover_assets_base_path(COVER_SVG_BASE_PATH)
+    return config.ensure_cover_assets_base_path(   SVG_BASE_PATH)
 
 
 def _get_cover_assets_unc_base_path() -> PureWindowsPath:
@@ -903,19 +893,6 @@ async def add_csp_header(request, call_next):
     response.headers["Content-Security-Policy"] = csp
     return response
 
-
-
-app.mount(
-    PUBLIC_URL_PREFIX,
-    CachedStaticFiles(directory=PUBLIC_DIR, check_dir=True),
-    name="public",
-)
-# Also expose the same static files under /api/public for callers that prefix API routes.
-app.mount(
-    f"/api{PUBLIC_URL_PREFIX}",
-    CachedStaticFiles(directory=PUBLIC_DIR, check_dir=True),
-    name="public_api_prefix",
-)
 
 
 class PDFDependencyUnavailableError(RuntimeError):

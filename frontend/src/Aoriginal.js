@@ -20,7 +20,7 @@ import { Plus, ChevronDown, ChevronRight, Replace, School, Users, BookOpen, Musi
 
 // Resolve backend URL using Vite env (import.meta.env) when available.
 // Fall back to older REACT_APP_* env or localhost when necessary.
-let BACKEND_URL = 'http://localhost:8000';
+let BACKEND_URL = 'http://localhost:8000'
 try {
   const env = import.meta?.env || {};
   BACKEND_URL = env.VITE_BACKEND_URL || env.VITE_REACT_APP_BACKEND_URL || env.VITE_APP_BACKEND_URL || BACKEND_URL;

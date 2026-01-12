@@ -60,10 +60,10 @@ const resolveCoverUrl = (theme) => {
   const cleanedId = typeof rawId === 'string' ? rawId.trim() : rawId;
   const versionId = typeof cleanedId === 'string' ? cleanedId.toUpperCase() : cleanedId;
   if (typeof versionId === 'string' && /^v\d+/i.test(versionId)) {
-    return normalizeAssetUrl(`/public/cover-library/colours/${versionId}/C1.png`);
+    return normalizeAssetUrl(`/cover-library/colours/${versionId}/C1.png`);
   }
   const id = typeof cleanedId === 'string' ? cleanedId.replace(/\s+/g, '_') : cleanedId;
-  return normalizeAssetUrl(`/public/cover-library/colours/${id}/C1.png`);
+  return normalizeAssetUrl(`/cover-library/colours/${id}/C1.png`);
 };
 
 const normalizeLibraryPayload = (library) => {

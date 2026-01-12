@@ -1559,7 +1559,7 @@ type HeaderProps = {
 
 // HEADER Component
 const Header = ({ onHome, hasFinish, onFinish, showReturnToMenu = false, onReturnToMenu, finishStatus = 'idle' }: HeaderProps) => {
-    const API = API_BASE_URL || '/api';
+    const logoSrc = normalizeAssetUrl('/Edplorebookselectorlogo.png');
     const isSaving = finishStatus === 'saving';
     const isSaved = finishStatus === 'success';
     const showFinish = hasFinish && finishStatus !== 'success';
@@ -1569,7 +1569,7 @@ const Header = ({ onHome, hasFinish, onFinish, showReturnToMenu = false, onRetur
         <header className="bg-white border-b py-3 px-6 shadow-sm sticky top-0">
             <div className="max-w-6xl mx-auto flex items-center justify-between">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={onHome}>
-                    <img src={`${API}/public/Edplorebookselectorlogo.png`} alt="Logo" className="w-8 h-8" />
+                    <img src={logoSrc} alt="Logo" className="w-8 h-8" />
 
                     <h1 className="text-xl font-bold">Edplore Book Selector</h1>
                 </div>

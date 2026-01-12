@@ -46,6 +46,7 @@ const deriveApiBaseUrl = (backendUrl) => {
 };
 
 export const API_BASE_URL = deriveApiBaseUrl(import.meta.env.VITE_BACKEND_URL);
+console.log("API_BASE_URL:", API_BASE_URL);
 
 const deriveAssetBaseUrl = () => {
   const override = (import.meta.env.VITE_ASSET_BASE_URL || "").trim();
@@ -56,6 +57,14 @@ const deriveAssetBaseUrl = () => {
     const parsedOverride = ensureAbsoluteUrl(override);
     if (parsedOverride) {
       return sanitizeUrl(parsedOverride.origin);
+    }
+  }
+
+  // Prefer current origin in the browser so static assets served from the frontend public folder resolve correctly.
+  if (typeof window !== "undefined" && window.location?.origin) {
+    const origin = sanitizeUrl(window.location.origin);
+    if (origin) {
+      return origin;
     }
   }
 
@@ -87,21 +96,66 @@ const deriveAssetBaseUrl = () => {
 
 export const ASSET_BASE_URL = deriveAssetBaseUrl();
 
+const deriveBackendOrigin = () => {
+  const backend = (import.meta.env.VITE_BACKEND_URL || "").trim();
+  const parsed = ensureAbsoluteUrl(backend);
+  if (parsed) {
+    return sanitizeUrl(parsed.origin);
+  }
+  try {
+    const apiUrl = new URL(API_BASE_URL);
+    return sanitizeUrl(apiUrl.origin);
+  } catch (error) {
+    return "";
+  }
+};
+
+const BACKEND_ORIGIN = deriveBackendOrigin();
+
 export const normalizeAssetUrl = (url) => {
   if (!url) return "";
+
+  // Normalize Vite public-prefix usage: /public/... should be served from root.
+  let href = url;
+  if (typeof href === "string") {
+    href = href.replace(/^(https?:\/\/[^/]+)?\/public(?=\/)/i, "$1");
+  }
+
+  // Keep backend-served assets (cover uploads, dynamic Assets) on the backend origin.
+  if (
+    typeof href === "string" &&
+    (href.startsWith("/cover-uploads") || href.startsWith("/Assets"))
+  ) {
+    if (BACKEND_ORIGIN) {
+      return sanitizeUrl(`${BACKEND_ORIGIN}${href}`);
+    }
+    return href;
+  }
+
   const base = ASSET_BASE_URL;
 
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(href);
+    const pathname = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+
+    // If backend returned a loopback URL for backend assets, swap to backend origin.
+    if (
+      LOCAL_HOSTNAMES.has(parsed.hostname) &&
+      (pathname.startsWith("/cover-uploads") || pathname.startsWith("/Assets")) &&
+      BACKEND_ORIGIN
+    ) {
+      return sanitizeUrl(`${BACKEND_ORIGIN}${pathname}`);
+    }
+
     if (LOCAL_HOSTNAMES.has(parsed.hostname) && base) {
       return sanitizeUrl(`${base}${parsed.pathname}${parsed.search}${parsed.hash}`);
     }
     return parsed.toString();
   } catch (error) {
-    if (base && url.startsWith("/")) {
-      return sanitizeUrl(`${base}${url}`);
+    if (base && typeof href === "string" && href.startsWith("/")) {
+      return sanitizeUrl(`${base}${href}`);
     }
-    return url;
+    return href;
   }
 };
 

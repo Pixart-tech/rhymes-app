@@ -12,7 +12,7 @@ import { API_BASE_URL, cn, normalizeAssetUrl } from '../lib/utils';
 import { COVER_COLOUR_OPTIONS, COVER_THEME_CATALOGUE, COVER_THEME_SLOT_COUNT } from '../theme';
 import { loadCoverWorkflowState, saveCoverWorkflowState, loadPersistedAppState } from '../lib/storage';
 import { useAuth } from '../hooks/useAuth';
-
+console.log('API_BASE_URL in CoverPageWorkflow:', API_BASE_URL);
 const GRADE_LABELS = {
   nursery: 'Nursery',
   lkg: 'LKG',
@@ -60,10 +60,10 @@ const resolveCoverUrl = (theme) => {
 
   if (typeof versionId === 'string' && /^V\d+/.test(versionId)) {
     // Library format keeps C1-C4 under /colours/Vx/
-    return normalizeAssetUrl(`/public/cover-library/colours/${versionId}/C1.png`);
+    return normalizeAssetUrl(`/cover-library/colours/${versionId}/C1.png`);
   }
 
-  return normalizeAssetUrl(`/public/cover-library/colours/${normalizedId}/C1.png`);
+  return normalizeAssetUrl(`/cover-library/colours/${normalizedId}/C1.png`);
 };
 
 const normalizeLibraryPayload = (library) => {
@@ -1025,6 +1025,7 @@ const CoverPageWorkflow = ({
                   return item.name ? item.name.replace(/\.[^.]+$/, '') : 'Cover';
                 })();
                 const imageUrl = item.uploadedUrl || item.url;
+                console.log('Rendering approval cover', { item, displayTitle, imageUrl });
                 return (
                 <div key={`${gradeLabel}-${item.name}`} className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
                   <div
@@ -1127,7 +1128,7 @@ const CoverPageWorkflow = ({
           const classLabel = typeof entry === 'string' ? '' : entry?.class_label;
           return {
             name: `${code}.png`,
-            url: normalizeAssetUrl(`/public/Assets/covers/${school.school_id}/${encodeURIComponent(code)}.png`),
+            url: normalizeAssetUrl(`/Assets/covers/${school.school_id}/${encodeURIComponent(code)}.png`),
             exists: false,
             uploadedUrl: null,
             gradeLabel: classLabel || '',
