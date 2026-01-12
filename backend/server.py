@@ -242,6 +242,12 @@ def _sanitize_component(value: str, fallback: str) -> str:
     return normalized or fallback
 
 
+def _resolve_library_theme_dir(theme_id: str) -> Path:
+    """Return the filesystem path for a library theme directory."""
+    safe_theme_id = _sanitize_component(theme_id, "theme")
+    return COVER_THEME_PUBLIC_DIR / safe_theme_id
+
+
 def _resolve_theme_dir(theme_id: str) -> Path:
     safe_theme_id = _sanitize_component(theme_id, "theme")
     return COVER_THEME_PUBLIC_DIR / safe_theme_id
