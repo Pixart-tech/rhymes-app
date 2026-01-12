@@ -2877,11 +2877,11 @@ async def get_cover_theme_images(theme_id: str, request: Request):
 # ---------------------------------------------------------------------------
 
 
-@api_router.get("/cover-library")
-async def list_cover_library(request: Request):
-    """Return available theme covers and colour PNGs stored under public/cover-library."""
+# @api_router.get("/cover-library")
+# async def list_cover_library(request: Request):
+#     """Return available theme covers and colour PNGs stored under public/cover-library."""
 
-    return {"library": _build_library_manifest(request)}
+#     return {"library": _build_library_manifest(request)}
 
 
 @api_router.post("/cover-library/themes/{theme_key}/cover")

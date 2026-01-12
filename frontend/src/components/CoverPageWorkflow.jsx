@@ -67,16 +67,18 @@ const resolveCoverUrl = (theme) => {
 };
 
 const normalizeLibraryPayload = (library) => {
+  const stripPublic = (value) => (typeof value === 'string' ? value.replace(/^\/public(?=\/)/i, '') : value);
+
   const themes = Array.isArray(library?.themes)
     ? library.themes.map((theme) => {
         const rawId = typeof theme?.id === 'string' ? theme.id.trim() : theme?.id;
         const normalizedId =
           typeof rawId === 'string' && /^v\d+/i.test(rawId) ? rawId.toUpperCase() : rawId || theme?.themeId;
         const resolvedCover =
-          theme?.coverUrl || theme?.thumbnailUrl || resolveCoverUrl({ ...theme, id: normalizedId });
-        const coverUrl = resolvedCover ? normalizeAssetUrl(resolvedCover) : '';
-        const thumbnailUrl = theme?.thumbnailUrl ? normalizeAssetUrl(theme.thumbnailUrl) : coverUrl;
-        const previewUrl = theme?.previewUrl ? normalizeAssetUrl(theme.previewUrl) : '';
+          stripPublic(theme?.coverUrl) || stripPublic(theme?.thumbnailUrl) || resolveCoverUrl({ ...theme, id: normalizedId });
+        const coverUrl = resolvedCover ? normalizeAssetUrl(stripPublic(resolvedCover)) : '';
+        const thumbnailUrl = theme?.thumbnailUrl ? normalizeAssetUrl(stripPublic(theme.thumbnailUrl)) : coverUrl;
+        const previewUrl = theme?.previewUrl ? normalizeAssetUrl(stripPublic(theme.previewUrl)) : '';
         return {
           ...theme,
           id: normalizedId,
@@ -95,7 +97,7 @@ const normalizeLibraryPayload = (library) => {
     if (!normalizedVersion) return;
     const normalizedGrades = {};
     Object.entries(grades || {}).forEach(([grade, src]) => {
-      normalizedGrades[grade] = normalizeAssetUrl(src);
+      normalizedGrades[grade] = normalizeAssetUrl(stripPublic(src));
     });
     colours[normalizedVersion] = normalizedGrades;
   });
@@ -172,6 +174,34 @@ const mapLibraryToThemes = (library) => {
     coverUrl: theme?.coverUrl || '',
     colours: colourEntries,
   }));
+};
+
+const buildStaticLibrary = () => {
+  const versions = Array.from({ length: 16 }, (_, idx) => `V${idx + 1}`);
+  const gradeToStem = { P: 'C1', N: 'C2', L: 'C3', U: 'C4' };
+
+  const themes = versions.map((version) => {
+    const match = version.match(/(\d+)/);
+    const labelNumber = match ? match[1] : version;
+    const coverUrl = normalizeAssetUrl(`/cover-library/colours/${version}/${gradeToStem.P}.png`);
+    return {
+      id: version,
+      label: `Theme ${labelNumber}`,
+      coverUrl,
+      thumbnailUrl: coverUrl,
+      previewUrl: null,
+    };
+  });
+
+  const colours = versions.reduce((acc, version) => {
+    acc[version] = Object.entries(gradeToStem).reduce((grades, [grade, stem]) => {
+      grades[grade] = normalizeAssetUrl(`/cover-library/colours/${version}/${stem}.png`);
+      return grades;
+    }, {});
+    return acc;
+  }, {});
+
+  return { themes, colours, colour_versions: versions };
 };
 
 const buildThemeSources = (theme) => {
@@ -490,22 +520,19 @@ const CoverPageWorkflow = ({
       const clientGrades = response.data?.client_grades || response.data?.grades || {};
       const rawStatus = response.data?.status;
       const rootStatus = (rawStatus ?? '').toString().trim();
-      const library = response.data?.library;
       const loadedColours = {};
-      let loadedThemeId = selectedThemeId;
-      let loadedColourId = selectedColourId;
-      let loadedFinished = isFinished;
-      let loadedUpdatedAt = lastSavedAt;
-      let loadedWorkflowStatus = rootStatus || workflowStatus;
-
-      if (library) {
-        const normalizedLibrary = normalizeLibraryPayload(library);
-        const mapped = mapLibraryToThemes(normalizedLibrary);
-        setThemes(mapped);
-        setLibraryColours(normalizedLibrary.colours || {});
-        if (!loadedThemeId && mapped.length) {
-          loadedThemeId = mapped[0].id;
-        }
+    let loadedThemeId = selectedThemeId;
+    let loadedColourId = selectedColourId;
+    let loadedFinished = isFinished;
+    let loadedUpdatedAt = lastSavedAt;
+    let loadedWorkflowStatus = rootStatus || workflowStatus;
+      // Always use static library served from frontend assets.
+      const staticLibrary = normalizeLibraryPayload(buildStaticLibrary());
+      const mapped = mapLibraryToThemes(staticLibrary);
+      setThemes(mapped);
+      setLibraryColours(staticLibrary.colours || {});
+      if (!loadedThemeId && mapped.length) {
+        loadedThemeId = mapped[0].id;
       }
 
       Object.entries(clientGrades).forEach(([gradeKey, entry]) => {
@@ -651,26 +678,11 @@ const CoverPageWorkflow = ({
     const fetchThemeImages = async () => {
       setIsLoadingThemes(true);
       setThemeError('');
-      try {
-        const response = await axios.get(`${API_BASE_URL}/cover-library`, { validateStatus: () => true });
-        if (response.status >= 400) {
-          throw new Error(`Server responded with status ${response.status}`);
-        }
-        const library = response.data?.library || response.data;
-        if (library) {
-          const normalizedLibrary = normalizeLibraryPayload(library);
-          setThemes(mapLibraryToThemes(normalizedLibrary));
-          setLibraryColours(normalizedLibrary.colours || {});
-        } else {
-          setThemes(buildFallbackThemes());
-        }
-      } catch (error) {
-        console.error('Unable to load cover theme thumbnails', error);
-        setThemeError('Unable to load theme thumbnails. Uploaded PNGs will appear when the server is reachable.');
-        setThemes(buildFallbackThemes());
-      } finally {
-        setIsLoadingThemes(false);
-      }
+      // Always use static assets served by the frontend; no backend dependency.
+      const normalizedLibrary = normalizeLibraryPayload(buildStaticLibrary());
+      setThemes(mapLibraryToThemes(normalizedLibrary));
+      setLibraryColours(normalizedLibrary.colours || {});
+      setIsLoadingThemes(false);
     };
 
     void fetchThemeImages();
