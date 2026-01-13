@@ -9,8 +9,9 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-PUBLIC_DIR = (ROOT_DIR.parent / "frontend" / "public").resolve()
+BACKEND_DIR = Path(__file__).resolve().parent
+ROOT_DIR = BACKEND_DIR.parent
+PUBLIC_DIR = (BACKEND_DIR / "public").resolve()
 SUBJECT_PDF_DIR = PUBLIC_DIR / "subject-pdfs"
 EXCEL_PATH = ROOT_DIR / "BOOK CODES 2025-26.xlsx"
 

@@ -93,7 +93,7 @@ _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
 _localize_svg_image_assets = svg_processing.localize_svg_image_assets
 
 BASE_DIR = Path(__file__).resolve().parent
-PUBLIC_DIR = (BASE_DIR / "../frontend/public").resolve()
+PUBLIC_DIR = (BASE_DIR / "public").resolve()
 COVER_THEME_PUBLIC_DIR = PUBLIC_DIR / "cover-themes"
 LIBRARY_ROOT_DIR = PUBLIC_DIR / "cover-library"
 LIBRARY_THEMES_DIR = LIBRARY_ROOT_DIR 
