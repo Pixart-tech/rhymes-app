@@ -87,6 +87,36 @@ const deriveAssetBaseUrl = () => {
 
 export const ASSET_BASE_URL = deriveAssetBaseUrl();
 
+const derivePublicUrlPrefix = () => {
+  const rawValue = (import.meta.env.VITE_PUBLIC_URL_PREFIX || "").trim();
+  const candidate = rawValue || "/public";
+  const withLeadingSlash = candidate.startsWith("/") ? candidate : `/${candidate}`;
+  return withLeadingSlash.replace(/\/+$/, "") || "/";
+};
+
+export const PUBLIC_URL_PREFIX = derivePublicUrlPrefix();
+export const COVER_LIBRARY_BASE = `${PUBLIC_URL_PREFIX}/cover-library`;
+
+export const deriveLibraryVersionId = (value) => {
+  if (!value) return "";
+  const trimmed = value.toString().trim();
+  if (!trimmed) return "";
+  if (/^v\d+/i.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+  const numeric = trimmed.match(/(\d+)/);
+  if (numeric) {
+    return `V${numeric[1]}`;
+  }
+  const sanitized = trimmed.replace(/\s+/g, "_");
+  return sanitized.toUpperCase();
+};
+
+export const buildCoverLibraryColourUrl = (versionId) => {
+  if (!versionId) return "";
+  return `${COVER_LIBRARY_BASE}/colours/${versionId}/C1.png`;
+};
+
 export const normalizeAssetUrl = (url) => {
   if (!url) return "";
   const base = ASSET_BASE_URL;

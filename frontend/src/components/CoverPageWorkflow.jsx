@@ -8,7 +8,13 @@ import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { CheckCircle2, ChevronLeft, ImageOff, X } from 'lucide-react';
 
-import { API_BASE_URL, cn, normalizeAssetUrl } from '../lib/utils';
+import {
+  API_BASE_URL,
+  cn,
+  normalizeAssetUrl,
+  deriveLibraryVersionId,
+  buildCoverLibraryColourUrl,
+} from '../lib/utils';
 import { COVER_COLOUR_OPTIONS, COVER_THEME_CATALOGUE, COVER_THEME_SLOT_COUNT } from '../theme';
 import { loadCoverWorkflowState, saveCoverWorkflowState, loadPersistedAppState } from '../lib/storage';
 import { useAuth } from '../hooks/useAuth';
@@ -53,17 +59,9 @@ const normalizeThemeId = (themeId) => {
 
 const resolveCoverUrl = (theme) => {
   const rawId = theme?.id || theme?.themeId;
-  const cleanedId = typeof rawId === 'string' ? rawId.trim() : rawId;
-  const normalizedId = typeof cleanedId === 'string' ? cleanedId.replace(/\s+/g, '_') : cleanedId;
-  const versionId = typeof normalizedId === 'string' ? normalizedId.toUpperCase() : normalizedId;
-  if (!normalizedId) return '';
-
-  if (typeof versionId === 'string' && /^V\d+/.test(versionId)) {
-    // Library format keeps C1-C4 under /colours/Vx/
-    return normalizeAssetUrl(`/cover-library/colours/${versionId}/C1.png`);
-  }
-
-  return normalizeAssetUrl(`/cover-library/colours/${normalizedId}/C1.png`);
+  const versionId = deriveLibraryVersionId(rawId);
+  if (!versionId) return '';
+  return normalizeAssetUrl(buildCoverLibraryColourUrl(versionId));
 };
 
 const normalizeLibraryPayload = (library) => {

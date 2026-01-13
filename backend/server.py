@@ -92,9 +92,11 @@ _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
 _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
 _localize_svg_image_assets = svg_processing.localize_svg_image_assets
 
-PUBLIC_DIR = (ROOT_DIR.parent / "frontend" / "public").resolve()
+BASE_DIR = Path(__file__).resolve().parent
+PUBLIC_DIR = (BASE_DIR / "../frontend/public").resolve()
 COVER_THEME_PUBLIC_DIR = PUBLIC_DIR / "cover-themes"
 LIBRARY_ROOT_DIR = PUBLIC_DIR / "cover-library"
+LIBRARY_THEMES_DIR = LIBRARY_ROOT_DIR 
 UPLOAD_COVERS_DIR = (PUBLIC_DIR / "Assets" / "covers").resolve()
 BACKEND_COVERS_DIR = (Path(__file__).resolve().parent / "Assets" / "covers").resolve()
 # Use only the colours folder for library assets.
@@ -254,6 +256,10 @@ def _sanitize_component(value: str, fallback: str) -> str:
 def _resolve_theme_dir(theme_id: str) -> Path:
     safe_theme_id = _sanitize_component(theme_id, "theme")
     return COVER_THEME_PUBLIC_DIR / safe_theme_id
+
+def _resolve_library_theme_dir(theme_key: str) -> Path:
+    safe_key = _sanitize_component(theme_key, "theme")
+    return LIBRARY_THEMES_DIR / safe_key
 
 
 def _get_library_colour_base_dir(prefer_existing: bool = True) -> Path:
@@ -865,7 +871,11 @@ normalized_origins = [origin for origin in cors_origins if origin != "*"]
 
 
 # middle ware configuration and app setup
-app = FastAPI()
+app = FastAPI(
+    title="BookSelector API",
+    version="1.0.0",
+    openapi_version="3.0.3",
+)
 origins = [
     
     "http://localhost:3000" , "http://192.168.0.102:3000" # remove * in production

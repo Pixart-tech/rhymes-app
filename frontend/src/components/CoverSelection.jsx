@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from './ui/button';
-import { cn, API_BASE_URL, normalizeAssetUrl } from '../lib/utils';
+import {
+  cn,
+  API_BASE_URL,
+  normalizeAssetUrl,
+  deriveLibraryVersionId,
+  buildCoverLibraryColourUrl,
+} from '../lib/utils';
 import { COVER_THEME_CATALOGUE } from '../theme';
 import { loadPersistedAppState } from '../lib/storage';
 import { useAuth } from '../hooks/useAuth';
@@ -56,14 +62,9 @@ const resolveCoverUrl = (theme) => {
     return normalizeAssetUrl(theme.coverUrl);
   }
   const rawId = theme?.id || theme?.themeId;
-  if (!rawId || (typeof rawId === 'string' && !rawId.trim())) return '';
-  const cleanedId = typeof rawId === 'string' ? rawId.trim() : rawId;
-  const versionId = typeof cleanedId === 'string' ? cleanedId.toUpperCase() : cleanedId;
-  if (typeof versionId === 'string' && /^v\d+/i.test(versionId)) {
-    return normalizeAssetUrl(`/cover-library/colours/${versionId}/C1.png`);
-  }
-  const id = typeof cleanedId === 'string' ? cleanedId.replace(/\s+/g, '_') : cleanedId;
-  return normalizeAssetUrl(`/cover-library/colours/${id}/C1.png`);
+  const versionId = deriveLibraryVersionId(rawId);
+  if (!versionId) return '';
+  return normalizeAssetUrl(buildCoverLibraryColourUrl(versionId));
 };
 
 const normalizeLibraryPayload = (library) => {
