@@ -60,10 +60,10 @@ const resolveCoverUrl = (theme) => {
   const cleanedId = typeof rawId === 'string' ? rawId.trim() : rawId;
   const versionId = typeof cleanedId === 'string' ? cleanedId.toUpperCase() : cleanedId;
   if (typeof versionId === 'string' && /^v\d+/i.test(versionId)) {
-    return normalizeAssetUrl(`/public/cover-library/colours/${versionId}/C1.png`);
+    return normalizeAssetUrl(`/cover-library/colours/${versionId}/C1.png`);
   }
   const id = typeof cleanedId === 'string' ? cleanedId.replace(/\s+/g, '_') : cleanedId;
-  return normalizeAssetUrl(`/public/cover-library/colours/${id}/C1.png`);
+  return normalizeAssetUrl(`/cover-library/colours/${id}/C1.png`);
 };
 
 const normalizeLibraryPayload = (library) => {
@@ -72,7 +72,8 @@ const normalizeLibraryPayload = (library) => {
         const rawId = typeof theme?.id === 'string' ? theme.id.trim() : theme?.id;
         const normalizedId =
           typeof rawId === 'string' && /^v\d+/i.test(rawId) ? rawId.toUpperCase() : rawId || theme?.themeId;
-        const cover = theme?.coverUrl || theme?.thumbnailUrl || resolveCoverUrl({ ...theme, id: normalizedId });
+        const frontCover = resolveCoverUrl({ ...theme, id: normalizedId });
+        const cover = frontCover || theme?.coverUrl || theme?.thumbnailUrl;
         const coverUrl = cover ? normalizeAssetUrl(cover) : '';
         const thumbnailUrl = theme?.thumbnailUrl ? normalizeAssetUrl(theme.thumbnailUrl) : coverUrl;
         const previewUrl = theme?.previewUrl ? normalizeAssetUrl(theme.previewUrl) : '';

@@ -17,7 +17,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../componen
 import { toast } from 'sonner';
 import { Toaster } from '../components/ui/sonner';
 import CoverPageWorkflow from '../components/CoverPageWorkflow';
-import HomePage from '../pages/HomePage';
 
 import InlineSvg from '../components/InlineSvg';
 import {
@@ -252,52 +251,19 @@ const ModeSelectionPage = ({
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="mx-auto flex max-w-5xl flex-col gap-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">Welcome, {school.school_name}</h1>
-            <p className="text-gray-600">School ID: {school.school_id}</p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {onEditProfile && (
-              <Button
-                variant="outline"
-                className="bg-white/80 hover:bg-white border-gray-200 whitespace-normal text-xs sm:text-sm px-3 sm:px-4 py-2 sm:py-2.5"
-                onClick={onEditProfile}
-              >
-                <UserRoundPen className="mr-2 h-4 w-4 shrink-0" />
-                <span className="min-w-0 text-left">Edit profile</span>
-              </Button>
-            )}
-            {isSuperAdmin && (
-              <>
-                <Button
-                  variant="outline"
-                  className="bg-white/80 hover:bg-white border-gray-200 whitespace-normal text-xs sm:text-sm px-3 sm:px-4 py-2 sm:py-2.5"
-                  onClick={onBackToAdmin}
-                >
-                  <ChevronLeft className="mr-2 h-4 w-4 shrink-0" />
-                  <span className="min-w-0 text-left">Back to admin dashboard</span>
-                </Button>
-                <Button
-                  asChild
-                  variant="outline"
-                  className="bg-white/80 hover:bg-white border-gray-200 whitespace-normal text-xs sm:text-sm px-3 sm:px-4 py-2 sm:py-2.5"
-                >
-                  <a href="#/admin/upload" className="min-w-0 text-left">Admin tools</a>
-                </Button>
-              </>
-            )}
-            {onBackToDashboard && (
-              <Button
-                variant="outline"
-                className="bg-white/80 hover:bg-white border-gray-200 whitespace-normal text-xs sm:text-sm px-3 sm:px-4 py-2 sm:py-2.5"
-                onClick={onBackToDashboard}
-              >
-                <ChevronLeft className="mr-2 h-4 w-4 shrink-0" />
-                <span className="min-w-0 text-left">Back to dashboard</span>
-              </Button>
-            )}
-          </div>
+        <div className="flex justify-end">
+          {(isSuperAdmin ? onBackToAdmin : onBackToDashboard) && (
+            <Button
+              variant="outline"
+              className="bg-white/80 hover:bg-white border-gray-200 whitespace-normal text-xs sm:text-sm px-3 sm:px-4 py-2 sm:py-2.5"
+              onClick={isSuperAdmin ? onBackToAdmin : onBackToDashboard}
+            >
+              <ChevronLeft className="mr-2 h-4 w-4 shrink-0" />
+              <span className="min-w-0 text-left">
+                {isSuperAdmin ? 'Back to admin dashboard' : 'Back to dashboard'}
+              </span>
+            </Button>
+          )}
         </div>
 
         {isFrozen && coverStatus === '4' && (
@@ -800,7 +766,6 @@ const GradeSelectionPage = ({
   school,
   mode,
   onGradeSelect,
-  onLogout,
   onBackToMode,
   coverDefaults,
   onEditCoverDetails,
@@ -1015,13 +980,6 @@ const GradeSelectionPage = ({
     [school?.school_id]
   );
 
-  const handleLogoutClick = () => {
-    if (typeof onLogout === 'function') {
-      onLogout();
-    }
-    navigate('/');
-  };
-
   const handleBackToMenu = () => {
     if (typeof onBackToMode === 'function') {
       onBackToMode();
@@ -1076,27 +1034,14 @@ const GradeSelectionPage = ({
     <>
       <div className="min-h-screen bg-slate-50 p-6">
         <div className="max-w-4xl mx-auto">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8 text-center md:text-left">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">{school.school_name}</h1>
-              <p className="text-gray-600">School ID: {school.school_id}</p>
-            </div>
-            <div className="flex items-center justify-center gap-3">
-              <Button
-                onClick={handleBackToMenu}
-                variant="outline"
-                className="bg-white/80 hover:bg-white border-gray-200"
-              >
-                Back to Menu
-              </Button>
-              <Button
-                onClick={handleLogoutClick}
-                variant="outline"
-                className="bg-white/80 hover:bg-white border-gray-200"
-              >
-                Logout
-              </Button>
-            </div>
+          <div className="flex justify-end mb-8">
+            <Button
+              onClick={handleBackToMenu}
+              variant="outline"
+              className="bg-white/80 hover:bg-white border-gray-200"
+            >
+              Back to Menu
+            </Button>
           </div>
 
           <div className="mb-8 space-y-2 text-center md:text-left">
@@ -3205,6 +3150,16 @@ export function RhymesWorkflowApp() {
           if (!ok) {
             return;
           }
+          if (typeof window !== 'undefined') {
+            if (school?.school_id) {
+              window.localStorage.setItem('bookSelectionSchoolId', school.school_id);
+            }
+            if (school?.school_name) {
+              window.localStorage.setItem('bookSelectionSchoolName', school.school_name);
+            }
+          }
+          navigate('/wizard');
+          return;
         }
         setSelectedMode(mode);
         if (mode === 'cover') {
@@ -3221,7 +3176,14 @@ export function RhymesWorkflowApp() {
         setModePending(false);
       }
     },
-    [ensureCoverSelectionsExist, modePending, resolveFirstEnabledGrade, selectionsFrozen]
+    [
+      ensureCoverSelectionsExist,
+      modePending,
+      resolveFirstEnabledGrade,
+      selectionsFrozen,
+      navigate,
+      school
+    ]
   );
 
   const handleGradeSelect = (grade, mode) => {
@@ -3346,7 +3308,6 @@ export function RhymesWorkflowApp() {
           school={school}
           mode={selectedMode}
           onGradeSelect={handleGradeSelect}
-          onLogout={handleLogout}
           onBackToMode={handleBackToModeSelection}
           coverDefaults={coverDefaults}
           onEditCoverDetails={handleEditCoverDetails}
@@ -3367,25 +3328,8 @@ export function RhymesWorkflowApp() {
           school={school}
           grade={selectedGrade}
           onBackToMode={handleBackToModeSelection}
-          onLogout={handleLogout}
           coverDefaults={coverDefaults}
           isReadOnly={selectionsFrozen || coverWorkflowIntent === 'view'}
-        />
-      ) : selectedMode === 'books' ? (
-        <HomePage
-          school={school}
-          onBackToMode={handleBackToModeSelection}
-          onStartBookSelection={() => {
-            if (typeof window !== 'undefined') {
-              if (school?.school_id) {
-                window.localStorage.setItem('bookSelectionSchoolId', school.school_id);
-              }
-              if (school?.school_name) {
-                window.localStorage.setItem('bookSelectionSchoolName', school.school_name);
-              }
-            }
-            navigate('/wizard');
-          }}
         />
       ) : (
         <FeaturePlaceholderPage

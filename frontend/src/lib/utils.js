@@ -74,12 +74,12 @@ const deriveAssetBaseUrl = () => {
     }
   }
 
-  if (DEFAULT_LAN_BASE) {
-    return sanitizeUrl(DEFAULT_LAN_BASE);
-  }
-
   if (typeof window !== "undefined") {
     return sanitizeUrl(window.location.origin);
+  }
+
+  if (DEFAULT_LAN_BASE) {
+    return sanitizeUrl(DEFAULT_LAN_BASE);
   }
 
   return "";

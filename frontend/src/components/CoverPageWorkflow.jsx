@@ -6,7 +6,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
-import { CheckCircle2, ImageOff, X } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ImageOff, X } from 'lucide-react';
 
 import { API_BASE_URL, cn, normalizeAssetUrl } from '../lib/utils';
 import { COVER_COLOUR_OPTIONS, COVER_THEME_CATALOGUE, COVER_THEME_SLOT_COUNT } from '../theme';
@@ -60,10 +60,10 @@ const resolveCoverUrl = (theme) => {
 
   if (typeof versionId === 'string' && /^V\d+/.test(versionId)) {
     // Library format keeps C1-C4 under /colours/Vx/
-    return normalizeAssetUrl(`/public/cover-library/colours/${versionId}/C1.png`);
+    return normalizeAssetUrl(`/cover-library/colours/${versionId}/C1.png`);
   }
 
-  return normalizeAssetUrl(`/public/cover-library/colours/${normalizedId}/C1.png`);
+  return normalizeAssetUrl(`/cover-library/colours/${normalizedId}/C1.png`);
 };
 
 const normalizeLibraryPayload = (library) => {
@@ -72,8 +72,8 @@ const normalizeLibraryPayload = (library) => {
         const rawId = typeof theme?.id === 'string' ? theme.id.trim() : theme?.id;
         const normalizedId =
           typeof rawId === 'string' && /^v\d+/i.test(rawId) ? rawId.toUpperCase() : rawId || theme?.themeId;
-        const resolvedCover =
-          theme?.coverUrl || theme?.thumbnailUrl || resolveCoverUrl({ ...theme, id: normalizedId });
+        const frontCover = resolveCoverUrl({ ...theme, id: normalizedId });
+        const resolvedCover = frontCover || theme?.coverUrl || theme?.thumbnailUrl;
         const coverUrl = resolvedCover ? normalizeAssetUrl(resolvedCover) : '';
         const thumbnailUrl = theme?.thumbnailUrl ? normalizeAssetUrl(theme.thumbnailUrl) : coverUrl;
         const previewUrl = theme?.previewUrl ? normalizeAssetUrl(theme.previewUrl) : '';
@@ -194,7 +194,6 @@ const CoverPageWorkflow = ({
   school,
   grade,
   onBackToMode,
-  onLogout,
   coverDefaults,
   isReadOnly = false,
 }) => {
@@ -1286,20 +1285,17 @@ const CoverPageWorkflow = ({
         <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
           <div className="mx-auto max-w-4xl space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-orange-500">Cover pages workflow</p>
-                <h1 className="text-2xl font-semibold text-slate-900">{school.school_name}</h1>
-                <p className="text-sm text-slate-600">School ID: {school.school_id}</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={onBackToMode} className="bg-white/80 hover:bg-white">
-                  Back to menu
-                </Button>
-                <Button variant="outline" onClick={onLogout} className="bg-white/80 hover:bg-white">
-                  Logout
-                </Button>
-              </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-orange-500">Cover pages workflow</p>
+              <h1 className="text-2xl font-semibold text-slate-900">{school.school_name}</h1>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={onBackToMode} className="bg-white/80 hover:bg-white">
+                <ChevronLeft className="mr-2 h-4 w-4" />
+                Back to menu
+              </Button>
+            </div>
+          </div>
 
             <Card className="border-none bg-white/80 shadow-lg">
               <CardContent className="p-6 space-y-3">
@@ -1321,7 +1317,6 @@ const CoverPageWorkflow = ({
             <div className="space-y-1">
               <p className="text-sm font-medium text-orange-500">Cover pages workflow</p>
               <h1 className="text-2xl font-semibold text-slate-900">{school.school_name}</h1>
-              <p className="text-sm text-slate-600">School ID: {school.school_id}</p>
               {workflowStatus === '4' && (
                 <p className="text-sm font-semibold text-indigo-700">{approvedMessage}</p>
               )}
@@ -1331,10 +1326,8 @@ const CoverPageWorkflow = ({
             </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={onBackToMode} className="bg-white/80 hover:bg-white">
+                <ChevronLeft className="mr-2 h-4 w-4" />
                 Back to menu
-              </Button>
-              <Button variant="outline" onClick={onLogout} className="bg-white/80 hover:bg-white">
-                Logout
               </Button>
             </div>
           </div>
@@ -1394,7 +1387,6 @@ const CoverPageWorkflow = ({
             <p className="text-sm font-medium text-orange-500">Cover pages workflow</p>
             <h1 className="text-3xl font-semibold text-slate-900">{school.school_name}</h1>
             <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-              <span>School ID: {school.school_id}</span>
               {isFinished && (
                 <span className="inline-flex items-center gap-1 text-green-700">
                   <CheckCircle2 className="h-4 w-4" /> Finished
@@ -1410,10 +1402,8 @@ const CoverPageWorkflow = ({
           </div>
           <div className="flex flex-wrap justify-end gap-3">
             <Button variant="outline" onClick={onBackToMode} className="bg-white/80 hover:bg-white">
+              <ChevronLeft className="mr-2 h-4 w-4" />
               Back to menu
-            </Button>
-            <Button variant="outline" onClick={onLogout} className="bg-white/80 hover:bg-white">
-              Logout
             </Button>
             {isAdmin && (
               <div className="flex flex-wrap gap-2">

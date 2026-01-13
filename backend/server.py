@@ -93,7 +93,7 @@ _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
 _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
 _localize_svg_image_assets = svg_processing.localize_svg_image_assets
 
-PUBLIC_DIR = (ROOT_DIR / "public").resolve()
+PUBLIC_DIR = (ROOT_DIR.parent / "frontend" / "public").resolve()
 COVER_THEME_PUBLIC_DIR = PUBLIC_DIR / "cover-themes"
 LIBRARY_ROOT_DIR = PUBLIC_DIR / "cover-library"
 UPLOAD_COVERS_DIR = (PUBLIC_DIR / "Assets" / "covers").resolve()

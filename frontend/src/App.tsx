@@ -2,8 +2,6 @@
 import React from 'react';
 import { HashRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
-import HomePage from './pages/HomePage';
-
 import AdminUploadPage from './pages/AdminUploadPage';
 
 
@@ -53,7 +51,6 @@ const App: React.FC = () => {
               <Route path="/" element={<RhymesWorkflowApp />} />
               <Route path="/sign-in" element={<Navigate to="/" replace />} />
               <Route path="/sign-up" element={<Navigate to="/" replace />} />
-              <Route path='/Home' element={<HomePage/>}/>
               <Route
                 path="/wizard"
                 element={
