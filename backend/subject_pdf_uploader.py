@@ -117,7 +117,7 @@ PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
 SUBJECT_ROWS, LOAD_ERROR = _load_subject_rows(EXCEL_PATH)
 
 app = FastAPI(title="Subject PDF Upload UI")
-app.mount("/public", StaticFiles(directory=PUBLIC_DIR), name="public")
+app.mount("/media", StaticFiles(directory=PUBLIC_DIR), name="public")
 
 
 @app.get("/", response_class=HTMLResponse)

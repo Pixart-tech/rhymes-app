@@ -92,6 +92,9 @@ _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
 _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
 _localize_svg_image_assets = svg_processing.localize_svg_image_assets
 
+
+PUBLIC_URL_PREFIX = "/media"
+
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = (BASE_DIR / "public").resolve()
 COVER_THEME_PUBLIC_DIR = PUBLIC_DIR / "cover-themes"
@@ -105,7 +108,6 @@ LIBRARY_COLOUR_BASE_DIRS = [LIBRARY_COVERS_DIR]
 LIBRARY_THEME_KEYS = [f"Theme {i}" for i in range(1, 17)]
 LIBRARY_GRADE_CODES = ["P", "N", "L", "U"]
 DEFAULT_COLOUR_VERSIONS = [f"V{i}" for i in range(1, 17)]
-PUBLIC_URL_PREFIX = "/public"
 SUBJECT_PDF_DIR = PUBLIC_DIR / "subject-pdfs"
 
 
@@ -919,7 +921,7 @@ app.mount(
     CachedStaticFiles(directory=PUBLIC_DIR, check_dir=True),
     name="public",
 )
-# Also expose the same static files under /api/public for callers that prefix API routes.
+
 app.mount(
     f"/api{PUBLIC_URL_PREFIX}",
     CachedStaticFiles(directory=PUBLIC_DIR, check_dir=True),
@@ -3033,7 +3035,7 @@ async def rebuild_images_page():
       <h2>Rebuild WebP Images</h2>
       <p>Click to POST <code>/api/cover-assets/rebuild-images</code>. Leave the path blank to use defaults.</p>
       <label for="dir">Source directory (optional)</label>
-      <input id="dir" type="text" placeholder="e.g. C:/path/to/covers or /public/cover-library/themes" />
+      <input id="dir" type="text" placeholder="e.g. C:/path/to/covers or /media/cover-library/themes" />
       <button id="run">Run rebuild</button>
       <div id="log">Idle</div>
       <script>

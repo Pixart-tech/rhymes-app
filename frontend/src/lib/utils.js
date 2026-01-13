@@ -89,7 +89,7 @@ export const ASSET_BASE_URL = deriveAssetBaseUrl();
 
 const derivePublicUrlPrefix = () => {
   const rawValue = (import.meta.env.VITE_PUBLIC_URL_PREFIX || "").trim();
-  const candidate = rawValue || "/public";
+  const candidate = rawValue || "/media";
   const withLeadingSlash = candidate.startsWith("/") ? candidate : `/${candidate}`;
   return withLeadingSlash.replace(/\/+$/, "") || "/";
 };

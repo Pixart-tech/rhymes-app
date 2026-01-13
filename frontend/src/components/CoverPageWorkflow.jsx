@@ -1124,7 +1124,7 @@ const CoverPageWorkflow = ({
           const classLabel = typeof entry === 'string' ? '' : entry?.class_label;
           return {
             name: `${code}.png`,
-            url: normalizeAssetUrl(`/public/Assets/covers/${school.school_id}/${encodeURIComponent(code)}.png`),
+            url: normalizeAssetUrl(`/media/Assets/covers/${school.school_id}/${encodeURIComponent(code)}.png`),
             exists: false,
             uploadedUrl: null,
             gradeLabel: classLabel || '',
