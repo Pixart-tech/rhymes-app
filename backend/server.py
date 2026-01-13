@@ -12,7 +12,7 @@ import os, sys
 
 # print("Forced working directory:", os.getcwd())
 
-
+from dotenv import load_dotenv
 import base64
 import logging
 import mimetypes
@@ -30,7 +30,6 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path, PureWindowsPath
 
-from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile, Form, Request, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field

@@ -11,7 +11,7 @@ const deriveFolderUrl = (sourceUrl) => {
   }
 
   try {
-    const base = new URL(sourceUrl, typeof window !== 'undefined' ? window.location.href : 'http://localhost');
+    const base = new URL(sourceUrl, typeof window !== 'undefined' ? window.location.href : '/');
     base.hash = '';
     base.search = '';
     const pathname = base.pathname || '/';
