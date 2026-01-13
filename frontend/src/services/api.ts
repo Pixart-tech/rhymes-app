@@ -1,4 +1,3 @@
-
 import { QuestionnaireAnswers } from '../types';
 
 // Simulates saving a selection to the backend and S3
