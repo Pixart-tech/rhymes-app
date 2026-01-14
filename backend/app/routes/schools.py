@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from io import BytesIO
 import imghdr
 import mimetypes
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import Response
+
+from PIL import Image, UnidentifiedImageError
 
 from .. import school_profiles
 from pydantic import BaseModel, field_validator
@@ -26,7 +29,6 @@ from ..firebase_service import (
 from ..schemas import (
     BranchStatusUpdatePayload,
     PaginatedSchoolResponse,
-    RhymeSelectionDetail,
     SchoolWithSelections,
 )
 
@@ -205,7 +207,20 @@ async def _read_upload_file(upload_file: Optional[UploadFile]) -> Tuple[Optional
     contents = await upload_file.read()
     if not contents:
         return None, None
-    return contents, upload_file.content_type or "application/octet-stream"
+    mime_type = (upload_file.content_type or "").lower()
+    allowed_mimes = {"image/png", "image/jpeg", "image/jpg"}
+    if mime_type and mime_type not in allowed_mimes:
+        raise HTTPException(status_code=400, detail="Files must be PNG or JPEG images.")
+
+    try:
+        with Image.open(BytesIO(contents)) as image:
+            if image.format not in {"PNG", "JPEG"}:
+                raise HTTPException(status_code=400, detail="Files must be PNG or JPEG images.")
+            output = BytesIO()
+            image.save(output, format="PNG")
+            return output.getvalue(), "image/png"
+    except UnidentifiedImageError:
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid image.")
 
 
 def _determine_image_media_type(blob: bytes) -> str:
@@ -687,16 +702,28 @@ def get_all_schools_with_selections(
     if user_record.get("role") != "super-admin":
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
-    total_schools_query = db.collection("schools")
-    total_count = len(list(total_schools_query.stream()))
+    count_aggregation = db.collection("schools").count()
+    count_snapshot = count_aggregation.get()
+    if not count_snapshot:
+        total_count = 0
+    else:
+        first_result = count_snapshot[0]
+        doc_data = {}
+        try:
+            doc_data = first_result.to_dict() or {}
+        except Exception:
+            pass
+        count_value = doc_data.get("count") or doc_data.get("value")
+        total_count = int(count_value or 0)
 
-    offset = (page - 1) * limit
+    offset = max((page - 1) * limit, 0)
     school_docs_query = (
         db.collection("schools")
         .order_by("timestamp", direction=firestore.Query.DESCENDING)
+        .offset(offset)
+        .limit(limit)
     )
-    all_school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
-    school_docs = all_school_docs[offset : offset + limit]
+    school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
 
     if not school_docs:
         return PaginatedSchoolResponse(schools=[], total_count=total_count)
@@ -719,43 +746,37 @@ def get_all_schools_with_selections(
             expanded_docs.append(branch_record)
 
     school_ids = [doc.get("school_id") for doc in expanded_docs if doc.get("school_id")]
-
-    selection_docs = []
-    if school_ids:
-        selection_docs_query = db.collection("rhyme_selections").where("school_id", "in", school_ids)
-        selection_docs = [doc.to_dict() for doc in selection_docs_query.stream()]
-
-    selections_by_school: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    selections_count: Dict[str, int] = {}
     latest_selection_timestamp: Dict[str, datetime] = {}
 
-    for selection in selection_docs:
-        school_id = selection.get("school_id")
-        grade = selection.get("grade")
+    if school_ids:
+        selection_docs_query = (
+            db.collection("rhyme_selections")
+            .where("school_id", "in", school_ids)
+            .select(["school_id", "timestamp"])
+        )
+        for selection_doc in selection_docs_query.stream():
+            selection = selection_doc.to_dict() or {}
+            school_id = selection.get("school_id")
+            if not school_id:
+                continue
+            selections_count[school_id] = selections_count.get(school_id, 0) + 1
+            timestamp = selection.get("timestamp")
+            if timestamp:
+                existing_ts = latest_selection_timestamp.get(school_id)
+                if not existing_ts or timestamp > existing_ts:
+                    latest_selection_timestamp[school_id] = timestamp
 
-        if not school_id or not grade:
-            continue
-
-        school_bucket = selections_by_school.setdefault(school_id, {})
-        grade_bucket = school_bucket.setdefault(grade, [])
-        grade_bucket.append(selection)
-
-        timestamp = selection.get("timestamp")
-        if timestamp:
-            existing = latest_selection_timestamp.get(school_id)
-            if not existing or timestamp > existing:
-                latest_selection_timestamp[school_id] = timestamp
-
-    def sort_key(selection: Dict[str, Any]):
-        page_index = selection.get("page_index")
-        try:
-            normalized_page = int(page_index)
-        except (TypeError, ValueError):
-            normalized_page = 0
-
-        position = (selection.get("position") or "top").strip().lower()
-        position_weight = 1 if position == "bottom" else 0
-
-        return (normalized_page, position_weight)
+    zoho_ids: Set[str] = set()
+    for doc in expanded_docs:
+        zoho_id = doc.get("branch_parent_id") or doc.get("school_id")
+        if zoho_id:
+            zoho_ids.add(zoho_id)
+    zoho_refs = [school_profiles._zoho_details_doc_ref(db, zoho_id) for zoho_id in zoho_ids]
+    zoho_snapshot_map: Dict[str, Dict[str, Any]] = {}
+    if zoho_refs:
+        for snapshot in db.get_all(zoho_refs):
+            zoho_snapshot_map[snapshot.id] = snapshot.to_dict() or {}
 
     schools_with_details: List[SchoolWithSelections] = []
 
@@ -764,49 +785,13 @@ def get_all_schools_with_selections(
         if not school_id:
             continue
         zoho_main_id = doc.get("branch_parent_id") or school_id
-        zoho_doc = school_profiles._zoho_details_doc_ref(db, zoho_main_id).get()
-        zoho_details = zoho_doc.to_dict() if zoho_doc.exists else {}
+        zoho_details = zoho_snapshot_map.get(zoho_main_id) or {}
         doc["zoho_customer_id"] = zoho_details.get("customer_id")
         doc["grade_default_labels"] = zoho_details.get("grade_labels")
         doc["grade_unique_values"] = zoho_details.get("grade_unique_values")
 
-
         base_school = school_profiles.build_school_from_record(doc)
-
-        grade_map: Dict[str, List[RhymeSelectionDetail]] = {}
-
-        for grade, selections in selections_by_school.get(school_id, {}).items():
-            sorted_selections = sorted(selections, key=sort_key)
-            detailed_selections: List[RhymeSelectionDetail] = []
-
-            for selection in sorted_selections:
-                page_index_raw = selection.get("page_index", 0)
-                try:
-                    page_index = int(page_index_raw)
-                except (TypeError, ValueError):
-                    page_index = 0
-
-                pages_raw = selection.get("pages", 0)
-                try:
-                    pages_value = float(pages_raw)
-                except (TypeError, ValueError):
-                    pages_value = 0.0
-
-                detailed_selections.append(
-                    RhymeSelectionDetail(
-                        id=selection.get("id"),
-                        page_index=page_index,
-                        rhyme_code=selection.get("rhyme_code"),
-                        rhyme_name=selection.get("rhyme_name"),
-                        pages=pages_value,
-                        position=selection.get("position"),
-                        timestamp=selection.get("timestamp"),
-                    )
-                )
-
-            grade_map[grade] = detailed_selections
-
-        total_selections = sum(len(items) for items in grade_map.values())
+        total_selections = selections_count.get(school_id, 0)
         last_updated = latest_selection_timestamp.get(school_id) or doc.get("timestamp")
 
         schools_with_details.append(
@@ -814,7 +799,6 @@ def get_all_schools_with_selections(
                 **base_school.dict(),
                 total_selections=total_selections,
                 last_updated=last_updated,
-                grade_selections=grade_map,
             )
         )
 

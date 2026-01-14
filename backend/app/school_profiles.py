@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import random
-import string
 from datetime import datetime
 import json
 from typing import Any, Dict, Iterable, List, Literal, Optional, Set, Tuple
@@ -27,7 +25,10 @@ GRADE_KEYS: Tuple[GradeKey, ...] = ("playgroup", "nursery", "lkg", "ukg")
 
 FORM_UNSET = object()
 
-SCHOOL_ID_ALPHABET = string.ascii_uppercase + string.digits
+SCHOOL_ID_START = 10100
+SCHOOL_ID_COUNTER_COLLECTION = "metadata"
+SCHOOL_ID_COUNTER_DOC_ID = "school_id_counter"
+SCHOOL_ID_COUNTER_FIELD = "next_id"
 
 BranchStatus = Literal["active", "inactive"]
 BRANCH_STATUS_ACTIVE: BranchStatus = "active"
@@ -372,6 +373,7 @@ class SchoolCreatePayload(BaseModel):
         school_name: str = Form(...),
         email: EmailStr = Form(...),
         phone: str = Form(...),
+        address: Optional[str] = Form(default=None),
         tagline: Optional[str] = Form(default=None),
         city: Optional[str] = Form(default=None),
         state: Optional[str] = Form(default=None),
@@ -397,6 +399,7 @@ class SchoolCreatePayload(BaseModel):
             state=state,
             pin=pin,
             website=website,
+            address=address,
             principal_name=principal_name,
             principal_email=principal_email,
             principal_phone=principal_phone,
@@ -850,13 +853,40 @@ def locate_school_record(
     return parent_snapshot.reference, branch_data, True
 
 
-def generate_school_id(db: firestore.Client, length: int = 5, attempts: int = 32) -> str:
-    for _ in range(attempts):
-        candidate = "".join(random.choices(SCHOOL_ID_ALPHABET, k=length))
-        doc_ref = db.collection("schools").document(candidate)
-        if not doc_ref.get().exists:
-            return candidate
-    raise HTTPException(status_code=500, detail="Unable to allocate a new school id")
+def allocate_school_id(
+    db: firestore.Client,
+    start_value: int = SCHOOL_ID_START,
+) -> str:
+    """Atomically increment and return the next numeric school id."""
+    counter_ref = (
+        db.collection(SCHOOL_ID_COUNTER_COLLECTION)
+        .document(SCHOOL_ID_COUNTER_DOC_ID)
+    )
+
+    @firestore.transactional
+    def _transaction(transaction: firestore.Transaction) -> str:
+        snapshot = counter_ref.get(transaction=transaction)
+        candidate = start_value
+        if snapshot.exists:
+            data = snapshot.to_dict() or {}
+            stored = data.get(SCHOOL_ID_COUNTER_FIELD)
+            if isinstance(stored, int) and stored >= start_value:
+                candidate = stored
+
+        if snapshot.exists:
+            transaction.update(
+                counter_ref,
+                {SCHOOL_ID_COUNTER_FIELD: candidate + 1},
+            )
+        else:
+            transaction.set(
+                counter_ref,
+                {SCHOOL_ID_COUNTER_FIELD: candidate + 1},
+            )
+        return str(candidate)
+
+    transaction = db.transaction()
+    return _transaction(transaction)
 
 
 def create_school_profile(
@@ -882,7 +912,7 @@ def create_school_profile(
             detail="A school with this phone number already exists. Please use a different phone number.",
         )
 
-    school_id = generate_school_id(db)
+    school_id = allocate_school_id(db)
     now = datetime.utcnow()
 
     owner_email_input = _clean_optional_string(str(payload.email) if payload.email else None)
@@ -974,7 +1004,7 @@ def create_branch_profile(
 
     normalized_branch_email = _ensure_unique_email(db, str(payload.coordinator_email), "branch email")
 
-    branch_id = generate_school_id(db)
+    branch_id = allocate_school_id(db)
     now = datetime.utcnow()
 
     address = _clean_optional_string(payload.address)

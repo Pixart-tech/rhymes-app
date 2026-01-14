@@ -23,8 +23,8 @@ class CoverUploaderApp:
         self.root.title("Cover Page Uploader")
 
         self.folder_var = StringVar()
-        self.upload_url_var = StringVar(value="https://example.com/api/upload")
-        self.finalize_url_var = StringVar(value="https://example.com/api/mark-complete")
+        self.upload_url_var = StringVar(value="http://31.97.236.164/api/cover-uploads")
+        self.finalize_url_var = StringVar(value="http://31.97.236.164/api/mark-complete")
         self.status_var = StringVar(value="Idle")
         self.progress_var = DoubleVar(value=0.0)
         self.progress_count_var = StringVar(value="0 / 0")

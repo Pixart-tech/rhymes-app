@@ -23,6 +23,18 @@ from ..models import School
 router = APIRouter()
 
 
+def _lookup_zoho_customer_id(
+    school_id: Optional[str], zoho_cache: Dict[str, Optional[str]]
+) -> Optional[str]:
+    if not school_id:
+        return None
+    if school_id in zoho_cache:
+        return zoho_cache[school_id]
+    customer_id = school_profiles.get_zoho_customer_id(db, school_id)
+    zoho_cache[school_id] = customer_id
+    return customer_id
+
+
 def _build_workspace_user(record: Dict[str, Any]) -> WorkspaceUser:
     return WorkspaceUser(
         uid=record["uid"],
@@ -40,9 +52,11 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
     workspace_user = _build_workspace_user(user_record)
+    zoho_cache: Dict[str, Optional[str]] = {}
     schools: List[School] = []
     seen_branch_ids = set()
     branch_parent_ids: List[str] = []
+
     for school_id in workspace_user.school_ids:
         if not school_id:
             continue
@@ -53,13 +67,16 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
         record = snapshot.to_dict() or {}
         record.setdefault("id", snapshot.id)
         record.setdefault("school_id", record.get("school_id") or snapshot.id)
+
         zoho_school_id = record.get("branch_parent_id") or record.get("school_id")
         if zoho_school_id:
-            record["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, zoho_school_id)
+            record["zoho_customer_id"] = _lookup_zoho_customer_id(zoho_school_id, zoho_cache)
+
         schools.append(school_profiles.build_school_from_record(record))
         branch_parent_id = record.get("school_id") or record.get("id")
         branch_parent_ids.append(branch_parent_id)
         seen_branch_ids.add(branch_parent_id)
+
         raw_branches = record.get("branches") or {}
         branch_entries = list(raw_branches.values()) if isinstance(raw_branches, dict) else list(raw_branches)
         for branch_entry in branch_entries:
@@ -68,23 +85,23 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
             branch_record = dict(branch_entry)
             branch_record.setdefault("id", branch_record.get("school_id") or branch_record.get("id"))
             branch_record.setdefault("school_id", branch_record.get("school_id") or branch_record.get("id"))
-            branch_parent_id = record.get("school_id") or record.get("id")
             branch_record.setdefault("branch_parent_id", branch_parent_id)
             branch_record["zoho_customer_id"] = record.get("zoho_customer_id")
             seen_branch_ids.add(branch_record["school_id"])
             schools.append(school_profiles.build_school_from_record(branch_record))
+
     for parent_id in set(branch_parent_ids):
         branch_docs_query = (
             db.collection("schools").where("branch_parent_id", "==", parent_id).stream()
         )
+        zoho_customer_id = _lookup_zoho_customer_id(parent_id, zoho_cache)
         for branch_doc in branch_docs_query:
             branch_data = branch_doc.to_dict() or {}
             branch_id = branch_data.get("school_id") or branch_doc.id
             if branch_id in seen_branch_ids:
                 continue
-            branch_parent_id = parent_id
-            branch_data.setdefault("branch_parent_id", branch_parent_id)
-            branch_data["zoho_customer_id"] = school_profiles.get_zoho_customer_id(db, branch_parent_id)
+            branch_data.setdefault("branch_parent_id", parent_id)
+            branch_data["zoho_customer_id"] = zoho_customer_id
             branch = school_profiles.build_school_from_record(branch_data)
             schools.append(branch)
             seen_branch_ids.add(branch_id)
