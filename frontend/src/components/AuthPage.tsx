@@ -424,6 +424,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         const response = await axios.get<WorkspaceSession>(`${API}/users/me`, {
           headers: { Authorization: `Bearer ${token}` }
         });
+        
         const session = response.data;
         hydrateWorkspace(session);
         lastFetchedWorkspaceUserId.current = currentUserId;

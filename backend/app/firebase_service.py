@@ -24,9 +24,10 @@ def _initialize_firestore_client() -> firestore.Client:
     # ✅ SINGLE SOURCE OF TRUTH
     credentials_path = os.environ.get(
         "GOOGLE_APPLICATION_CREDENTIALS",
-        "secure/firebase_key.json"  # local fallback
+        "D:\\rhymes app\\rhymes-app\\backend\\firebase_key.json"
+ # local fallback
     )
-
+    
     if emulator_host:
         cred = credentials.AnonymousCredentials()
     else:

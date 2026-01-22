@@ -71,11 +71,13 @@ export const buildFinalBookSelections = (
       ...selection,
       selectedOption: mergeWithCanonicalOption(selection.selectedOption),
     }));
+    const normalizedClassName = (className || '').toString().trim().toLowerCase();
     const gradeKey = className.toLowerCase();
     const classKey = gradeKey;
     const gradeLabel = gradeNames[gradeKey] || className;
     const displayLabel = gradeLabel || className;
     const coverMeta = coverSelections[className] || null;
+    const isPlaygroup = normalizedClassName === 'playgroup' || normalizedClassName === 'pg';
 
     const hasActive = (selection: SelectionRecord): boolean => {
       if (!selection.selectedOption) return false;
@@ -108,6 +110,11 @@ export const buildFinalBookSelections = (
 
     classSelections.forEach((selection) => {
       if (!selection.selectedOption) return;
+      const isAssessmentSubject =
+        (selection.subjectName || '').toString().trim().toLowerCase() === 'assessment';
+      if (isPlaygroup && isAssessmentSubject) {
+        return;
+      }
 
       const hasActiveCore = !!selection.selectedOption.coreId && !selection.skipCore;
       const hasActiveWork = !!selection.selectedOption.workId && !selection.skipWork;
@@ -126,6 +133,10 @@ export const buildFinalBookSelections = (
         selection.customAddonTitle ||
         selection.selectedOption.defaultAddonCoverTitle ||
         selection.selectedOption.label;
+      const isLanguageSubject =
+        (selection.subjectName || '').toString().trim().toLowerCase() === 'languages';
+      const gradeSubjectValue = (title: string) =>
+        isLanguageSubject ? displayLabel : `${displayLabel} : ${title}`;
 
       const base = {
         class: classKey,
@@ -144,7 +155,7 @@ export const buildFinalBookSelections = (
         finalData.push({
           ...base,
           component: 'core',
-          grade_subject: `${displayLabel} : ${coreTitle}`,
+          grade_subject: gradeSubjectValue(coreTitle),
           core: selection.selectedOption.coreId,
           core_cover: selection.selectedOption.coreCover,
           core_cover_title: selection.customCoreTitle || selection.selectedOption.defaultCoreCoverTitle,
@@ -158,7 +169,7 @@ export const buildFinalBookSelections = (
         finalData.push({
           ...base,
           component: 'work',
-          grade_subject: `${displayLabel} : ${workTitle}`,
+          grade_subject: gradeSubjectValue(workTitle),
           core: undefined,
           work: selection.selectedOption.workId,
           work_cover: selection.selectedOption.workCover,
@@ -172,7 +183,7 @@ export const buildFinalBookSelections = (
         finalData.push({
           ...base,
           component: 'addon',
-          grade_subject: `${displayLabel} : ${addonTitle}`,
+          grade_subject: gradeSubjectValue(addonTitle),
           core: undefined,
           work: undefined,
           addOn: selection.selectedOption.addOnId,
@@ -183,20 +194,28 @@ export const buildFinalBookSelections = (
       }
     });
 
-    const normalizedClassName = (className || '').toString().trim().toLowerCase();
-    const isPlaygroup = normalizedClassName === 'playgroup' || normalizedClassName === 'pg';
-
-    if (!excludedSet.has(normalizedClassName) && !isPlaygroup) {
+    if (!excludedSet.has(normalizedClassName)) {
       // Skip assessment only when all three subjects are absent
       if (!hasCoreSubjects) {
         return;
       }
+      if (isPlaygroup) {
+        return;
+      }
+      const normalizedClass = (className || '').toString().trim().toLowerCase();
+      console.log('Building assessment for class:', className, 'normalized as:', normalizedClass);
+      console.log('Assessment variants:', assessmentVariants[className], assessmentVariants[normalizedClass]);
+      const variant = assessmentVariants[className] || assessmentVariants[normalizedClass] || 'WITH_MARKS';
+      console.log('Using assessment variant:', variant);
+      
+     
       const assessment = getAssessmentForClass(
         className,
         englishSelection,
         mathsSelection,
-        assessmentVariants[className] || 'WITH_MARKS'
+        variant
       );
+      console.log('Selected assessment:', assessment);
 
         if (assessment) {
           const assessmentTitle = customAssessmentTitles[className] || assessment.defaultCoreCoverTitle || assessment.label;
