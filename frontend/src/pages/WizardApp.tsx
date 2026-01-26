@@ -1474,11 +1474,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           showReturnToMenu={viewState === 'LANDING'}
           onReturnToMenu={handleReturnToMainMenu}
         />
-        <TermsModal
+        {/* <TermsModal
           open={showTermsModal}
             onAccept={handleAcceptTerms}
             onClose={handleDismissTerms}
-          />
+          /> */}
           <TitleCustomization
             classData={currentClassData}
             selections={selections}
@@ -1564,11 +1564,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           showReturnToMenu={viewState === 'LANDING'}
           onReturnToMenu={handleReturnToMainMenu}
         />
-          <TermsModal
+          {/* <TermsModal
             open={showTermsModal}
             onAccept={handleAcceptTerms}
             onClose={handleDismissTerms}
-          />
+          /> */}
           <ClassSummary 
             classData={currentClassData}
             selections={summaryClassSelections}
@@ -1586,9 +1586,9 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             onConfirm={() => {
               if (!readOnlySummary) {
                 markClassCompleted(currentClassData.name);
-                if (!hasAcceptedTerms) {
-                  setShowTermsModal(true);
-                }
+                // if (!hasAcceptedTerms) {
+                //   setShowTermsModal(true);
+                // }
               }
               handleGoHome();
             }}
@@ -1624,11 +1624,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           showReturnToMenu={viewState === 'LANDING'}
           onReturnToMenu={handleReturnToMainMenu}
         />
-        <TermsModal
+        {/* <TermsModal
           open={showTermsModal}
           onAccept={handleAcceptTerms}
           onClose={handleDismissTerms}
-        />
+        /> */}
         
         <div className="flex-1 flex flex-col items-center py-4 px-3 md:py-6 md:px-4">
             {/* Wizard header */}
@@ -1809,11 +1809,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         onReturnToMenu={handleReturnToMainMenu}
       />
 
-      <TermsModal
+      {/* <TermsModal
         open={showTermsModal}
         onAccept={handleAcceptTerms}
         onClose={handleDismissTerms}
-      />
+      /> */}
 
       <main className="flex-1 max-w-6xl mx-auto w-full p-4">
         {isFinalized && (
@@ -1825,7 +1825,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             </div>
           </div>
         )}
-        {needsTermsAcceptance && (
+        {/* {needsTermsAcceptance && (
           <div className="mb-6">
             <div className="max-w-3xl mx-auto bg-white border border-slate-200 rounded-xl shadow-sm p-4 md:p-5">
               <h3 className="text-lg font-bold text-slate-800 mb-1">Terms &amp; Conditions</h3>
@@ -1850,7 +1850,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
               </div>
             </div>
           </div>
-        )}
+        )} */}
         <div className="text-center mt-6 mb-10">
             <h2 className="text-4xl font-extrabold">Customise your Curriculum</h2>
             <p className="text-slate-600 mt-2">Select book sets for each grade level.</p>
@@ -2030,46 +2030,46 @@ type TermsModalProps = {
   onClose: () => void;
 };
 
-const TermsModal = ({ open, onAccept, onClose }: TermsModalProps) => {
-  if (!open) {
-    return null;
-  }
+// const TermsModal = ({ open, onAccept, onClose }: TermsModalProps) => {
+//   if (!open) {
+//     return null;
+//   }
 
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-5 md:p-6 border border-slate-200">
-        <h3 className="text-xl font-bold text-slate-800 mb-2">Terms &amp; Conditions</h3>
-        <p className="text-sm text-slate-700 leading-relaxed">
+//   return (
+//     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+//       <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-5 md:p-6 border border-slate-200">
+//         <h3 className="text-xl font-bold text-slate-800 mb-2">Terms &amp; Conditions</h3>
+//         <p className="text-sm text-slate-700 leading-relaxed">
 
-Please check the selections thoroughly, as these will be used for book printing.<br></br>
+// Please check the selections thoroughly, as these will be used for book printing.<br></br>
 
-All selections made by the customer are final.<br></br>
+// All selections made by the customer are final.<br></br>
 
-Any changes made after the final selection/confirmation may or may not be reflected in the printed books.<br></br>
+// Any changes made after the final selection/confirmation may or may not be reflected in the printed books.<br></br>
 
-If you make any changes or edits to the initial book selection after submitting/confirming it, you must immediately inform your sales representative so we can consider the updated version for printing.<br></br>
+// If you make any changes or edits to the initial book selection after submitting/confirming it, you must immediately inform your sales representative so we can consider the updated version for printing.<br></br>
 
-Printing will be processed based on the latest version received and confirmed by our team/sales representative.<br></br>
+// Printing will be processed based on the latest version received and confirmed by our team/sales representative.<br></br>
 
-Thank you.
-        </p>
-        <div className="mt-5 flex flex-col sm:flex-row sm:justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
-          >
-            Close
-          </button>
-          <button
-            type="button"
-            onClick={onAccept}
-            className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700"
-          >
-            Accept
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
+// Thank you.
+//         </p>
+//         <div className="mt-5 flex flex-col sm:flex-row sm:justify-end gap-2">
+//           <button
+//             type="button"
+//             onClick={onClose}
+//             className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
+//           >
+//             Close
+//           </button>
+//           <button
+//             type="button"
+//             onClick={onAccept}
+//             className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700"
+//           >
+//             Accept
+//           </button>
+//         </div>
+//       </div>
+//     </div>
+//   );
+// };

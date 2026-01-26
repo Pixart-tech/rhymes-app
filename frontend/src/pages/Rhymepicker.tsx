@@ -2032,7 +2032,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
       if (newPages > 0.5) {
         return true;
       }
-
+    
       if (existingPages > 0.5) {
         return true;
       }
