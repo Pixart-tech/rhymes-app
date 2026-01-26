@@ -366,7 +366,7 @@ const CoverSelection = () => {
       const base = API_BASE_URL || '/api';
       const token = await getIdToken?.();
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-      console.log('Fetching saved cover selections for school ID:', headers);
+      
       const response = await fetch(`${base}/cover-selections/${schoolId}`, { headers });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);

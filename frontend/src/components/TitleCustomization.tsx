@@ -220,7 +220,7 @@ const TitleCustomization: React.FC<TitleCustomizationProps> = ({
       };
     });
 
-    console.log(updatedSelections);
+    
     
     onUpdateSelections(updatedSelections);
     setHasUnsavedChanges(false);

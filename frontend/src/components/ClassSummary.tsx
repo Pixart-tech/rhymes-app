@@ -136,12 +136,33 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   const handleSkipCore = (e: React.MouseEvent, subjectName: string, optionTypeId: string) => {
     if (readOnly) return;
     e.stopPropagation();
+
     const updated = selections.map(s => {
         if (matchesSelection(s, subjectName, optionTypeId)) {
             return { ...s, skipCore: true };
         }
         return s;
     });
+
+    const lower = (value: string) => value?.toString().trim().toLowerCase();
+    
+    const englishSelection = updated.find(
+    (s) => lower(s.subjectName) === "english" && hasActiveBook(s)
+    )?.selectedOption || null;
+    const mathsSelection = updated.find(
+    (s) => lower(s.subjectName) === "maths" && hasActiveBook(s)
+    )?.selectedOption || null;
+    const evsSelection = updated.find(
+        (s) => lower(s.subjectName) === "evs" && hasActiveBook(s)
+    )?.selectedOption || null;
+
+    // console.log('After skipping core, checking active core subjects:', {
+    //     englishSelection,
+    //     mathsSelection,
+    //     evsSelection
+    // });
+
+    /* 
     const hasActiveCore = updated.some((s) => {
       const subj = normalize(s.subjectName);
       if (subj === 'assessment') return false;
@@ -152,8 +173,9 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         !!s.selectedOption?.coreId &&
         !s.skipCore
       );
-    });
-    
+    });*/
+
+    const hasActiveCore = englishSelection && mathsSelection && evsSelection;
     
     const cleaned = hasActiveCore
       ? updated
@@ -184,7 +206,34 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
         return s;
     });
-    onUpdateSelections(newSelections);
+
+    const lower = (value: string) => value?.toString().trim().toLowerCase();
+    
+    const englishSelection = newSelections.find(
+    (s) => lower(s.subjectName) === "english" && hasActiveBook(s)
+    )?.selectedOption || null;
+    const mathsSelection = newSelections.find(
+    (s) => lower(s.subjectName) === "maths" && hasActiveBook(s)
+    )?.selectedOption || null;
+    const evsSelection = newSelections.find(
+        (s) => lower(s.subjectName) === "evs" && hasActiveBook(s)
+    )?.selectedOption || null;
+
+    console.log('After skipping core, checking active core subjects:', {
+        englishSelection,
+        mathsSelection,
+        evsSelection
+    });
+
+    const hasActiveCore = englishSelection && mathsSelection && evsSelection;
+    
+    const cleaned = hasActiveCore
+      ? newSelections
+      : newSelections.filter(
+          (s) => !(normalize(s.className) === lowerClassName && normalize(s.subjectName) === 'assessment')
+        );
+
+    onUpdateSelections(cleaned);
   };
 
   const handleRestoreWorkbook = (e: React.MouseEvent, subjectName: string, optionTypeId: string) => {
@@ -208,7 +257,34 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
         return s;
     });
-    onUpdateSelections(newSelections);
+
+    const lower = (value: string) => value?.toString().trim().toLowerCase();
+    
+    const englishSelection = newSelections.find(
+    (s) => lower(s.subjectName) === "english" && hasActiveBook(s)
+    )?.selectedOption || null;
+    const mathsSelection = newSelections.find(
+    (s) => lower(s.subjectName) === "maths" && hasActiveBook(s)
+    )?.selectedOption || null;
+    const evsSelection = newSelections.find(
+        (s) => lower(s.subjectName) === "evs" && hasActiveBook(s)
+    )?.selectedOption || null;
+
+    // console.log('After skipping core, checking active core subjects:', {
+    //     englishSelection,
+    //     mathsSelection,
+    //     evsSelection
+    // });
+
+    const hasActiveCore = englishSelection && mathsSelection && evsSelection;
+    
+    const cleaned = hasActiveCore
+      ? newSelections
+      : newSelections.filter(
+          (s) => !(normalize(s.className) === lowerClassName && normalize(s.subjectName) === 'assessment')
+        );
+
+    onUpdateSelections(cleaned);
   };
 
   const handleRestoreAddon = (e: React.MouseEvent, subjectName: string, optionTypeId: string) => {
@@ -238,18 +314,18 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
       onExcludeAssessment(classData.name);
   };
 
-  const handleDropAssessmentDoNotExclude = ( subjectName: string = 'Assessment', optionTypeId?: string) => {
-      if (readOnly) return;
-      // Remove any explicit assessment selection entries, mirroring other drop handlers
-      const filtered = selections.filter((s) =>
-          normalize(s.className) !== lowerClassName ||
-          normalize(s.subjectName) !== 'assessment' ||
-          (optionTypeId && s.selectedOption?.typeId !== optionTypeId)
-      );
-      if (filtered.length !== selections.length) {
-        onUpdateSelections(filtered);
-      }
-  };
+//   const handleDropAssessmentDoNotExclude = ( subjectName: string = 'Assessment', optionTypeId?: string) => {
+//       if (readOnly) return;
+//       // Remove any explicit assessment selection entries, mirroring other drop handlers
+//       const filtered = selections.filter((s) =>
+//           normalize(s.className) !== lowerClassName ||
+//           normalize(s.subjectName) !== 'assessment' ||
+//           (optionTypeId && s.selectedOption?.typeId !== optionTypeId)
+//       );
+//       if (filtered.length !== selections.length) {
+//         onUpdateSelections(filtered);
+//       }
+//   };
 
   const handleRestoreAssessment = (e: React.MouseEvent, subjectName: string = 'Assessment', optionTypeId?: string) => {
       if (readOnly) return;
@@ -413,7 +489,11 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
       const mathsSelection = classSelections.find(
         (s) => lower(s.subjectName) === "maths" && hasActiveBook(s)
       )?.selectedOption || null;
-          const assessment = getAssessmentForClass(classData.name, englishSelection, mathsSelection, currentAssessmentVariant);
+      const evsSelection = classSelections.find(
+          (s) => lower(s.subjectName) === "evs" && hasActiveBook(s)
+        )?.selectedOption || null;
+        
+          const assessment = getAssessmentForClass(classData.name, englishSelection, mathsSelection, evsSelection, currentAssessmentVariant);
 
       // Render assessment when not explicitly excluded; rely on restore banner instead of showing dropped row.
         const isServerMissing = serverMissingSet.has(lowerClassName);
@@ -446,12 +526,12 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   const hasActiveSelection = classSelections.some((s) => hasActiveBook(s));
   const isAssessmentMissing = hasActiveCoreSubjects && !hasAssessmentBook && !hasExcludedAssessment;
   // Show restore only when the server snapshot lacks assessment for this class and there is no local undo row.
-  const showServerRestoreBanner =
-    canMutate &&
-    serverMissingSet.has(lowerClassName) &&
-    hasActiveCoreSubjects &&
-    !hasAssessmentBook &&
-    !hasExcludedAssessment;
+//   const showServerRestoreBanner =
+//     canMutate &&
+//     serverMissingSet.has(lowerClassName) &&
+//     hasActiveCoreSubjects &&
+//     !hasAssessmentBook &&
+//     !hasExcludedAssessment;
   const hasAnySelections = classSelections.length > 0 && hasActiveSelection;
   const displayGradeLabel = gradeLabel || classData.name;
 
@@ -478,7 +558,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         </div>
 
         <div className="p-2 md:p-6 bg-slate-50/50">
-          {showServerRestoreBanner && (
+          {/* {showServerRestoreBanner && (
             <div className="mb-3 flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs md:text-sm text-blue-800">
               <span>Assessment is missing for this class. Restore it to include in selections.</span>
               <button
@@ -489,7 +569,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                 Restore Assessment
               </button>
             </div>
-          )}
+          )} */}
 
           {books.length === 0 ? (
              <div className="text-center py-10 text-slate-500 italic text-sm">
@@ -560,7 +640,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                                 </div>
                                 
                                 {/* Assessment Variant Selector */}
-                                {isAssessmentBook(book) && !book.isExcluded && (
+                                {/* {isAssessmentBook(book) && !book.isExcluded && (
                                     <div className="mt-2 flex items-center gap-3">
                                         <label className="flex items-center gap-1.5 cursor-pointer">
                                             <input 
@@ -585,7 +665,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                                             <span className="text-xs text-slate-600">Without Marks</span>
                                         </label>
                                     </div>
-                                )}
+                                )} */}
                             </div>
 
                             {/* Type Badge (Desktop Only) */}

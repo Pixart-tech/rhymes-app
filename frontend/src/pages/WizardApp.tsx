@@ -9,7 +9,7 @@ import { Check, Book, Home, ChevronLeft, Info, Square, CheckSquare, Star } from 
 import { buildFinalBookSelections } from '../lib/bookSelectionUtils';
 import { useAuth } from '../hooks/useAuth';
 import { API_BASE_URL, normalizeAssetUrl } from '../lib/utils';
-import { loadPersistedAppState } from '../lib/storage';
+import { loadPersistedAppState, savePersistedAppState } from '../lib/storage';
 import { toast } from 'sonner';
 const SIGNATURE_FIELDS = [
   'class',
@@ -253,7 +253,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     return selectionSignature !== lastSavedSelectionSignature.current;
   }, [selectionSignature, selections.length, savedClassSignatures]);
   const needsTermsAcceptance = !isFinalized && hasPendingSelections && !hasAcceptedTerms;
-  const canFinish = !isFinalized && hasPendingSelections && finishStatus !== 'success' && hasAcceptedTerms;
+  const canFinish = !isFinalized && hasPendingSelections && finishStatus !== 'success'; //&& hasAcceptedTerms;
 
   useEffect(() => {
     if (finishStatus === 'success' && selectionSignature !== lastSavedSelectionSignature.current) {
@@ -282,15 +282,18 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const currentSubject = currentClassData ? currentClassData.subjects[currentSubjectIndex] : null;
 
   const regenerateAssessmentForClass = (className: string, source: SelectionRecord[]) => {
+    
     const targetKey = normalizeClassKey(className);
     const classSelections = source.filter((s) => normalizeClassKey(s.className) === targetKey);
     if (isPlaygroupClass(className)) {
       return classSelections.filter((s) => normalizeClassKey(s.subjectName) !== 'assessment');
     }
-    const { englishSelection, mathsSelection, hasAny } = getActiveCoreSelections(classSelections);
+    const { englishSelection, mathsSelection, evsSelection, hasAllCore } = getActiveCoreSelections(classSelections);
 
     const variant = getAssessmentVariantForClass(className);
-    const assessmentOpt = hasAny ? getAssessmentForClass(className, englishSelection, mathsSelection, variant) : null;
+    const assessmentOpt = hasAllCore
+      ? getAssessmentForClass(className, englishSelection, mathsSelection, evsSelection, variant)
+      : null;
 
     const withoutAssessment = classSelections.filter(
       (s) => normalizeClassKey(s.subjectName) !== 'assessment'
@@ -337,7 +340,8 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       classSelections.find((s) => s.subjectName === 'Maths' && isActive(s))?.selectedOption || null;
     const evsSelection =
       classSelections.find((s) => s.subjectName === 'EVS' && isActive(s))?.selectedOption || null;
-    return { englishSelection, mathsSelection, evsSelection, hasAny: Boolean(englishSelection || mathsSelection || evsSelection) };
+    const hasAllCore = Boolean(englishSelection && mathsSelection && evsSelection);
+    return { englishSelection, mathsSelection, evsSelection, hasAllCore };
   };
 
   const calculateBookCount = (className: string) => {
@@ -389,12 +393,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       !excludedSet.has(normalizedClass) &&
       !excludedSet.has(normalizedClassOrPlaygroup)
     ) {
-        const { englishSelection, mathsSelection, evsSelection, hasAny } = getActiveCoreSelections(classSelections);
-        if (hasAny) {
+        const { englishSelection, mathsSelection, evsSelection, hasAllCore } = getActiveCoreSelections(classSelections);
+        if (hasAllCore) {
           const assessment = getAssessmentForClass(
             className,
             englishSelection,
             mathsSelection,
+            evsSelection,
             assessmentVariants[className] || 'WITH_MARKS'
           );
           // Count only when an assessment payload exists (summary shows the same).
@@ -666,7 +671,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         });
       }
 
-      console.log('Multi-select next selections:', nextSelections);
+      
 
       setWizardSelections(nextSelections);
       return;
@@ -702,7 +707,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     } else {
       if (currentClassData) {
         
-        console.log(newSelectedRecord);
+        
 
         const updatedClassSelections = regenerateAssessmentForClass(currentClassData.name, newSelectedRecord ? newSelectedRecord : wizardSelections);
 
@@ -766,12 +771,12 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
     // If assessment is absent, add it back using current core selections.
     const classSelections = selections.filter((s) => normalizeClassKey(s.className) === target);
-    const { englishSelection, mathsSelection, hasAny } = getActiveCoreSelections(classSelections);
-    if (!hasAny) {
+    const { englishSelection, mathsSelection, evsSelection, hasAllCore } = getActiveCoreSelections(classSelections);
+    if (!hasAllCore) {
       return;
     }
     const variant = getAssessmentVariantForClass(className);
-    const assessmentOpt = getAssessmentForClass(className, englishSelection, mathsSelection, variant);
+    const assessmentOpt = getAssessmentForClass(className, englishSelection, mathsSelection, evsSelection, variant);
     if (!assessmentOpt) {
       return;
     }
@@ -807,7 +812,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   };
   
   const handleAssessmentVariantChange = (className: string, variant: AssessmentVariant) => {
-    console.log('Updating variant for', className, 'to', variant);
+    
     const normalized = normalizeGradeKey(className);
     setAssessmentVariants((prev) => ({
       ...prev,
@@ -824,11 +829,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       if (isPlaygroupClass(className)) {
         return others;
       }
-      const { englishSelection, mathsSelection, hasAny } = getActiveCoreSelections(classSelections);
-      if (!hasAny) {
+      const { englishSelection, mathsSelection, evsSelection, hasAllCore } = getActiveCoreSelections(classSelections);
+      if (!hasAllCore) {
         return others;
       }
-      const assessmentOpt = getAssessmentForClass(className, englishSelection, mathsSelection, variant);
+      const assessmentOpt = getAssessmentForClass(className, englishSelection, mathsSelection, evsSelection, variant);
       if (!assessmentOpt) {
         return others;
       }
@@ -908,13 +913,14 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   };
 
   const handleFinishAll = async () => {
-    if (!hasAcceptedTerms) {
-      setShowTermsModal(true);
-      toast.error('Please accept the terms and conditions before finishing.');
-      return;
-    }
+    // if (true) {
+    //   setShowTermsModal(false);
+    //   toast.error('Please accept the terms and conditions before finishing.');
+    //   return;
+    // }
 
     setFinishStatus('saving');
+    
     const saved = await persistFinalSelections();
     if (!saved) {
       setFinishStatus('error');
@@ -945,8 +951,20 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     setCurrentSubjectIndex(0);
     setViewingInfoForOption(null);
     setSkipWorkMap({});
+    
     // Navigate then show toast so it renders on the main menu Toaster
+    try {
+      const persisted = loadPersistedAppState() || {};
+      savePersistedAppState({
+        ...persisted,
+        selectedMode: null,
+        selectedGrade: null,
+      });
+    } catch {
+      // ignore storage errors
+    }
     handleReturnToMainMenu();
+    
     setTimeout(() => {
       toast.success('Book selections saved successfully');
     }, 150);
@@ -984,14 +1002,15 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const getCurrentAssessmentDetails = () => {
     if (!currentClassData) return null;
     const classSelections = selections.filter(s => s.className === currentClassData.name);
-    const { englishSelection, mathsSelection, evsSelection, hasAny } = getActiveCoreSelections(classSelections);
-    if (!hasAny) {
+    const { englishSelection, mathsSelection, evsSelection, hasAllCore } = getActiveCoreSelections(classSelections);
+    if (!hasAllCore) {
       return null;
     }
     return getAssessmentForClass(
       currentClassData.name,
       englishSelection,
       mathsSelection,
+      evsSelection,
       getAssessmentVariantForClass(currentClassData.name)
     );
   };
@@ -2021,7 +2040,18 @@ const TermsModal = ({ open, onAccept, onClose }: TermsModalProps) => {
       <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-5 md:p-6 border border-slate-200">
         <h3 className="text-xl font-bold text-slate-800 mb-2">Terms &amp; Conditions</h3>
         <p className="text-sm text-slate-700 leading-relaxed">
-          Curriculum may be subjected to changes. By accepting, you acknowledge that future updates may modify the current selections.
+
+Please check the selections thoroughly, as these will be used for book printing.<br></br>
+
+All selections made by the customer are final.<br></br>
+
+Any changes made after the final selection/confirmation may or may not be reflected in the printed books.<br></br>
+
+If you make any changes or edits to the initial book selection after submitting/confirming it, you must immediately inform your sales representative so we can consider the updated version for printing.<br></br>
+
+Printing will be processed based on the latest version received and confirmed by our team/sales representative.<br></br>
+
+Thank you.
         </p>
         <div className="mt-5 flex flex-col sm:flex-row sm:justify-end gap-2">
           <button

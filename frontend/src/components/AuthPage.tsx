@@ -417,6 +417,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
 
       try {
         const token = await getIdToken();
+        
         if (!token) {
           throw new Error('Unable to fetch Firebase token');
         }

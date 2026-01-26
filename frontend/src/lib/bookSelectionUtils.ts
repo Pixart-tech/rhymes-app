@@ -195,6 +195,7 @@ export const buildFinalBookSelections = (
     });
 
     if (!excludedSet.has(normalizedClassName)) {
+      
       // Skip assessment only when all three subjects are absent
       if (!hasCoreSubjects) {
         return;
@@ -203,19 +204,18 @@ export const buildFinalBookSelections = (
         return;
       }
       const normalizedClass = (className || '').toString().trim().toLowerCase();
-      console.log('Building assessment for class:', className, 'normalized as:', normalizedClass);
-      console.log('Assessment variants:', assessmentVariants[className], assessmentVariants[normalizedClass]);
+   
       const variant = assessmentVariants[className] || assessmentVariants[normalizedClass] || 'WITH_MARKS';
-      console.log('Using assessment variant:', variant);
       
      
       const assessment = getAssessmentForClass(
         className,
         englishSelection,
         mathsSelection,
+        evsSelection,
         variant
       );
-      console.log('Selected assessment:', assessment);
+      
 
         if (assessment) {
           const assessmentTitle = customAssessmentTitles[className] || assessment.defaultCoreCoverTitle || assessment.label;

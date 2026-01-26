@@ -205,7 +205,7 @@ export const SCHOOL_DATA: ClassData[] = [
         options: [
           { typeId: generateId(), label: "1-100 and 1-100 number names", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link: "pdf_u_math_1", info: "1-50 recap , 51-100 numbers and number names upto 100, Post math concepts , single digit addition and subtraction, introduction to time and division" },
           { typeId: generateId(), label: "101-200", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000409", addOnCover: "0406", addOnSpine: "U14", defaultAddonCoverTitle: "Maths 101-200", isRecommended: false, link: "pdf_u_math_2", info: "Add on book - From 101-200" },
-          { typeId: generateId(), label: "101-500", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000410", addOnCover: "0414", addOnSpine: "U15", defaultAddonCoverTitle: "Maths 101-500", isRecommended: false, link: "pdf_u_math_3", info: "Add on book - From 101-500" },
+          { typeId: generateId(), label: "101-500", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000410", addOnCover: "0415", addOnSpine: "U15", defaultAddonCoverTitle: "Maths 101-500", isRecommended: false, link: "pdf_u_math_3", info: "Add on book - From 101-500" },
         ]
       },
       {
@@ -273,23 +273,26 @@ export const getAssessmentForClass = (
     className: string, 
     englishOpt: BookOption | null, 
     mathsOpt: BookOption | null,
+    evsOpt: BookOption | null,
     variant: AssessmentVariant
 ): { label: string, coreId: string, coreCover: string, coreSpine: string, defaultCoreCoverTitle: string, link: string } | null => {
-  if (!englishOpt && !mathsOpt) return null;
+  
+  if (!englishOpt || !mathsOpt || !evsOpt) return null;
   
   const normalizedClassName = (className || '').trim().toLowerCase();
   const isWithMarks = variant === 'WITH_MARKS';
   const defaultCoreCoverTitle = "Assessment";
   if (normalizedClassName === "nursery") {
-     if (!englishOpt || !mathsOpt) return null;
-     const eng = englishOpt.label.toLowerCase();
-     const mat = mathsOpt.label;
+     //if (!englishOpt || !mathsOpt) return null;
+     const eng = englishOpt?.label.toLowerCase();
+     const mat = mathsOpt?.label;
 
-     const is50 = mat.includes("1 to 50");
+     const is50 = mat ? mat.includes("1 to 50"): false;
      
      const coreCover = "0207";
 
-     if (eng.includes("abcd caps") && !eng.includes("small")) {
+
+     if (!eng  || (eng?.includes("abcd caps") && !eng.includes("small"))) {
         return is50 
             ? { 
                 label: `ABCD 1-50${isWithMarks ? '' : ' (NM)'}`, 
@@ -308,7 +311,7 @@ export const getAssessmentForClass = (
                 link: "pdf_n_ass_abcd_20" 
               };
      }
-     if (eng.includes("lti caps")) {
+     if (eng?.includes("lti caps")) {
         return is50 
             ? { 
                 label: `LTI 1-50${isWithMarks ? '' : ' (NM)'}`, 
@@ -327,7 +330,7 @@ export const getAssessmentForClass = (
                 link: "pdf_n_ass_lti_20" 
               };
      }
-     if (eng.includes("satpin small")) {
+     if (eng?.includes("satpin small")) {
         return is50 
             ? { 
                 label: `satpin 1-50${isWithMarks ? '' : ' (NM)'}`, 
@@ -346,7 +349,7 @@ export const getAssessmentForClass = (
                 link: "pdf_n_ass_satpin_20" 
               };
      }
-     if (eng.includes("abcd small")) {
+     if (eng?.includes("abcd small")) {
         return is50 
             ? { 
                 label: `abcd 1-50${isWithMarks ? '' : ' (NM)'}`, 
@@ -365,7 +368,7 @@ export const getAssessmentForClass = (
                 link: "pdf_n_ass_abcd_sm_20" 
               };
      }
-     if (eng.includes("abcd caps & small")) {
+     if (eng?.includes("abcd caps & small")) {
         return is50 
             ? { 
                 label: `AaBb 1-50${isWithMarks ? '' : ' (NM)'}`, 
@@ -387,10 +390,10 @@ export const getAssessmentForClass = (
   }
 
   if (normalizedClassName === "lkg") {
-     if (!englishOpt) return null;
-     const eng = englishOpt.label.toLowerCase();
+
+     const eng = englishOpt?.label.toLowerCase();
      const coreCover = "0307";
-     if (eng.includes("small + vowels")) {
+     if (!eng ||eng?.includes("small + vowels")) {
          return { 
             label: `Small 1-50${isWithMarks ? '' : ' (NM)'}`, 
             coreId: isWithMarks ? "100000312" : "100000314", 
@@ -400,7 +403,7 @@ export const getAssessmentForClass = (
             link: "pdf_l_ass_sm_50" 
          };
      }
-     if (eng.includes("caps + vowels")) {
+     if (eng?.includes("caps + vowels")) {
          return { 
             label: `Big1-50${isWithMarks ? '' : ' (NM)'}`, 
             coreId: isWithMarks ? "100000313" : "100000315", 
@@ -413,10 +416,10 @@ export const getAssessmentForClass = (
   }
 
   if (normalizedClassName === "ukg") {
-     if (!mathsOpt) return null;
-     const mat = mathsOpt.label;
+
+     const mat = mathsOpt?.label;
      const coreCover = "0408";
-     if (mat.includes("1-100") && mat.includes("number names")) {
+     if (!mat || (mat?.includes("1-100") && mat.includes("number names"))) {
          return { 
             label: `1-100${isWithMarks ? '' : ' (NM)'}`, 
             coreId: isWithMarks ? "100000412" : "100000415", 

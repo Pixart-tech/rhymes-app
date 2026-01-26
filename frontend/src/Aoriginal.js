@@ -740,18 +740,13 @@ const RhymeSelectionPage = ({ school, grade, onBack, onLogout }) => {
 
     const position = resolveRhymePosition(rhyme, { explicitPosition });
 
-    console.log("→ Deleting rhyme (request):", {
-      code: rhyme.code,
-      position,
-      currentPageIndex,
-      grade
-    });
+   
 
     try {
       const res = await axios.delete(
         `/api/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`
       );
-      console.log("← Delete response:", res.data);
+      
 
       setSelectedRhymes(prev => prev.filter(r => {
         if (Number(r.page_index) !== Number(currentPageIndex)) return true;

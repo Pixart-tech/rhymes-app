@@ -230,13 +230,13 @@ const ModeSelectionPage = ({
       gradient: 'from-blue-400 to-indigo-500',
       icon: BookMarked
     },
-    {
-      id: 'rhymes',
-      title: 'Rhymes',
-      description: 'Select and organise rhymes to build your customised binders.',
-      gradient: 'from-orange-400 to-red-400',
-      icon: Music
-    }
+    // {
+    //   id: 'rhymes',
+    //   title: 'Rhymes',
+    //   description: 'Select and organise rhymes to build your customised binders.',
+    //   gradient: 'from-orange-400 to-red-400',
+    //   icon: Music
+    // }
   ];
 
   return (
@@ -275,18 +275,22 @@ const ModeSelectionPage = ({
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
               {options.map((option) => {
+                
                 const IconComponent = option.icon;
                 const showCoverButton = !(option.id === 'cover' && coverStatus !== '1');
                 const isBooksOption = option.id === 'books';
                 const buttonLabel = isBooksOption && hasBookSelections ? 'View book selections' : `Explore ${option.title}`;
                 return (
+                  
                   <Card
                     key={option.id}
                     className="group h-full min-h-[220px] sm:min-h-[240px] flex flex-col cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg border border-slate-200 bg-white"
                     onClick={() => onModeSelect(option.id)}
                   >
                     <CardContent className="flex-1 flex flex-col justify-between p-3 sm:p-4 text-center gap-2">
+                      
                       <div className="space-y-2">
+                        
                         <div className={`w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-lg sm:text-xl shadow`}>
                           <IconComponent className="h-6 w-6 sm:h-7 sm:w-7" />
                         </div>
@@ -2254,18 +2258,18 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
 
     const position = resolveRhymePosition(rhyme, { explicitPosition });
 
-    console.log("→ Deleting rhyme (request):", {
-      code: rhyme.code,
-      position,
-      currentPageIndex,
-      grade
-    });
+    // console.log("→ Deleting rhyme (request):", {
+    //   code: rhyme.code,
+    //   position,
+    //   currentPageIndex,
+    //   grade
+    // });
 
     try {
       const res = await axios.delete(
         `/api/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`
       );
-      console.log("← Delete response:", res.data);
+      
 
       setSelectedRhymes(prev => {
         const filtered = prev.filter(r => {
@@ -3089,6 +3093,7 @@ export function RhymesWorkflowApp() {
     }
     try {
       const token = await getIdToken?.();
+      
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       const response = await axios.get(`${API}/cover-selections/${school.school_id}/exists`, {
         headers,
@@ -3144,6 +3149,7 @@ export function RhymesWorkflowApp() {
     bookPresenceFetchRef.current = { inFlight: true, schoolId: school.school_id };
     try {
       const token = await getIdToken?.();
+      
       if (!token) {
         setHasBookSelections(false);
         return;
@@ -3216,6 +3222,8 @@ export function RhymesWorkflowApp() {
       try {
         const statusHeaders: Record<string, string> = {};
         const token = await getIdToken?.();
+        
+        
         if (token) {
           statusHeaders.Authorization = `Bearer ${token}`;
         }
@@ -3454,7 +3462,8 @@ export function RhymesWorkflowApp() {
           onEditCoverDetails={handleEditCoverDetails}
           onCoverIntentChange={setCoverWorkflowIntent}
         />
-      ) : selectedMode === 'rhymes' ? (
+      ) : 
+      selectedMode === 'rhymes' ? (
         <RhymeSelectionPage
           school={school}
           grade={selectedGrade}
@@ -3464,7 +3473,8 @@ export function RhymesWorkflowApp() {
           isReadOnly={selectionsFrozen}
           isFrozen={selectionsFrozen}
         />
-      ) : selectedMode === 'cover' && selectedGrade ? (
+      ) : 
+      selectedMode === 'cover' && selectedGrade ? (
         <CoverPageWorkflow
           school={school}
           grade={selectedGrade}
