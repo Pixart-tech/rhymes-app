@@ -878,10 +878,13 @@ app = FastAPI(
     version="1.0.0",
     openapi_version="3.0.3",
 )
+
+"""
 origins = [
     
     "http://localhost:3000" , "http://192.168.0.102:3000" # remove * in production
 ]
+"""
 
 app.add_middleware(
     CORSMiddleware,
@@ -2071,23 +2074,23 @@ async def save_book_selections(
     return {"ok": True, "updated_at": now.isoformat()}
 
 
-@api_router.get("/book-selections/{school_id}/classes/{class_name}")
-def get_book_selection_for_class(
-    school_id: str, class_name: str, authorization: Optional[str] = Header(None)
-):
-    """Return saved book selection for a single class without streaming the entire collection."""
-    _verify_and_decode_token(authorization)
-    doc_id = _normalize_class_doc_id(class_name)
-    if not doc_id:
-        raise HTTPException(status_code=400, detail="class_name is required")
-    doc_ref = _book_collection_for_school(school_id).document(doc_id)
-    snapshot = doc_ref.get()
-    if not snapshot.exists:
-        raise HTTPException(status_code=404, detail="Class selection not found")
+# @api_router.get("/book-selections/{school_id}/classes/{class_name}")
+# def get_book_selection_for_class(
+#     school_id: str, class_name: str, authorization: Optional[str] = Header(None)
+# ):
+#     """Return saved book selection for a single class without streaming the entire collection."""
+#     _verify_and_decode_token(authorization)
+#     doc_id = _normalize_class_doc_id(class_name)
+#     if not doc_id:
+#         raise HTTPException(status_code=400, detail="class_name is required")
+#     doc_ref = _book_collection_for_school(school_id).document(doc_id)
+#     snapshot = doc_ref.get()
+#     if not snapshot.exists:
+#         raise HTTPException(status_code=404, detail="Class selection not found")
 
-    data = snapshot.to_dict() or {}
-    data.setdefault("class", data.get("class") or snapshot.id)
-    return data
+#     data = snapshot.to_dict() or {}
+#     data.setdefault("class", data.get("class") or snapshot.id)
+#     return data
 
 
 @api_router.get("/book-selections/{school_id}")

@@ -53,6 +53,7 @@ const buildStableObject = (value: any): any => {
   return result;
 };
 
+
 const normalizeItemForSignature = (item: any) => {
   if (!item || typeof item !== 'object') {
     return item;
@@ -254,6 +255,8 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   }, [selectionSignature, selections.length, savedClassSignatures]);
   const needsTermsAcceptance = !isFinalized && hasPendingSelections && !hasAcceptedTerms;
   const canFinish = !isFinalized && hasPendingSelections && finishStatus !== 'success'; //&& hasAcceptedTerms;
+  
+  
 
   useEffect(() => {
     if (finishStatus === 'success' && selectionSignature !== lastSavedSelectionSignature.current) {
@@ -497,6 +500,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   };
 
   const buildSelectionFromSavedItem = useCallback((className: string, item: any): SelectionRecord | null => {
+    
     const match = findOptionForSavedItem(className, item);
 
     const baseOption: BookOption =
@@ -622,6 +626,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   };
 
   const handleOptionSelect = (option: BookOption | null) => {
+
     if (!currentClassData || !currentSubject) return;
 
     // Any new change unlocks finalized state for editing
@@ -724,13 +729,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
   const handleUpdateSelection = (updatedSelections: SelectionRecord[]) => {
     // Merge updates for the affected class; preserve other classes to avoid accidental drops.
-    const targetClass =
-      updatedSelections.find((s) => s.className)?.className || currentClassData?.name || null;
-    if (!targetClass) {
+    if (!currentClassData) {
       setSelections(updatedSelections);
       return;
     }
-    const targetKey = normalizeClassKey(targetClass);
+
+    const targetKey = normalizeClassKey(currentClassData.name);
+    
     setSelections((prev) => {
       const retained = prev.filter((s) => normalizeClassKey(s.className) !== targetKey);
       const incoming = updatedSelections.filter((s) => normalizeClassKey(s.className) === targetKey);
@@ -1073,7 +1078,6 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       return gradeKeyLookup[key] || key;
     };
     const normalizeClassId = (value: string): string => normalizeClassKey(normalizeClassNameToEnabled(value));
-
     // Remove any subject with no active core/work/addon before building payload
     const cleanedSelections = selections
       .map((s) => ({ ...s, className: normalizeClassNameToEnabled(s.className) }))
@@ -1086,7 +1090,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         const isAssessment = (s.subjectName || '').toString().trim().toLowerCase() === 'assessment';
         return (hasActiveCore || hasActiveWork || hasActiveAddon) && (!isAssessment || hasActiveCore);
       });
-
+    
     const classesWithActive = new Set(
       cleanedSelections.map((s) => normalizeClassId(s.className)).filter(Boolean)
     );
@@ -1101,7 +1105,8 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       customAssessmentTitles,   
       latestGradeNames
     );
-
+    
+    
     const sanitizedSelections = finalSelections.map(
       ({ cover_theme_id, cover_theme_label, cover_colour_id, cover_colour_label, cover_status, ...rest }) => rest
     );
@@ -1505,6 +1510,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   if (viewState === 'SUMMARY' && currentClassData) {
     const classKey = normalizeClassKey(currentClassData.name);
     // Always render the summary from the current in-memory state (which is hydrated from the saved snapshot).
+    
     const candidateSelections = selections;
     const candidateExcluded = explicitExcludedAssessments;
     const candidateAssessmentVariants = assessmentVariants;
@@ -1547,13 +1553,14 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       const hasAddon = !!s.selectedOption.addOnId && !s.skipAddon;
       return hasCore || hasWork || hasAddon;
     });
-    const currentFinal = buildFinalBookSelections(
-      cleanedSelections,
-      summaryClassExcluded,
-      baseAssessmentVariants,
-      baseCustomAssessmentTitles,
-      latestGradeNames
-    );
+   
+    // const currentFinal = buildFinalBookSelections(
+    //   cleanedSelections,
+    //   summaryClassExcluded,
+    //   baseAssessmentVariants,
+    //   baseCustomAssessmentTitles,
+    //   latestGradeNames
+    // );
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
         <Header

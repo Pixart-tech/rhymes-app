@@ -220,16 +220,18 @@ const TitleCustomization: React.FC<TitleCustomizationProps> = ({
       };
     });
 
-    
-    
+
     onUpdateSelections(updatedSelections);
+    
     setHasUnsavedChanges(false);
+
   }, [classData.name, draftFor, onUpdateSelections, selections]);
 
   const handleNext = useCallback(() => {
     if (hasUnsavedChanges) {
       handleSaveDrafts();
     }
+    
     onNext();
   }, [handleSaveDrafts, hasUnsavedChanges, onNext]);
 

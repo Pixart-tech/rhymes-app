@@ -246,7 +246,6 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   };
 
   const handleSkipAddon = (e: React.MouseEvent, subjectName: string, optionTypeId: string) => {
-    
     if (readOnly) return;
     e.stopPropagation();
     const newSelections = selections.map(s => {
@@ -255,10 +254,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
         }
         return s;
     });
-    
 
-
-    
     const lower = (value: string) => value?.toString().trim().toLowerCase();
     
     const englishSelection = newSelections.find(
@@ -284,7 +280,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
       : newSelections.filter(
           (s) => !(normalize(s.className) === lowerClassName && normalize(s.subjectName) === 'assessment')
         );
-    
+
     onUpdateSelections(cleaned);
   };
 

@@ -396,7 +396,7 @@ export const getAssessmentForClass = (
      if (!eng ||eng?.includes("small + vowels")) {
          return { 
             label: `Small 1-50${isWithMarks ? '' : ' (NM)'}`, 
-            coreId: isWithMarks ? "100000312" : "100000314", 
+            coreId: isWithMarks ? "100000312" : "100000318", 
             coreCover, 
             coreSpine: isWithMarks ? "L7" : "L18",
             defaultCoreCoverTitle,
@@ -406,7 +406,7 @@ export const getAssessmentForClass = (
      if (eng?.includes("caps + vowels")) {
          return { 
             label: `Big1-50${isWithMarks ? '' : ' (NM)'}`, 
-            coreId: isWithMarks ? "100000313" : "100000315", 
+            coreId: isWithMarks ? "100000313" : "100000319", 
             coreCover, 
             coreSpine: isWithMarks ? "L17" : "L19",
             defaultCoreCoverTitle,

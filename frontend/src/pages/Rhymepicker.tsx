@@ -3132,6 +3132,7 @@ export function RhymesWorkflowApp() {
     inFlight: false,
     schoolId: null
   });
+
   const refreshBookSelectionsPresence = useCallback(async (force: boolean = false) => {
     if (!school?.school_id) {
       setHasBookSelections(false);
@@ -3149,6 +3150,11 @@ export function RhymesWorkflowApp() {
     bookPresenceFetchRef.current = { inFlight: true, schoolId: school.school_id };
     try {
       const token = await getIdToken?.();
+      console.log(token);
+      if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+      }
+      console.log(authLoading)
       
       if (!token) {
         setHasBookSelections(false);
@@ -3229,8 +3235,8 @@ export function RhymesWorkflowApp() {
         }
         if (!coverStatusFetchRef.current.inFlight || coverStatusFetchRef.current.schoolId !== school.school_id) {
           coverStatusFetchRef.current = { inFlight: true, schoolId: school.school_id };
-          const existsResp = await axios.get(`${API}/cover-selections/${school.school_id}/exists`, {
-            headers: statusHeaders,
+          const existsResp = await axios.get(`${API}/cover-status/${school.school_id}`, {
+            headers: statusHeaders, 
             validateStatus: () => true,
           });
           if (existsResp.status < 400) {

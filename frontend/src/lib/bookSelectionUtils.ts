@@ -1,3 +1,4 @@
+import { add } from 'date-fns';
 import { getAssessmentForClass, SCHOOL_DATA } from '../constants/constants';
 import { AssessmentVariant, BookOption, CoverSelectionMeta, FinalOutputItem, SelectionRecord } from '../types/types';
 
@@ -20,12 +21,13 @@ const canonicalOptionIndex: Record<string, BookOption> = (() => {
 const mergeWithCanonicalOption = (option: BookOption | null): BookOption | null => {
   if (!option) return null;
   const canonical =
+  
+    (option.addOnId && canonicalOptionIndex[`addon:${option.addOnId}`])||
     (option.coreId && canonicalOptionIndex[`core:${option.coreId}`]) ||
-    (option.workId && canonicalOptionIndex[`work:${option.workId}`]) ||
-    (option.addOnId && canonicalOptionIndex[`addon:${option.addOnId}`]);
+    (option.workId && canonicalOptionIndex[`work:${option.workId}`]);
 
   if (!canonical) return option;
-
+  
   return {
     ...option,
     coreCover: canonical.coreCover ?? option.coreCover,
@@ -57,6 +59,7 @@ export const buildFinalBookSelections = (
     (excludedAssessments || []).map((value) => (value || '').toString().trim().toLowerCase())
   );
 
+  
   selections.forEach((selection) => {
     if (!selectionsByClass[selection.className]) {
       selectionsByClass[selection.className] = [];
@@ -65,12 +68,17 @@ export const buildFinalBookSelections = (
   });
 
   const finalData: FinalOutputItem[] = [];
-
+  
+  
   Object.keys(selectionsByClass).forEach((className) => {
+    
     const classSelections = selectionsByClass[className].map((selection) => ({
       ...selection,
       selectedOption: mergeWithCanonicalOption(selection.selectedOption),
     }));
+
+    
+  
     const normalizedClassName = (className || '').toString().trim().toLowerCase();
     const gradeKey = className.toLowerCase();
     const classKey = gradeKey;
@@ -107,7 +115,9 @@ export const buildFinalBookSelections = (
         const subject = (item.subjectName || '').toString().trim().toLowerCase();
         return ['english', 'maths', 'evs'].includes(subject) && !!item.selectedOption;
       });
+    
 
+    
     classSelections.forEach((selection) => {
       if (!selection.selectedOption) return;
       const isAssessmentSubject =
@@ -129,10 +139,12 @@ export const buildFinalBookSelections = (
         selection.customWorkTitle ||
         selection.selectedOption.defaultWorkCoverTitle ||
         selection.selectedOption.label;
+      
       const addonTitle =
         selection.customAddonTitle ||
         selection.selectedOption.defaultAddonCoverTitle ||
         selection.selectedOption.label;
+     
       const isLanguageSubject =
         (selection.subjectName || '').toString().trim().toLowerCase() === 'languages';
       const gradeSubjectValue = (title: string) =>
@@ -178,8 +190,9 @@ export const buildFinalBookSelections = (
           addOn: undefined
         });
       }
-
+     
       if (hasActiveAddon) {
+        
         finalData.push({
           ...base,
           component: 'addon',
