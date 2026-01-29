@@ -39,17 +39,42 @@ const formatGradeLabelTitle = (grade: GradeKey): string => {
 };
 
 const SERVICE_OPTIONS: { value: SchoolServiceType; prompt: string }[] = [
-  { value: 'id_cards', prompt: 'Are you taking ID cards?'},
-  { value: 'report_cards', prompt: 'Are you taking report cards?'},
-  { value: 'certificates', prompt: 'Are you taking certificates?' }
+  { value: 'id_cards', prompt: 'Are you taking ID cards?' },
+  { value: 'report_cards', prompt: 'Are you taking report cards?' },
+  { value: 'certificates', prompt: 'Are you taking certificates?' },
+  { value: 'Pre-Written Nursery Set', prompt: 'Do you want the Pre-Written Nursery Set?' },
+  { value: 'Pre-Written LKG Set', prompt: 'Do you want the Pre-Written LKG Set?' },
+  { value: 'Pre-Written UKG Set', prompt: 'Do you want the Pre-Written UKG Set?' },
+  { value: 'Birthday  card', prompt: 'Do you want the Birthday card?' },
+  { value: 'Independence Day activity card', prompt: 'Do you want the Independence Day activity card?' },
+  { value: "Children's Day Gifting Book", prompt: "Do you want the Children's Day Gifting Book?" },
+  { value: 'Calendars 26', prompt: 'Do you want Calendars 26?' }
 ];
 
-export const SCHOOL_SERVICE_KEYS: SchoolServiceType[] = ['id_cards', 'report_cards', 'certificates'];
+export const SCHOOL_SERVICE_KEYS: SchoolServiceType[] = [
+  'id_cards',
+  'report_cards',
+  'certificates',
+  'Pre-Written Nursery Set',
+  'Pre-Written LKG Set',
+  'Pre-Written UKG Set',
+  'Birthday  card',
+  'Independence Day activity card',
+  "Children's Day Gifting Book",
+  'Calendars 26'
+];
 
 const createDefaultServiceStatus = (): ServiceStatusMap => ({
   id_cards: '',
   report_cards: '',
-  certificates: ''
+  certificates: '',
+  'Pre-Written Nursery Set': '',
+  'Pre-Written LKG Set': '',
+  'Pre-Written UKG Set': '',
+  'Birthday  card': '',
+  'Independence Day activity card': '',
+  "Children's Day Gifting Book": '',
+  'Calendars 26': ''
 });
 
 const buildServiceStatusFromProfile = (profile?: SchoolProfile | null): ServiceStatusMap => {

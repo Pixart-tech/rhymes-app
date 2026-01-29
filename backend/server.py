@@ -1976,7 +1976,7 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
 async def save_book_selections(
     payload: BookSelectionPayload, authorization: Optional[str] = Header(None)
 ):
-    print("Received book selections payload:", payload)
+    
     """Persist book selections grouped per class under the school_id (book_selections/{school_id}/classes/{class})."""
     decoded_token = _verify_and_decode_token(authorization)
 
@@ -2972,7 +2972,7 @@ async def delete_library_colour(version: str, grade_code: str, request: Request)
 
 # ---------------------------------------------------------------------------
 # Subject PDF uploads (static)
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------ge-----------
 
 
 @api_router.post("/subject-pdfs/{class_name}/{subject_name}")
@@ -3160,7 +3160,7 @@ async def get_cover_assets_network_paths(selection_key: str):
     
 
     try:
-        print(selection_fs_path)
+        
         exists = Path(selection_fs_path).exists()
        
         is_directory = selection_fs_path.is_dir()
@@ -3190,7 +3190,7 @@ async def get_cover_assets_network_paths(selection_key: str):
         # Build a raw UNC string (for example r"\\pixartnas\share\folder") so the
         # network lookup uses the exact Windows path supplied by administrators.
         network_file = unc_path_utils.format_unc_path(selection_unc_path / svg_file.name)
-        print(network_file)
+       
         svg_markup: Optional[str] = None
 
         svg_source_path: Optional[Path] = None
@@ -3261,7 +3261,7 @@ async def get_cover_asset_image(file_name: str):
 @api_router.get("/cover-assets/svg/{relative_path:path}")
 async def get_cover_asset(relative_path: str):
     """Return the raw SVG bytes for the cover asset ``relative_path``."""
-    print("Iam running")
+   
     base_path = _ensure_cover_assets_base_path()
    
 

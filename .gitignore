@@ -54,6 +54,7 @@ venv/
 virtual_env/
 backend/firebase_key.json
 backend/images/
+backend/public/subject-pdfs/
 package.json
 yarn.lock
 # Development tools

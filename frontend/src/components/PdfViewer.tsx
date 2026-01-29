@@ -10,10 +10,10 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ link }) => {
   // In a real app, 'link' would be a real URL.
   // If the link is just a placeholder ID like 'pdf1', we show a dummy UI.
   
-  const isRealUrl = link.startsWith('http');
-  const displayUrl = isRealUrl ? link : null;
+  const displayUrl = link && link.trim().length > 0 ? link : null;
 
   if (!displayUrl) {
+    
     return (
       <div className="w-full h-64 md:h-96 bg-slate-100 border border-slate-300 rounded-lg flex flex-col items-center justify-center p-6 text-slate-500">
         <FileText size={48} className="mb-4 text-slate-400" />

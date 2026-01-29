@@ -1,8 +1,67 @@
 
 import { ClassData, BookOption, Subject, AssessmentVariant } from '../types/types';
+import { PUBLIC_URL_PREFIX, normalizeAssetUrl } from '../lib/utils';
 
 // Helper to generate IDs
 const generateId = () => Math.random().toString(36).substr(2, 9);
+
+// Static PDF helpers
+const SUBJECT_PDF_ROOT = 'subject-pdfs';
+const PROGRAM_FOLDER = 'LQ'; // adjust if your public folder uses a different prefix
+// Use names exactly as provided; only URL-encode unsafe characters.
+const encodePathSegment = (value: string) => encodeURIComponent((value || '').toString().trim());
+type ComponentKind = 'core' | 'work' | 'addon';
+
+const buildStaticPdfLink = (
+  link: string | undefined,
+  className: string,
+  subjectName: string,
+  component: ComponentKind
+) => {
+  if (!link) return '';
+  const trimmed = link.toString().trim();
+  // Keep absolute or root-relative URLs untouched (but normalized for LAN)
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('/')) {
+    return normalizeAssetUrl(trimmed);
+  }
+  // Treat the existing placeholder as the file stem; append .pdf and map to static folder
+  const file = trimmed.endsWith('.pdf') ? trimmed : `${trimmed}.pdf`;
+
+  // Path rules:
+  // - English (any class): /LQ/<ClassName>.<SubjectName>/<file>
+  // - Core/Work (others): /LQ/<ClassName>/<file>
+  // - Addon:     /LQ/Addon books/<file>
+  // - Assessment (component 'core' but subjectName normalized to 'Assessment' in caller): same as core/work
+  // - Languages: treated as core/work (same rule)
+  const isEnglish = (subjectName || '').toString().trim().toLowerCase() === 'english' &&className!=='PG';
+  const baseFolder =
+    component === 'addon'
+      ? `${PROGRAM_FOLDER}/Addon books`
+      : isEnglish&&className!=='PG'
+        ? `${PROGRAM_FOLDER}/${encodePathSegment(className)}/${encodePathSegment(subjectName)}`
+        : `${PROGRAM_FOLDER}/${encodePathSegment(className)}`;
+
+  const path = `${PUBLIC_URL_PREFIX}/${SUBJECT_PDF_ROOT}/${baseFolder}/${encodeURIComponent(file)}`;
+  return normalizeAssetUrl(path);
+};
+
+const mapSubjectLinks = (data: ClassData[]): ClassData[] =>
+  data.map((cls) => ({
+    ...cls,
+    subjects: cls.subjects.map((sub) => ({
+      ...sub,
+      options: sub.options.map((opt) => ({
+        ...opt,
+        // link: reserved for Assessment; for other subjects leave as-is
+        link: sub.name === 'Assessment'
+          ? buildStaticPdfLink(opt.link, cls.name, sub.name, 'core')
+          : opt.link,
+        link1: buildStaticPdfLink(opt.link1, cls.name, sub.name, 'core'),
+        link2: buildStaticPdfLink(opt.link2, cls.name, sub.name, 'work'),
+        link3: buildStaticPdfLink(opt.link3, cls.name, sub.name, 'addon'),
+      })),
+    })),
+  }));
 
 export const CLASS_THEMES: Record<string, {
   cardBg: string;
@@ -98,44 +157,44 @@ export const DEFAULT_THEME = {
 };
 
 
-export const SCHOOL_DATA: ClassData[] = [
+const RAW_SCHOOL_DATA: ClassData[] = [
   {
     name: "Nursery",
     subjects: [
       {
         name: "English",
         options: [
-          { typeId: generateId(), label: "ABCD caps", coreId: "100000203", coreCover: "0201", coreSpine: "N2", defaultCoreCoverTitle: "English Skillbook", workId: "100000204", workCover: "0202", workSpine: "N3", defaultWorkCoverTitle: "English Workbook", link: "pdf1", info: "Introduction of both cases of letters and writing practice of Uppercase letters", isRecommended: true },
-          { typeId: generateId(), label: "ABCD caps & small", coreId: "100000205", coreCover: "0201", coreSpine: "N10", defaultCoreCoverTitle: "English Skillbook", workId: "100000206", workCover: "0202", workSpine: "N11", defaultWorkCoverTitle: "English Workbook", link: "pdf2", info: "Introduction , activity, and writing of both cases of letters", isRecommended: false },
-          { typeId: generateId(), label: "ABCD small", coreId: "100000207", coreCover: "0201", coreSpine: "N12", defaultCoreCoverTitle: "English Skillbook", workId: "100000208", workCover: "0202", workSpine: "N13", defaultWorkCoverTitle: "English Workbook", link: "pdf3", info: "Introduction, activity and writing of lowercase letters", isRecommended: false },
-          { typeId: generateId(), label: "SATPIN small", coreId: "100000209", coreCover: "0201", coreSpine: "N14", defaultCoreCoverTitle: "English Skillbook", workId: "100000210", workCover: "0202", workSpine: "N15", defaultWorkCoverTitle: "English Workbook", link: "pdf4", info: "Introduction, Activity and writing of Lowercase letters in satpin sequence", isRecommended: false },
-          { typeId: generateId(), label: "LTI caps", coreId: "100000211", coreCover: "0201", coreSpine: "N16", defaultCoreCoverTitle: "English Skillbook", workId: "100000212", workCover: "0202", workSpine: "N17", defaultWorkCoverTitle: "English Workbook", link: "pdf5", info: "Introduction, activity and writing of Uppercase letters in LTI  sequence", isRecommended: false },
-          { typeId: generateId(), label: "Jolly phonics", coreId: "100000213", coreCover: "0201", coreSpine: "N9", defaultCoreCoverTitle: "English Phonics", link: "pdf6", info: "Similar learning outcome of Jolly phonics book", isRecommended: false },
+          { typeId: generateId(), label: "ABCD caps", coreId: "100000203", coreCover: "0201", coreSpine: "N2", defaultCoreCoverTitle: "English Skillbook", workId: "100000204", workCover: "0202", workSpine: "N3", defaultWorkCoverTitle: "English Workbook", link1: "Nursery_English_Skillbook_caps",link2:"Nursery_English_Workbook_caps", info: "Introduction of both cases of letters and writing practice of Uppercase letters", isRecommended: true },
+          { typeId: generateId(), label: "ABCD caps & small", coreId: "100000205", coreCover: "0201", coreSpine: "N10", defaultCoreCoverTitle: "English Skillbook", workId: "100000206", workCover: "0202", workSpine: "N11", defaultWorkCoverTitle: "English Workbook", link1: "Nur_ABCD Eng Skillbook Caps&Small together",link2: "Nur_ABCD Eng workbook Caps&Small together", info: "Introduction , activity, and writing of both cases of letters", isRecommended: false },
+          { typeId: generateId(), label: "ABCD small", coreId: "100000207", coreCover: "0201", coreSpine: "N12", defaultCoreCoverTitle: "English Skillbook", workId: "100000208", workCover: "0202", workSpine: "N13", defaultWorkCoverTitle: "English Workbook", link1: "Nur_abcd Eng skillbook small",link2: "Nur_abcd Eng workbook small",info: "Introduction, activity and writing of lowercase letters", isRecommended: false },
+          { typeId: generateId(), label: "SATPIN small", coreId: "100000209", coreCover: "0201", coreSpine: "N14", defaultCoreCoverTitle: "English Skillbook", workId: "100000210", workCover: "0202", workSpine: "N15", defaultWorkCoverTitle: "English Workbook", link1: "Nur_satpin skillbook",link2:"Nur_satpin workbook", info: "Introduction, Activity and writing of Lowercase letters in satpin sequence", isRecommended: false },
+          { typeId: generateId(), label: "LTI caps", coreId: "100000211", coreCover: "0201", coreSpine: "N16", defaultCoreCoverTitle: "English Skillbook", workId: "100000212", workCover: "0202", workSpine: "N17", defaultWorkCoverTitle: "English Workbook", link1: "Nur_LTI_caps_Skillbook",link2:"Nur_LTI_caps_Workbook", info: "Introduction, activity and writing of Uppercase letters in LTI  sequence", isRecommended: false },
+          { typeId: generateId(), label: "Jolly phonics", coreId: "100000213", coreCover: "0201", coreSpine: "N9", defaultCoreCoverTitle: "English Phonics", link1: "Nursery_jolly_Phonics", info: "Similar learning outcome of Jolly phonics book", isRecommended: false },
         ]
       },
       {
         name: "Maths",
         options: [
-          { typeId: generateId(), label: "1 to 20", coreId: "100000214", coreCover: "0203", coreSpine: "N4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000215", workCover: "0204", workSpine: "N5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link: "pdf_n_math_1", info: "Premath, Introduction, activity and writing of number 1-20 with 4 basic shapes and 4 colours" },
-          { typeId: generateId(), label: "1 to 50", coreId: "100000214", coreCover: "0203", coreSpine: "N4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000215", workCover: "0204", workSpine: "N5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000216", addOnCover: "0205", addOnSpine: "N18", defaultAddonCoverTitle: "Maths 21-50", isRecommended: false, link: "pdf_n_math_2", info: "Add on book - 21-50 number practice with post math concepts" },
+          { typeId: generateId(), label: "1 to 20", coreId: "100000214", coreCover: "0203", coreSpine: "N4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000215", workCover: "0204", workSpine: "N5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link1: "Nursery Maths skillbook",link2:"Nursery_Maths_Work Book", info: "Premath, Introduction, activity and writing of number 1-20 with 4 basic shapes and 4 colours" },
+          { typeId: generateId(), label: "1 to 50", coreId: "100000214", coreCover: "0203", coreSpine: "N4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000215", workCover: "0204", workSpine: "N5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000216", addOnCover: "0205", addOnSpine: "N18", defaultAddonCoverTitle: "Maths 21-50", isRecommended: false,link1: "Nursery Maths skillbook",link2:"Nursery_Maths_Work Book", link3:"Nursery_21 - 50", info: "Add on book - 21-50 number practice with post math concepts" },
         ]
       },
       {
         name: "EVS",
         options: [
-          { typeId: generateId(), label: "EVS", coreId: "100000201", coreCover: "0206", coreSpine: "N1", defaultCoreCoverTitle: "EVS", isRecommended: true, link: "pdf_n_evs", info: "17 concepts : All About Me, Personal Hygiene, Action Words, My Home, My Family, My School, Clothes, Fruits, Vegetables, Flowers, Farm Animals, Wild Animals, Birds, Community Helpers, My Neighbourhood, Transportation, Seasons" },
+          { typeId: generateId(), label: "EVS", coreId: "100000201", coreCover: "0206", coreSpine: "N1", defaultCoreCoverTitle: "EVS", isRecommended: true, link1: "Nursery_EVS", info: "17 concepts : All About Me, Personal Hygiene, Action Words, My Home, My Family, My School, Clothes, Fruits, Vegetables, Flowers, Farm Animals, Wild Animals, Birds, Community Helpers, My Neighbourhood, Transportation, Seasons" },
         ]
       },
       {
         name: "Rhymes & stories",
         options: [
-          { typeId: generateId(), label: "Rhymes & Stories (Customisable)", coreId: "100000202", coreCover: "0208", coreSpine: "N8", defaultCoreCoverTitle: "Rhymes & Stories", isRecommended: true, link: "pdf_n_rhymes", info: "25 Rhymes & 5 Stories" },
+          { typeId: generateId(), label: "Rhymes & Stories (Customisable)", coreId: "100000202", coreCover: "0208", coreSpine: "N8", defaultCoreCoverTitle: "Rhymes & Stories", isRecommended: true, link1: "Nursery_Rhymes and stories", info: "25 Rhymes & 5 Stories" },
         ]
       },
       {
         name: "Art & craft",
         options: [
-          { typeId: generateId(), label: "Art & Craft", coreId: "100000217", coreCover: "0209", coreSpine: "N6", defaultCoreCoverTitle: "Art & Craft", isRecommended: true, link: "pdf_n_art", info: "25 colouring activities & 15 craft activities" },
+          { typeId: generateId(), label: "Art & Craft", coreId: "100000217", coreCover: "0209", coreSpine: "N6", defaultCoreCoverTitle: "Art & Craft", isRecommended: true, link1: "Nur_Art and craft", info: "25 colouring activities & 15 craft activities" },
         ]
       }
     ]
@@ -146,44 +205,44 @@ export const SCHOOL_DATA: ClassData[] = [
       {
         name: "English",
         options: [
-          { typeId: generateId(), label: "small + vowels", coreId: "100000303", coreCover: "0301", coreSpine: "L2", defaultCoreCoverTitle: "English Skillbook", workId: "100000304", workCover: "0302", workSpine: "L3", defaultWorkCoverTitle: "English Workbook", isRecommended: true, link: "pdf_l_eng_1", info: "Upper and lower case letter association and lower case writing practice along with Vowels" },
-          { typeId: generateId(), label: "caps + vowels", coreId: "100000305", coreCover: "0301", coreSpine: "L14", defaultCoreCoverTitle: "English Skillbook", workId: "100000306", workCover: "0302", workSpine: "L15", defaultWorkCoverTitle: "English Workbook", isRecommended: false, link: "pdf_l_eng_2", info: "Upper and lower case letter association and Upper case writing practice along with Vowels" },
-          { typeId: generateId(), label: "Jolly phonics", coreId: "100000307", coreCover: "0301", coreSpine: "L13", defaultCoreCoverTitle: "English Phonics", isRecommended: false, link: "pdf_l_eng_3", info: "Similar learning outcome of Jolly phonics book" },
+          { typeId: generateId(), label: "small + vowels", coreId: "100000303", coreCover: "0301", coreSpine: "L2", defaultCoreCoverTitle: "English Skillbook", workId: "100000304", workCover: "0302", workSpine: "L3", defaultWorkCoverTitle: "English Workbook", isRecommended: true, link2: "LKG_English_WB_small&vowels",link1:"LKG_English_skillbook_small&vowels", info: "Upper and lower case letter association and lower case writing practice along with Vowels" },
+          { typeId: generateId(), label: "caps + vowels", coreId: "100000305", coreCover: "0301", coreSpine: "L14", defaultCoreCoverTitle: "English Skillbook", workId: "100000306", workCover: "0302", workSpine: "L15", defaultWorkCoverTitle: "English Workbook", isRecommended: false, link1: "LKG_Eng Caps skillbook",link2:"LKG_Eng Caps workbook", info: "Upper and lower case letter association and Upper case writing practice along with Vowels" },
+          { typeId: generateId(), label: "Jolly phonics", coreId: "100000307", coreCover: "0301", coreSpine: "L13", defaultCoreCoverTitle: "English Phonics", isRecommended: false, link1: "LKG_Phonics", info: "Similar learning outcome of Jolly phonics book" },
         ]
       },
       {
         name: "Maths",
         options: [
-          { typeId: generateId(), label: "1-50 and 1-10 number names", coreId: "100000308", coreCover: "0303", coreSpine: "L4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000309", workCover: "0304", workSpine: "L5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link: "pdf_l_math_1", info: "Premath, Introduction, activity and writing of number 1-50 and 1-10 numner names with 2 secondary shapes and 2 secondary colours, pictorial addition and subtraction" },
-          { typeId: generateId(), label: "51-100", coreId: "100000308", coreCover: "0303", coreSpine: "L4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000309", workCover: "0304", workSpine: "L5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000310", addOnCover: "0305", addOnSpine: "L16", defaultAddonCoverTitle: "Maths 51-100", isRecommended: false, link: "pdf_l_math_2", info: "Add on book - 51-100 number practice and post math concepts" },
+          { typeId: generateId(), label: "1-50 and 1-10 number names", coreId: "100000308", coreCover: "0303", coreSpine: "L4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000309", workCover: "0304", workSpine: "L5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link1: "LKG_Maths skillbook",link2:"LKG_Maths_WB",info: "Premath, Introduction, activity and writing of number 1-50 and 1-10 numner names with 2 secondary shapes and 2 secondary colours, pictorial addition and subtraction" },
+          { typeId: generateId(), label: "51-100", coreId: "100000308", coreCover: "0303", coreSpine: "L4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000309", workCover: "0304", workSpine: "L5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000310", addOnCover: "0305", addOnSpine: "L16", defaultAddonCoverTitle: "Maths 51-100", isRecommended: false, link1: "LKG_Maths skillbook",link2:"LKG_Maths_WB",link3: "LKG_51-100", info: "Add on book - 51-100 number practice and post math concepts" },
         ]
       },
       {
         name: "EVS",
         options: [
-          { typeId: generateId(), label: "EVS (default)", coreId: "100000301", coreCover: "0306", coreSpine: "L1", defaultCoreCoverTitle: "EVS", isRecommended: true, link: "pdf_l_evs", info: "28 concepts :All About Me, Sense Organs, My Family, House, My School, Good Manners, Healthy Food, Plants, Flowers, Fruits, Vegetables, Domestic Animals, Wild Animals, Animals & Young Ones, Aquatic Animals, Birds, Insects, Transportation, Traffic Signals, Seasons, My Neighbourhood, India, Festivals, Water Uses, National Symbols, Living & Non-Living" },
+          { typeId: generateId(), label: "EVS (default)", coreId: "100000301", coreCover: "0306", coreSpine: "L1", defaultCoreCoverTitle: "EVS", isRecommended: true, link1: "LKG_EVS", info: "28 concepts :All About Me, Sense Organs, My Family, House, My School, Good Manners, Healthy Food, Plants, Flowers, Fruits, Vegetables, Domestic Animals, Wild Animals, Animals & Young Ones, Aquatic Animals, Birds, Insects, Transportation, Traffic Signals, Seasons, My Neighbourhood, India, Festivals, Water Uses, National Symbols, Living & Non-Living" },
         ]
       },
       {
         name: "Art & craft",
         options: [
-          { typeId: generateId(), label: "Art & Craft", coreId: "100000311", coreCover: "0308", coreSpine: "L6", defaultCoreCoverTitle: "Art & Craft", isRecommended: true, link: "pdf_l_art", info: "13 Colourinf activities & 22 colouring activities" },
+          { typeId: generateId(), label: "Art & Craft", coreId: "100000311", coreCover: "0308", coreSpine: "L6", defaultCoreCoverTitle: "Art & Craft", isRecommended: true, link1: "LKG_Art & Craft", info: "13 Colourinf activities & 22 colouring activities" },
         ]
       },
       {
         name: "Rhymes & stories",
         options: [
-          { typeId: generateId(), label: "Rhymes & Stories (Customisable)", coreId: "100000302", coreCover: "0309", coreSpine: "L8", defaultCoreCoverTitle: "Rhymes & Stories", isRecommended: true, link: "pdf_l_rhymes", info: "24 Rhymes & 5 stories" },
+          { typeId: generateId(), label: "Rhymes & Stories (Customisable)", coreId: "100000302", coreCover: "0309", coreSpine: "L8", defaultCoreCoverTitle: "Rhymes & Stories", isRecommended: true, link1: "LKG_Rhymes and stories", info: "24 Rhymes & 5 stories" },
         ]
       },
       {
         name: "Languages",
         isMultiSelect: true,
         options: [
-          { typeId: generateId(), label: "Swara", jsonSubject: "Kannada", coreId: "100000314", coreCover: "0310", coreSpine: "L10", defaultCoreCoverTitle: "Kannada", isRecommended: false, link: "pdf_l_kan", info: "Kannada letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
-          { typeId: generateId(), label: "Swara", jsonSubject: "Hindi", coreId: "100000315", coreCover: "0311", coreSpine: "L9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link: "pdf_l_hin", info: "Hindi letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
-          { typeId: generateId(), label: "Swara", jsonSubject: "Tamil", coreId: "100000316", coreCover: "0312", coreSpine: "L11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link: "pdf_l_tam", info: "Telugu letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
-          { typeId: generateId(), label: "Swara", jsonSubject: "Telugu", coreId: "100000317", coreCover: "0313", coreSpine: "L12", defaultCoreCoverTitle: "Telugu", isRecommended: false, link: "pdf_l_tel", info: "Tamil letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
+          { typeId: generateId(), label: "Swara", jsonSubject: "Kannada", coreId: "100000314", coreCover: "0310", coreSpine: "L10", defaultCoreCoverTitle: "Kannada", isRecommended: false, link1: "LKG_Kannada", info: "Kannada letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
+          { typeId: generateId(), label: "Swara", jsonSubject: "Hindi", coreId: "100000315", coreCover: "0311", coreSpine: "L9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link1: "LKG_Hindi", info: "Hindi letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
+          { typeId: generateId(), label: "Swara", jsonSubject: "Tamil", coreId: "100000316", coreCover: "0312", coreSpine: "L11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link1: "LKG_Tamil", info: "Telugu letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
+          { typeId: generateId(), label: "Swara", jsonSubject: "Telugu", coreId: "100000317", coreCover: "0313", coreSpine: "L12", defaultCoreCoverTitle: "Telugu", isRecommended: false, link1: "LKG_Telugu", info: "Tamil letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
         ]
       }
     ]
@@ -194,46 +253,46 @@ export const SCHOOL_DATA: ClassData[] = [
       {
         name: "English",
         options: [
-          { typeId: generateId(), label: "without cursive+ long vowels + blends + diaphrams + simple sentences", coreId: "100000403", coreCover: "0401", coreSpine: "U2", defaultCoreCoverTitle: "English Skillbook", workId: "100000404", workCover: "0402", workSpine: "U3", defaultWorkCoverTitle: "English Workbook", isRecommended: true, link: "pdf_u_eng_1" },
-          { typeId: generateId(), label: "With cursive+ long vowels + blends + diaphrams + simple sentences", coreId: "100000403", coreCover: "0401", coreSpine: "U2", defaultCoreCoverTitle: "English Skillbook", workId: "100000404", workCover: "0402", workSpine: "U3", defaultWorkCoverTitle: "English Workbook", addOnId: "100000406", addOnCover: "0403", addOnSpine: "U12", defaultAddonCoverTitle: "Cursive", isRecommended: false, link: "pdf_u_eng_2" },
-          { typeId: generateId(), label: "Jolly phonics", coreId: "100000405", coreCover: "0401", coreSpine: "U13", defaultCoreCoverTitle: "English Phonics", isRecommended: false, link: "pdf_u_eng_3" },
-          { typeId: generateId(), label: "Jolly phonics + Cursive", coreId: "100000405", coreCover: "0401", coreSpine: "U13", defaultCoreCoverTitle: "English Phonics", addOnId: "100000406", addOnCover: "0403", addOnSpine: "U12", defaultAddonCoverTitle: "Cursive", isRecommended: false, link: "pdf_u_eng_4", info: "Similar learning outcome of Jolly phonics book + Cursive practice" },
+          { typeId: generateId(), label: "without cursive+ long vowels + blends + diaphrams + simple sentences", coreId: "100000403", coreCover: "0401", coreSpine: "U2", defaultCoreCoverTitle: "English Skillbook", workId: "100000404", workCover: "0402", workSpine: "U3", defaultWorkCoverTitle: "English Workbook", isRecommended: true, link1: "UKG_English_SB" ,link2:"UKG_English_WB"},
+          { typeId: generateId(), label: "With cursive+ long vowels + blends + diaphrams + simple sentences", coreId: "100000403", coreCover: "0401", coreSpine: "U2", defaultCoreCoverTitle: "English Skillbook", workId: "100000404", workCover: "0402", workSpine: "U3", defaultWorkCoverTitle: "English Workbook", addOnId: "100000406", addOnCover: "0403", addOnSpine: "U12", defaultAddonCoverTitle: "Cursive", isRecommended: false, link1: "UKG_English_SB" ,link2:"UKG_English_WB",link3: "UKG_Cursive" },
+          { typeId: generateId(), label: "Jolly phonics", coreId: "100000405", coreCover: "0401", coreSpine: "U13", defaultCoreCoverTitle: "English Phonics", isRecommended: false, link1: "UKG_Phonics_without_cursive" },
+          { typeId: generateId(), label: "Jolly phonics + Cursive", coreId: "100000405", coreCover: "0401", coreSpine: "U13", defaultCoreCoverTitle: "English Phonics", addOnId: "100000406", addOnCover: "0403", addOnSpine: "U12", defaultAddonCoverTitle: "Cursive", isRecommended: false,link1: "UKG_Phonics_without_cursive" , link3: "UKG_Cursive", info: "Similar learning outcome of Jolly phonics book + Cursive practice" },
         ]
       },
       {
         name: "Maths",
         options: [
-          { typeId: generateId(), label: "1-100 and 1-100 number names", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link: "pdf_u_math_1", info: "1-50 recap , 51-100 numbers and number names upto 100, Post math concepts , single digit addition and subtraction, introduction to time and division" },
-          { typeId: generateId(), label: "101-200", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000409", addOnCover: "0406", addOnSpine: "U14", defaultAddonCoverTitle: "Maths 101-200", isRecommended: false, link: "pdf_u_math_2", info: "Add on book - From 101-200" },
-          { typeId: generateId(), label: "101-500", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000410", addOnCover: "0415", addOnSpine: "U15", defaultAddonCoverTitle: "Maths 101-500", isRecommended: false, link: "pdf_u_math_3", info: "Add on book - From 101-500" },
+          { typeId: generateId(), label: "1-100 and 1-100 number names", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link1: "UKG_Maths skillbook",link2:"UKG_Maths_WB", info: "1-50 recap , 51-100 numbers and number names upto 100, Post math concepts , single digit addition and subtraction, introduction to time and division" },
+          { typeId: generateId(), label: "101-200", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000409", addOnCover: "0406", addOnSpine: "U14", defaultAddonCoverTitle: "Maths 101-200", isRecommended: false, link1:"UKG_Maths skillbook",link2:"UKG_Maths_WB",link3: "UKG_101-200", info: "Add on book - From 101-200" },
+          { typeId: generateId(), label: "101-500", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000410", addOnCover: "0415", addOnSpine: "U15", defaultAddonCoverTitle: "Maths 101-500", isRecommended: false,link1:"UKG_Maths skillbook",link2:"UKG_Maths_WB", link3: "UKG_101-500", info: "Add on book - From 101-500" },
         ]
       },
       {
         name: "EVS",
         options: [
-          { typeId: generateId(), label: "EVS", coreId: "100000401", coreCover: "0407", coreSpine: "U1", defaultCoreCoverTitle: "EVS", isRecommended: true, link: "pdf_u_evs", info: "All About Me, Sense Organs, Internal Body Parts, Daily Routine and Good Habits, My Family, Safety at Home, Types of Houses, My School, Healthy and Unhealthy Food, Types of Plants, Germination of Plants, Things We Get from Trees, Things the Plant Needs to Grow, Fruits, Vegetables, Flowers, Animals and Their Young Ones, Animal Homes, Animal Sounds, Types of Animals, Types of Birds, Lifecycle of a Butterfly, Emergency Vehicles, Traffic Rules, My Neighbourhood, Worship Places and Festivals, Community Helpers, Water Cycle, Reduce Reuse Recycle, Machines, Parts of a Computer, Living and Non-living Things, Monuments of India, Our National Leaders, Seasons, Games and Sports" },
+          { typeId: generateId(), label: "EVS", coreId: "100000401", coreCover: "0407", coreSpine: "U1", defaultCoreCoverTitle: "EVS", isRecommended: true, link1: "UKG_EVS", info: "All About Me, Sense Organs, Internal Body Parts, Daily Routine and Good Habits, My Family, Safety at Home, Types of Houses, My School, Healthy and Unhealthy Food, Types of Plants, Germination of Plants, Things We Get from Trees, Things the Plant Needs to Grow, Fruits, Vegetables, Flowers, Animals and Their Young Ones, Animal Homes, Animal Sounds, Types of Animals, Types of Birds, Lifecycle of a Butterfly, Emergency Vehicles, Traffic Rules, My Neighbourhood, Worship Places and Festivals, Community Helpers, Water Cycle, Reduce Reuse Recycle, Machines, Parts of a Computer, Living and Non-living Things, Monuments of India, Our National Leaders, Seasons, Games and Sports" },
         ]
       },
       {
         name: "Rhymes & stories",
         options: [
-          { typeId: generateId(), label: "Rhymes & Stories (Customisable)", coreId: "100000402", coreCover: "0409", coreSpine: "U8", defaultCoreCoverTitle: "Rhymes & Stories", isRecommended: true, link: "pdf_u_rhymes", info: "24 Rhymes & 5 stories" },
+          { typeId: generateId(), label: "Rhymes & Stories (Customisable)", coreId: "100000402", coreCover: "0409", coreSpine: "U8", defaultCoreCoverTitle: "Rhymes & Stories", isRecommended: true, link1: "UKG_Rhymes and stories", info: "24 Rhymes & 5 stories" },
         ]
       },
       {
         name: "Art & craft",
         options: [
-          { typeId: generateId(), label: "Art & Craft", coreId: "100000411", coreCover: "0410", coreSpine: "U6", defaultCoreCoverTitle: "Art & Craft", isRecommended: true, link: "pdf_u_art", info: "6 Colouring activities & 28 craft activities" },
+          { typeId: generateId(), label: "Art & Craft", coreId: "100000411", coreCover: "0410", coreSpine: "U6", defaultCoreCoverTitle: "Art & Craft", isRecommended: true, link1: "UKG_Art & Craft", info: "6 Colouring activities & 28 craft activities" },
         ]
       },
       {
         name: "Languages",
         isMultiSelect: true,
         options: [
-          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Kannada", coreId: "100000418", coreCover: "0411", coreSpine: "U10", defaultCoreCoverTitle: "Kannada", isRecommended: false, link: "pdf_u_kan", info: "The book covers Kannada letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
-          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Hindi", coreId: "100000419", coreCover: "0412", coreSpine: "U9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link: "pdf_u_hin", info: "The book covers Hindi letter practice (varnamala) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
-          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Tamil", coreId: "100000420", coreCover: "0413", coreSpine: "U11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link: "pdf_u_tam", info: "The book covers Tamil letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
-          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Telugu", coreId: "100000421", coreCover: "0414", coreSpine: "U21", defaultCoreCoverTitle: "Telugu", isRecommended: false, link: "pdf_u_tel", info: "The book covers Telugu letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
+          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Kannada", coreId: "100000418", coreCover: "0411", coreSpine: "U10", defaultCoreCoverTitle: "Kannada", isRecommended: false, link1: "UKG_Kannada", info: "The book covers Kannada letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
+          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Hindi", coreId: "100000419", coreCover: "0412", coreSpine: "U9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link1: "UKG_Hindi", info: "The book covers Hindi letter practice (varnamala) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
+          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Tamil", coreId: "100000420", coreCover: "0413", coreSpine: "U11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link1: "UKG_Tamil", info: "The book covers Tamil letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
+          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Telugu", coreId: "100000421", coreCover: "0414", coreSpine: "U21", defaultCoreCoverTitle: "Telugu", isRecommended: false, link1: "UKG_Telugu", info: "The book covers Telugu letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
         ]
       }
     ]
@@ -243,31 +302,33 @@ export const SCHOOL_DATA: ClassData[] = [
     subjects: [
       {
         name: "EVS",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000101", coreCover: "0101", coreSpine: "PG1", defaultCoreCoverTitle: "EVS", isRecommended: true, link: "pdf_p_evs", info: "All About Me, About Myself, My Face, Myself, Body Hygiene, My Birthday, Family, My Family Tree, Home, Different Rooms at Home, Living Room, Kitchen, Bathroom, Bedroom, Seasons, Farm Animals, Wild Animals, Birds, Transportation, Flowers, Vegetables and Fruits" }]
+        options: [{ typeId: generateId(), label: "Standard", coreId: "100000101", coreCover: "0101", coreSpine: "PG1", defaultCoreCoverTitle: "EVS", isRecommended: true, link1: "PG_EVS", info: "All About Me, About Myself, My Face, Myself, Body Hygiene, My Birthday, Family, My Family Tree, Home, Different Rooms at Home, Living Room, Kitchen, Bathroom, Bedroom, Seasons, Farm Animals, Wild Animals, Birds, Transportation, Flowers, Vegetables and Fruits" }]
       },
       {
         name: "Rhymes and stories",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000102", coreCover: "0102", coreSpine: "PG6", defaultCoreCoverTitle: "Rhymes and stories", isRecommended: true, link: "pdf_p_rhymes", info: "24 Rhymes & 5 stories" }]
+        options: [{ typeId: generateId(), label: "Standard", coreId: "100000102", coreCover: "0102", coreSpine: "PG6", defaultCoreCoverTitle: "Rhymes and stories", isRecommended: true, link1: "PG_Rhymes and stories", info: "24 Rhymes & 5 stories" }]
       },
       {
         name: "English",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000103", coreCover: "0103", coreSpine: "PG2", defaultCoreCoverTitle: "English", isRecommended: true, link: "pdf_p_eng", info: "Upper case introduction, recognition , finger tracing and colouring activities" }]
+        options: [{ typeId: generateId(), label: "Standard", coreId: "100000103", coreCover: "0103", coreSpine: "PG2", defaultCoreCoverTitle: "English", isRecommended: true, link1: "PG_English", info: "Upper case introduction, recognition , finger tracing and colouring activities" }]
       },
       {
         name: "Maths",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000104", coreCover: "0104", coreSpine: "PG3", defaultCoreCoverTitle: "Maths", isRecommended: true, link: "pdf_p_math", info: "Premath concepts, basic colours and shapes and 1-10 introduction and recognition" }]
+        options: [{ typeId: generateId(), label: "Standard", coreId: "100000104", coreCover: "0104", coreSpine: "PG3", defaultCoreCoverTitle: "Maths", isRecommended: true, link1: "PG_Maths", info: "Premath concepts, basic colours and shapes and 1-10 introduction and recognition" }]
       },
       {
         name: "Art & craft",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000105", coreCover: "0105", coreSpine: "PG4", defaultCoreCoverTitle: "Art & craft", isRecommended: true, link: "pdf_p_art", info: "A to Z aphabetical colouring activities" }]
+        options: [{ typeId: generateId(), label: "Standard", coreId: "100000105", coreCover: "0105", coreSpine: "PG4", defaultCoreCoverTitle: "Art & craft", isRecommended: true, link1: "PG_Art & Craft", info: "A to Z aphabetical colouring activities" }]
       },
       {
         name: "Pattern",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000106", coreCover: "0106", coreSpine: "PG5", defaultCoreCoverTitle: "Pattern", isRecommended: true, link: "pdf_p_pattern", info: "12 Different pre writing strokes" }]
+        options: [{ typeId: generateId(), label: "Standard", coreId: "100000106", coreCover: "0106", coreSpine: "PG5", defaultCoreCoverTitle: "Pattern", isRecommended: true, link1: "PG_Pattern", info: "12 Different pre writing strokes" }]
       },
     ]
   }
 ];
+
+export const SCHOOL_DATA: ClassData[] = mapSubjectLinks(RAW_SCHOOL_DATA);
 
 export const getAssessmentForClass = (
     className: string, 
@@ -276,41 +337,41 @@ export const getAssessmentForClass = (
     evsOpt: BookOption | null,
     variant: AssessmentVariant
 ): { label: string, coreId: string, coreCover: string, coreSpine: string, defaultCoreCoverTitle: string, link: string } | null => {
-  
-  if (!englishOpt || !mathsOpt || !evsOpt) return null;
-  
-  const normalizedClassName = (className || '').trim().toLowerCase();
-  const isWithMarks = variant === 'WITH_MARKS';
-  const defaultCoreCoverTitle = "Assessment";
-  if (normalizedClassName === "nursery") {
-     //if (!englishOpt || !mathsOpt) return null;
-     const eng = englishOpt?.label.toLowerCase();
-     const mat = mathsOpt?.label;
+  const result = (() => {
+    if (!englishOpt || !mathsOpt || !evsOpt) return null;
+    
+    const normalizedClassName = (className || '').trim().toLowerCase();
+    const isWithMarks = variant === 'WITH_MARKS';
+    const defaultCoreCoverTitle = "Assessment";
+    if (normalizedClassName === "nursery") {
+       //if (!englishOpt || !mathsOpt) return null;
+       const eng = englishOpt?.label.toLowerCase();
+       const mat = mathsOpt?.label;
 
-     const is50 = mat ? mat.includes("1 to 50"): false;
-     
-     const coreCover = "0207";
+       const is50 = mat ? mat.includes("1 to 50"): false;
+       
+       const coreCover = "0207";
 
 
-     if (!eng  || (eng?.includes("abcd caps") && !eng.includes("small"))) {
-        return is50 
-            ? { 
-                label: `ABCD 1-50${isWithMarks ? '' : ' (NM)'}`, 
-                coreId: isWithMarks ? "100000224" : "100000234", 
-                coreCover, 
-                coreSpine: isWithMarks ? "N24" : "N34",
-                defaultCoreCoverTitle,
-                link: "pdf_n_ass_abcd_50" 
-              } 
-            : { 
-                label: `ABCD 1-20${isWithMarks ? '' : ' (NM)'}`, 
-                coreId: isWithMarks ? "100000218" : "100000228", 
-                coreCover, 
-                coreSpine: isWithMarks ? "N7" : "N28",
-                defaultCoreCoverTitle,
-                link: "pdf_n_ass_abcd_20" 
-              };
-     }
+       if (!eng  || (eng?.includes("abcd caps") && !eng.includes("small"))) {
+          return is50 
+              ? { 
+                  label: `ABCD 1-50${isWithMarks ? '' : ' (NM)'}`, 
+                  coreId: isWithMarks ? "100000224" : "100000234", 
+                  coreCover, 
+                  coreSpine: isWithMarks ? "N24" : "N34",
+                  defaultCoreCoverTitle,
+                  link: "Nursery_Assessment"
+                } 
+              : { 
+                  label: `ABCD 1-20${isWithMarks ? '' : ' (NM)'}`, 
+                  coreId: isWithMarks ? "100000218" : "100000228", 
+                  coreCover, 
+                  coreSpine: isWithMarks ? "N7" : "N28",
+                  defaultCoreCoverTitle,
+                  link: "Nursery_Assessment"
+                };
+       }
      if (eng?.includes("lti caps")) {
         return is50 
             ? { 
@@ -319,7 +380,7 @@ export const getAssessmentForClass = (
                 coreCover, 
                 coreSpine: isWithMarks ? "N23" : "N33",
                 defaultCoreCoverTitle,
-                link: "pdf_n_ass_lti_50" 
+                link: "Nursery_Assessment" 
               } 
             : { 
                 label: `LTI 1-20${isWithMarks ? '' : ' (NM)'}`, 
@@ -327,7 +388,7 @@ export const getAssessmentForClass = (
                 coreCover, 
                 coreSpine: isWithMarks ? "N19" : "N29",
                 defaultCoreCoverTitle,
-                link: "pdf_n_ass_lti_20" 
+                link: "Nursery_Assessment" 
               };
      }
      if (eng?.includes("satpin small")) {
@@ -338,7 +399,7 @@ export const getAssessmentForClass = (
                 coreCover, 
                 coreSpine: isWithMarks ? "N25" : "N35",
                 defaultCoreCoverTitle,
-                link: "pdf_n_ass_satpin_50" 
+                link: "Nursery_Assessment" 
               } 
             : { 
                 label: `satpin 1-20${isWithMarks ? '' : ' (NM)'}`, 
@@ -346,7 +407,7 @@ export const getAssessmentForClass = (
                 coreCover, 
                 coreSpine: isWithMarks ? "N20" : "N30",
                 defaultCoreCoverTitle,
-                link: "pdf_n_ass_satpin_20" 
+                link: "Nursery_Assessment" 
               };
      }
      if (eng?.includes("abcd small")) {
@@ -357,7 +418,7 @@ export const getAssessmentForClass = (
                 coreCover, 
                 coreSpine: isWithMarks ? "N26" : "N36",
                 defaultCoreCoverTitle,
-                link: "pdf_n_ass_abcd_sm_50" 
+                link: "Nursery_Assessment" 
               } 
             : { 
                 label: `abcd 1-20${isWithMarks ? '' : ' (NM)'}`, 
@@ -365,7 +426,7 @@ export const getAssessmentForClass = (
                 coreCover, 
                 coreSpine: isWithMarks ? "N21" : "N31",
                 defaultCoreCoverTitle,
-                link: "pdf_n_ass_abcd_sm_20" 
+                link: "Nursery_Assessment" 
               };
      }
      if (eng?.includes("abcd caps & small")) {
@@ -376,7 +437,7 @@ export const getAssessmentForClass = (
                 coreCover, 
                 coreSpine: isWithMarks ? "N27" : "N37",
                 defaultCoreCoverTitle,
-                link: "pdf_n_ass_aabb_50" 
+                link: "Nursery_Assessment" 
               } 
             : { 
                 label: `AaBb 1-20${isWithMarks ? '' : ' (NM)'}`, 
@@ -384,7 +445,7 @@ export const getAssessmentForClass = (
                 coreCover, 
                 coreSpine: isWithMarks ? "N22" : "N32",
                 defaultCoreCoverTitle,
-                link: "pdf_n_ass_aabb_20" 
+                link: "Nursery_Assessment" 
               };
      }
   }
@@ -400,7 +461,7 @@ export const getAssessmentForClass = (
             coreCover, 
             coreSpine: isWithMarks ? "L7" : "L18",
             defaultCoreCoverTitle,
-            link: "pdf_l_ass_sm_50" 
+            link: "LKG_Assessment" 
          };
      }
      if (eng?.includes("caps + vowels")) {
@@ -410,7 +471,7 @@ export const getAssessmentForClass = (
             coreCover, 
             coreSpine: isWithMarks ? "L17" : "L19",
             defaultCoreCoverTitle,
-            link: "pdf_l_ass_bg_50" 
+            link: "LKG_Assessment" 
          };
      }
   }
@@ -426,7 +487,7 @@ export const getAssessmentForClass = (
             coreCover, 
             coreSpine: isWithMarks ? "U7" : "U18",
             defaultCoreCoverTitle,
-            link: "pdf_u_ass_100" 
+            link: "UKG_Assessment" 
          };
      }
      if (mat.includes("101-200")) {
@@ -436,7 +497,7 @@ export const getAssessmentForClass = (
             coreCover, 
             coreSpine: isWithMarks ? "U16" : "U19",
             defaultCoreCoverTitle,
-            link: "pdf_u_ass_200" 
+            link: "UKG_Assessment" 
          };
      }
      if (mat.includes("101-500")) {
@@ -446,10 +507,12 @@ export const getAssessmentForClass = (
             coreCover, 
             coreSpine: isWithMarks ? "U17" : "U20",
             defaultCoreCoverTitle,
-            link: "pdf_u_ass_500" 
+            link: "UKG_Assessment" 
          };
      }
   }
   
   return null;
+  })();
+  return result ? { ...result, link: buildStaticPdfLink(result?.link, className, "Assessment", 'core') } : null;
 }

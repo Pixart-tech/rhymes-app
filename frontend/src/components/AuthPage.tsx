@@ -82,11 +82,29 @@ const resolveUserId = (value?: { uid?: string; schoolId?: string; email?: string
   return raw ? raw.toString().trim() : '';
 };
 
-const SERVICE_KEYS: SchoolServiceType[] = ['id_cards', 'report_cards', 'certificates'];
+const SERVICE_KEYS: SchoolServiceType[] = [
+  'id_cards',
+  'report_cards',
+  'certificates',
+  'Pre-Written Nursery Set',
+  'Pre-Written LKG Set',
+  'Pre-Written UKG Set',
+  'Birthday  card',
+  'Independence Day activity card',
+  "Children's Day Gifting Book",
+  'Calendars 26'
+];
 const SERVICE_LABELS: Record<SchoolServiceType, string> = {
   id_cards: 'ID cards',
   report_cards: 'Report cards',
-  certificates: 'Certificates'
+  certificates: 'Certificates',
+  'Pre-Written Nursery Set': 'Pre-Written Nursery Set',
+  'Pre-Written LKG Set': 'Pre-Written LKG Set',
+  'Pre-Written UKG Set': 'Pre-Written UKG Set',
+  'Birthday  card': 'Birthday card',
+  'Independence Day activity card': 'Independence Day activity card',
+  "Children's Day Gifting Book": "Children's Day Gifting Book",
+  'Calendars 26': 'Calendars 26'
 };
 const GRADE_KEYS_ORDER: GradeKey[] = ['None', 'playgroup', 'nursery', 'lkg', 'ukg'];
 const GRADE_LABELS: Record<GradeKey, string> = {
@@ -121,7 +139,14 @@ const resolveLabelFromUniqueCode = (value?: string | null | undefined): string |
 const DEFAULT_SERVICE_STATUS: ServiceStatusMap = {
   id_cards: 'no',
   report_cards: 'no',
-  certificates: 'no'
+  certificates: 'no',
+  'Pre-Written Nursery Set': 'no',
+  'Pre-Written LKG Set': 'no',
+  'Pre-Written UKG Set': 'no',
+  'Birthday  card': 'no',
+  'Independence Day activity card': 'no',
+  "Children's Day Gifting Book": 'no',
+  'Calendars 26': 'no'
 };
 type AdminServiceFilter = 'all' | SchoolServiceType;
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
@@ -791,11 +816,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   };
 
   const buildDialogServiceStatus = useCallback(
-    (school?: AdminSchoolProfile | null): ServiceStatusMap => ({
-      id_cards: school?.service_status?.id_cards ?? DEFAULT_SERVICE_STATUS.id_cards,
-      report_cards: school?.service_status?.report_cards ?? DEFAULT_SERVICE_STATUS.report_cards,
-      certificates: school?.service_status?.certificates ?? DEFAULT_SERVICE_STATUS.certificates
-    }),
+    (school?: AdminSchoolProfile | null): ServiceStatusMap =>
+      SERVICE_KEYS.reduce<ServiceStatusMap>((accumulator, key) => {
+        accumulator[key] = school?.service_status?.[key] ?? DEFAULT_SERVICE_STATUS[key];
+        return accumulator;
+      }, {} as ServiceStatusMap),
     []
   );
 

@@ -1,7 +1,17 @@
 
 
 
-export type SchoolServiceType = 'id_cards' | 'report_cards' | 'certificates';
+export type SchoolServiceType =
+   'id_cards'
+  | 'report_cards'
+  | 'certificates'
+  | 'Pre-Written Nursery Set'
+  | 'Pre-Written LKG Set'
+  | 'Pre-Written UKG Set'
+  | 'Birthday  card'
+  | 'Independence Day activity card'
+  | "Children's Day Gifting Book"
+  | 'Calendars 26';
 
 export type ServiceStatus = 'yes' | 'no';
 export type OptionalServiceStatus = ServiceStatus | '';
@@ -143,6 +153,9 @@ export interface BookOption {
   workCover?: string;
   workSpine?: string;
   defaultWorkCoverTitle?: string;
+  link1?: string;
+  link2?: string;
+  link3?: string;
   addOnId?: string;
   addOnCover?: string;
   addOnSpine?: string;

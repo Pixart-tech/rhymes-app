@@ -29,6 +29,9 @@ interface PhysicalBookItem {
   title: string;
   type: 'Core' | 'Work' | 'Addon';
   link?: string;
+  link1?: string;
+  link2?:string;
+  link3?:string;
   subjectName: string;
   className: string;
   // Actions
@@ -47,6 +50,8 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   const [expandedPdf, setExpandedPdf] = useState<string | null>(null);
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [manualForm, setManualForm] = useState({ subject: '', coreCode: '', coreCover: '', coreSpine: '' });
+  const resolveBookLink = (book: PhysicalBookItem) => book.link || book.link1 || book.link2 || book.link3 || '';
+  
   const normalize = (value: string) => (value || '').toString().trim().toLowerCase();
   const excludedAssessmentSet = useMemo(
     () => new Set((excludedAssessments || []).map((c) => normalize(c))),
@@ -346,6 +351,27 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
 
   // Process selections into a flat list of physical books
   const books: PhysicalBookItem[] = useMemo(() => {
+    const assessmentLinkFallback = () => {
+      const lower = (value: string) => value?.toString().trim().toLowerCase();
+      const englishSelection = classSelections.find((s) => lower(s.subjectName) === 'english' && hasActiveBook(s))?.selectedOption || null;
+      const mathsSelection = classSelections.find((s) => lower(s.subjectName) === 'maths' && hasActiveBook(s))?.selectedOption || null;
+      const evsSelection = classSelections.find((s) => lower(s.subjectName) === 'evs' && hasActiveBook(s))?.selectedOption || null;
+      const assessment = getAssessmentForClass(classData.name, englishSelection, mathsSelection, evsSelection, currentAssessmentVariant);
+      return assessment?.link || '';
+    };
+
+    const pickLinkForType = (opt: any, component: PhysicalBookItem['type'], isAssessment: boolean) => {
+      const direct =
+        component === 'Core'
+          ? opt.link || opt.link1
+          : component === 'Work'
+          ? opt.link || opt.link2 || opt.link1
+          : opt.link || opt.link3 || opt.link2 || opt.link1;
+      if (direct) return direct;
+      if (isAssessment) return assessmentLinkFallback();
+      return '';
+    };
+
     const list: PhysicalBookItem[] = [];
     let hasExplicitAssessment = false;
     let hadServerAssessment = false;
@@ -405,7 +431,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                     id: `${s.subjectName}-${opt.typeId}-core`,
                     title: fullTitle,
                     type: 'Core',
-                    link: opt.link,
+                    link: pickLinkForType(opt, 'Core', isAssessmentSubject),
                     subjectName: isAssessmentSubject ? 'Assessment' : displaySubject,
                     className: s.className,
                     canDrop: canMutate,
@@ -442,7 +468,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                     id: `${s.subjectName}-${opt.typeId}-work`,
                     title: `${opt.label} (Workbook)`,
                     type: 'Work',
-                    link: opt.link, // Assuming same PDF link for now
+                    link: pickLinkForType(opt, 'Work', isAssessmentSubject),
                     subjectName: displaySubject,
                     className: s.className,
                     canDrop: canMutate,
@@ -471,7 +497,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                     id: `${s.subjectName}-${opt.typeId}-addon`,
                     title: `${opt.label} (Add-on)`,
                     type: 'Addon',
-                    link: opt.link,
+                    link: pickLinkForType(opt, 'Addon', isAssessmentSubject),
                     subjectName: displaySubject,
                     className: s.className,
                     canDrop: canMutate,
@@ -683,7 +709,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
 
                             {/* Actions (Right on mobile, Col 3 on desktop) */}
                             <div className="flex items-center justify-end gap-2 md:col-span-5 self-center shrink-0">
-                                {book.link !== undefined && (
+                                {!book.isExcluded && (
                                     <button 
                                         type="button"
                                         onClick={(e) => { e.stopPropagation(); togglePdf(book.id); }}
@@ -716,9 +742,10 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                         </div>
 
                         {/* Inline PDF Viewer */}
-                        {book.link && expandedPdf === book.id && (
+                        {!book.isExcluded && expandedPdf === book.id && (
+                            
                             <div className="border-t border-slate-100 p-2 md:p-4 bg-slate-50 animate-in fade-in">
-                                <PdfViewer link={book.link} />
+                                <PdfViewer link={resolveBookLink(book)} />
                             </div>
                         )}
                      </div>

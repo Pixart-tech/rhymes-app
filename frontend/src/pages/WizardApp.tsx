@@ -257,6 +257,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const canFinish = !isFinalized && hasPendingSelections && finishStatus !== 'success'; //&& hasAcceptedTerms;
   
   
+  
 
   useEffect(() => {
     if (finishStatus === 'success' && selectionSignature !== lastSavedSelectionSignature.current) {
@@ -646,8 +647,10 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         setWizardSelections(cleared);
         setSkipWorkMap({});
         advanceStep(cleared);
+        
         return;
       }
+      
 
       const existingIndex = workingSelections.findIndex(
         (s) =>
@@ -927,6 +930,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     setFinishStatus('saving');
     
     const saved = await persistFinalSelections();
+   
     if (!saved) {
       setFinishStatus('error');
       return;

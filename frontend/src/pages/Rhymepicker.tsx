@@ -3134,6 +3134,10 @@ export function RhymesWorkflowApp() {
   });
 
   const refreshBookSelectionsPresence = useCallback(async (force: boolean = false) => {
+    // Defer until Firebase auth is ready so the first request carries a token.
+    if (authLoading || !user) {
+      return;
+    }
     if (!school?.school_id) {
       setHasBookSelections(false);
       bookPresenceFetchRef.current = { inFlight: false, schoolId: null };
@@ -3150,15 +3154,8 @@ export function RhymesWorkflowApp() {
     bookPresenceFetchRef.current = { inFlight: true, schoolId: school.school_id };
     try {
       const token = await getIdToken?.();
-      console.log(token);
       if (!token) {
-          throw new Error('Unable to fetch Firebase token');
-      }
-      console.log(authLoading)
-      
-      if (!token) {
-        setHasBookSelections(false);
-        return;
+        throw new Error('Unable to fetch Firebase token');
       }
       const headers = { Authorization: `Bearer ${token}` };
       const response = await axios.get(`${API}/book-selections/${school.school_id}`, {
@@ -3189,9 +3186,12 @@ export function RhymesWorkflowApp() {
     } finally {
       bookPresenceFetchRef.current.inFlight = false;
     }
-  }, [API, getIdToken, school?.school_id]);
+  }, [API, authLoading, getIdToken, school?.school_id, user]);
 
   useEffect(() => {
+    if (authLoading || !user) {
+      return;
+    }
     if (!school?.school_id) {
       return;
     }
@@ -3202,7 +3202,7 @@ export function RhymesWorkflowApp() {
     // Ensure a fresh check on each entry to mode page
     bookPresenceFetchRef.current = { inFlight: false, schoolId: null };
     void refreshBookSelectionsPresence(true);
-  }, [refreshBookSelectionsPresence, school?.school_id, selectedMode]);
+  }, [authLoading, refreshBookSelectionsPresence, school?.school_id, selectedMode, user]);
 
   useEffect(() => {
     if (!school?.school_id) {
