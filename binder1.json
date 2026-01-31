@@ -1,0 +1,417 @@
+{
+  "school": {
+    "created_at": "2025-11-29 09:55:18.636896+00:00",
+    "city": "bangalore",
+    "grades": {
+      "lkg": {
+        "label": "LKG",
+        "enabled": true
+      },
+      "nursery": {
+        "label": "MONT1",
+        "enabled": true
+      },
+      "playgroup": {
+        "label": "PRENURSERY",
+        "enabled": true
+      },
+      "ukg": {
+        "label": "UKG",
+        "enabled": true
+      }
+    },
+    
+    "address": "1-6-5,Swagruha apartments, Srihandhakaval, nagarbhavi, bangalore, kA - 533003",
+    "created_by_email": "chandraraotummala2@gmail.com",
+    "timestamp": "2025-12-04 04:22:32.149298+00:00",
+    "state": "kA",
+    "pin": "533003",
+    "school_name": "abc",
+    "website": "www.edplore.com",
+    "service_type": [
+      "id_cards",
+      "report_cards",
+      "certificates"
+    ],
+    "id": "SREI0",
+    "principal_email": "chandraraotummala2@gmail.com",
+    "logo": "image/png",
+    "created_by_user_id": "OhQyNKpYrFgU830jNSgpzeT97BS2",
+    "tagline": "jhgj",
+    "address_line1": "1-6-5,Swagruha apartments",
+    "phone": "08888888888",
+    "principal_phone": "08888888888",
+    "email": "chandraraotummala2@gmail.com",
+    "school_id": "SREI0",
+    "principal_name": "Mickey",
+    "updated_at": "2025-12-04 04:22:32.149298+00:00",
+    "id_card_fields": [
+      "Student Name"
+    ],
+    "service_status": {
+      "certificates": "yes",
+      "id_cards": "yes",
+      "report_cards": "yes"
+    }
+  },
+
+  "Coverpage"
+: {
+  "grades" : {
+    "lkg" : {
+      "theme" : "V12",
+      "theme_colour" : "V12_C1"
+    },
+    "nursery" : {
+      "theme" : "V12",
+      "theme_colour" : "V12_C2"
+    },
+    "playgroup" : {
+      "theme" : "V12",
+      "theme_colour" : "V12_C3"
+    },
+    "ukg" : {
+      "theme" : "V12",
+      "theme_colour" : "V12_C4"
+    }
+
+  }
+    
+  },
+
+  "books": {
+    "selections": [
+      {
+        "core_cover": "0301",
+        "work_cover_title": "English Workbook",
+        "type": "small + vowels",
+        "core_spine": "L2",
+        "work": "100000304",
+        "class": "LKG",
+        "core": "100000303",
+        "work_cover": "0302",
+        "work_spine": "L3",
+        "core_cover_title": "English Skillbook",
+        "grade_subject": "LKG : English Skillbook",
+        "subject": "English"
+      },
+      {
+        "core_cover": "0303",
+        "work_cover_title": "Maths Workbook",
+        "type": "1-50 and 1-10 number names",
+        "core_spine": "L4",
+        "work": "100000309",
+        "class": "LKG",
+        "core": "100000308",
+        "work_cover": "0304",
+        "work_spine": "L5",
+        "core_cover_title": "Maths Skillbook",
+        "grade_subject": "LKG : Maths Skillbook",
+        "subject": "Maths"
+      },
+      {
+        "core_cover": "0306",
+        "type": "EVS (default)",
+        "core_spine": "L1",
+        "class": "LKG",
+        "core": "100000301",
+        "core_cover_title": "EVS",
+        "grade_subject": "LKG : EVS",
+        "subject": "EVS"
+      },
+      {
+        "core_cover": "0308",
+        "type": "Art & Craft",
+        "core_spine": "L6",
+        "class": "LKG",
+        "core": "100000311",
+        "core_cover_title": "Art & Craft",
+        "grade_subject": "LKG : Art & Craft",
+        "subject": "Art & Craft"
+      },
+      {
+        "core_cover": "0309",
+        "type": "Rhymes & Stories (Customisable)",
+        "core_spine": "L8",
+        "class": "LKG",
+        "core": "100000302",
+        "core_cover_title": "Rhymes & Stories",
+        "grade_subject": "LKG : Rhymes & Stories",
+        "subject": "Rhymes & stories"
+      },
+      {
+        "core_cover": "0310",
+        "type": "Swara",
+        "core_spine": "L10",
+        "class": "LKG",
+        "core": "100000314",
+        "core_cover_title": "Kannada",
+        "grade_subject": "LKG : Kannada",
+        "subject": "Kannada"
+      },
+      {
+        "core_cover": "0307",
+        "type": "Small 1-50",
+        "core_spine": "L7",
+        "class": "LKG",
+        "core": "100000312",
+        "core_cover_title": "Assessment",
+        "grade_subject": "LKG : Assessment",
+        "subject": "Assessment"
+      },
+      {
+        "core_cover": "0201",
+        "work_cover_title": "English Workbook",
+        "type": "ABCD caps",
+        "core_spine": "N2",
+        "work": "100000204",
+        "class": "MONT1 ",
+        "core": "100000203",
+        "work_cover": "0202",
+        "work_spine": "N3",
+        "core_cover_title": "English Skillbook",
+        "grade_subject": "MONT1 : English Skillbook",
+        "subject": "English"
+      },
+      {
+        "core_cover": "0203",
+        "work_cover_title": "Maths Workbook",
+        "type": "1 to 20",
+        "core_spine": "N4",
+        "work": "100000215",
+        "class": "MONT1 ",
+        "core": "100000214",
+        "work_cover": "0204",
+        "work_spine": "N5",
+        "core_cover_title": "Maths Skillbook",
+        "grade_subject": "MONT1 : Maths Skillbook",
+        "subject": "Maths"
+      },
+      {
+        "core_cover": "0206",
+        "type": "EVS",
+        "core_spine": "N1",
+        "class": "MONT1 ",
+        "core": "100000201",
+        "core_cover_title": "EVS",
+        "grade_subject": "MONT1 : EVS",
+        "subject": "EVS"
+      },
+      {
+        "core_cover": "0208",
+        "type": "Rhymes & Stories (Customisable)",
+        "core_spine": "N8",
+        "class": "MONT1 ",
+        "core": "100000202",
+        "core_cover_title": "Rhymes & Stories",
+        "grade_subject": "MONT1 : Rhymes & Stories",
+        "subject": "Rhymes & stories"
+      },
+      {
+        "core_cover": "0209",
+        "type": "Art & Craft",
+        "core_spine": "N6",
+        "class": "MONT1 ",
+        "core": "100000217",
+        "core_cover_title": "Art & Craft",
+        "grade_subject": "MONT1 : Art & Craft",
+        "subject": "Art & Craft"
+      },
+      {
+        "core_cover": "0207",
+        "type": "ABCD 1-20",
+        "core_spine": "N7",
+        "class": "MONT1 ",
+        "core": "100000218",
+        "core_cover_title": "Assessment",
+        "grade_subject": "MONT1 : Assessment",
+        "subject": "Assessment"
+      },
+      {
+        "core_cover": "0101",
+        "type": "Standard",
+        "core_spine": "PG1",
+        "class": "PG",
+        "core": "100000101",
+        "core_cover_title": "EVS",
+        "grade_subject": "Playgroup : EVS",
+        "subject": "EVS"
+      },
+      {
+        "core_cover": "0102",
+        "type": "Standard",
+        "core_spine": "PG6",
+        "class": "PG",
+        "core": "100000102",
+        "core_cover_title": "Rhymes and stories",
+        "grade_subject": "Playgroup : Rhymes and stories",
+        "subject": "Rhymes and stories"
+      },
+      {
+        "core_cover": "0103",
+        "type": "Standard",
+        "core_spine": "PG2",
+        "class": "PG",
+        "core": "100000103",
+        "core_cover_title": "English",
+        "grade_subject": "Playgroup : English",
+        "subject": "English"
+      },
+      {
+        "core_cover": "0104",
+        "type": "Standard",
+        "core_spine": "PG3",
+        "class": "PG",
+        "core": "100000104",
+        "core_cover_title": "Maths",
+        "grade_subject": "Playgroup : Maths",
+        "subject": "Maths"
+      },
+      {
+        "core_cover": "0105",
+        "type": "Standard",
+        "core_spine": "PG4",
+        "class": "PG",
+        "core": "100000105",
+        "core_cover_title": "Art & Craft",
+        "grade_subject": "Playgroup : Art & Craft",
+        "subject": "Art & Craft"
+      },
+      {
+        "core_cover": "0106",
+        "type": "Standard",
+        "core_spine": "PG5",
+        "class": "PG",
+        "core": "100000106",
+        "core_cover_title": "Pattern",
+        "grade_subject": "Playgroup : Pattern",
+        "subject": "Pattern"
+      },
+      {
+        "core_cover": "0401",
+        "type": "without cursive+ long vowels + blends + diaphrams + simple sentences",
+        "core_spine": "U2",
+        "work": "100000404",
+        "class": "UKG",
+        "core": "100000403",
+        "work_cover": "0402",
+        "work_spine": "U3",
+        "subject": "English"
+      },
+      {
+        "core_cover": "0404",
+        "type": "1-100 and 1-100 number names",
+        "core_spine": "U4",
+        "work": "100000408",
+        "class": "UKG",
+        "core": "100000407",
+        "work_cover": "0405",
+        "work_spine": "U5",
+        "subject": "Maths"
+      },
+      {
+        "core": "100000401",
+        "core_cover": "0407",
+        "type": "EVS",
+        "core_spine": "U1",
+        "subject": "EVS",
+        "class": "UKG"
+      },
+      {
+        "core": "100000411",
+        "core_cover": "0410",
+        "type": "Art & Craft",
+        "core_spine": "U6",
+        "subject": "Art & Craft",
+        "class": "UKG"
+      },
+      {
+        "core": "100000416",
+        "core_cover": "0412",
+        "type": "Swara & vyanjana",
+        "core_spine": "U9",
+        "subject": "Hindi",
+        "class": "UKG"
+      },
+      {
+        "core": "100000415",
+        "core_cover": "0411",
+        "type": "Swara & vyanjana",
+        "core_spine": "U10",
+        "subject": "Kannada",
+        "class": "UKG"
+      },
+      {
+        "core": "100000412",
+        "core_cover": "0408",
+        "type": "1-100",
+        "core_spine": "U7",
+        "subject": "Assessment",
+        "class": "UKG"
+      },
+      {
+    "class": "Nursery",
+    "subject": "Drawing",
+    "type": "Custom",
+    "core": "101000202",
+    "core_cover": "CNC1",
+    "core_cover_title": "Drawing",
+    "core_spine": "NC1"
+      }
+    ],
+    "excluded_assessments": [],
+    "source": "wizard",
+    "updated_at": "2025-12-04T04:29:45.196261+00:00"
+  },
+  "rhymes": {
+    "lkg": [
+      {
+        "page_index": 0,
+        "code": "RE00001",
+        "name": "one, two, buckle my shoes",
+        "pages": 0.5,
+        "position": "top"
+      }
+    ],
+    "nursery": [
+      {
+        "page_index": 0,
+        "code": "RE00300",
+        "name": "The wheels on the bus",
+        "pages": 3.0,
+        "position": "top"
+      },
+      {
+        "page_index": 3,
+        "code": "RE00285",
+        "name": "Five little speckled frogs",
+        "pages": 2.0,
+        "position": "top"
+      },
+      {
+        "page_index": 5,
+        "code": "RE00077",
+        "name": "Fruits salad",
+        "pages": 1.0,
+        "position": "top"
+      },
+      {
+        "page_index": 6,
+        "code": "RE00003",
+        "name": "Two little hands to clap",
+        "pages": 0.5,
+        "position": "top"
+      }
+    ],
+    "ukg": [
+      {
+        "page_index": 0,
+        "code": "RE00077",
+        "name": "Fruits salad",
+        "pages": 1.0,
+        "position": "top"
+      }
+    ]
+  },
+  "generated_at": "2025-12-04T04:32:15.035150"
+}

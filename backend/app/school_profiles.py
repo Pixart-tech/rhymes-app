@@ -11,12 +11,32 @@ from pydantic import BaseModel, EmailStr, Field, FieldValidationInfo, field_vali
 
 from .models import School
 
-SchoolServiceType = Literal["id_cards", "report_cards", "certificates"]
+SchoolServiceType = Literal["id_cards", "report_cards", "certificates", "Pre-Written Nursery Set", "Pre-Written LKG Set", "Pre-Written UKG Set", "Birthday  card",   "Independence Day activity card","Children's Day Gifting Book","Calendars 26",]
 SERVICE_TYPE_VALUES: Tuple[SchoolServiceType, ...] = (
     "id_cards",
     "report_cards",
     "certificates",
+    "Pre-Written Nursery Set",
+    "Pre-Written LKG Set",
+    "Pre-Written UKG Set",
+    "Birthday  card",
+    "Independence Day activity card",
+    "Children's Day Gifting Book",
+    "Calendars 26"
+    
 )
+# SERVICE_TYPE_VALUES: dict[SchoolServiceType, str] = {
+#     "id_cards": "840442000002690064",
+#     "report_cards": "840442000002690020",
+#     "certificates": "840442000002690009",
+#     "Pre-Written Nursery Set": "840442000002690031",
+#     "Pre-Written LKG Set": "840442000002690042",
+#     "Pre-Written UKG Set": "840442000002690053",
+#     "Birthday Gifting card": "1004",
+#     "Independence Day activity card": "1001",
+#     "Children's Day Gifting Book": "1002",
+#     "Calendar 26": "1003",
+# }
 SERVICE_STATUS_VALUES = ("yes", "no")
 ServiceStatus = Literal["yes", "no"]
 ServiceStatusMap = Dict[SchoolServiceType, ServiceStatus]

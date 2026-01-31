@@ -1,3 +1,4 @@
+import { add } from 'date-fns';
 import { getAssessmentForClass, SCHOOL_DATA } from '../constants/constants';
 import { AssessmentVariant, BookOption, CoverSelectionMeta, FinalOutputItem, SelectionRecord } from '../types/types';
 
@@ -20,12 +21,13 @@ const canonicalOptionIndex: Record<string, BookOption> = (() => {
 const mergeWithCanonicalOption = (option: BookOption | null): BookOption | null => {
   if (!option) return null;
   const canonical =
+  
+    (option.addOnId && canonicalOptionIndex[`addon:${option.addOnId}`])||
     (option.coreId && canonicalOptionIndex[`core:${option.coreId}`]) ||
-    (option.workId && canonicalOptionIndex[`work:${option.workId}`]) ||
-    (option.addOnId && canonicalOptionIndex[`addon:${option.addOnId}`]);
+    (option.workId && canonicalOptionIndex[`work:${option.workId}`]);
 
   if (!canonical) return option;
-
+  
   return {
     ...option,
     coreCover: canonical.coreCover ?? option.coreCover,
@@ -57,6 +59,7 @@ export const buildFinalBookSelections = (
     (excludedAssessments || []).map((value) => (value || '').toString().trim().toLowerCase())
   );
 
+  
   selections.forEach((selection) => {
     if (!selectionsByClass[selection.className]) {
       selectionsByClass[selection.className] = [];
@@ -65,17 +68,24 @@ export const buildFinalBookSelections = (
   });
 
   const finalData: FinalOutputItem[] = [];
-
+  
+  
   Object.keys(selectionsByClass).forEach((className) => {
+    
     const classSelections = selectionsByClass[className].map((selection) => ({
       ...selection,
       selectedOption: mergeWithCanonicalOption(selection.selectedOption),
     }));
+
+    
+  
+    const normalizedClassName = (className || '').toString().trim().toLowerCase();
     const gradeKey = className.toLowerCase();
     const classKey = gradeKey;
     const gradeLabel = gradeNames[gradeKey] || className;
     const displayLabel = gradeLabel || className;
     const coverMeta = coverSelections[className] || null;
+    const isPlaygroup = normalizedClassName === 'playgroup' || normalizedClassName === 'pg';
 
     const hasActive = (selection: SelectionRecord): boolean => {
       if (!selection.selectedOption) return false;
@@ -105,9 +115,16 @@ export const buildFinalBookSelections = (
         const subject = (item.subjectName || '').toString().trim().toLowerCase();
         return ['english', 'maths', 'evs'].includes(subject) && !!item.selectedOption;
       });
+    
 
+    
     classSelections.forEach((selection) => {
       if (!selection.selectedOption) return;
+      const isAssessmentSubject =
+        (selection.subjectName || '').toString().trim().toLowerCase() === 'assessment';
+      if (isPlaygroup && isAssessmentSubject) {
+        return;
+      }
 
       const hasActiveCore = !!selection.selectedOption.coreId && !selection.skipCore;
       const hasActiveWork = !!selection.selectedOption.workId && !selection.skipWork;
@@ -122,10 +139,16 @@ export const buildFinalBookSelections = (
         selection.customWorkTitle ||
         selection.selectedOption.defaultWorkCoverTitle ||
         selection.selectedOption.label;
+      
       const addonTitle =
         selection.customAddonTitle ||
         selection.selectedOption.defaultAddonCoverTitle ||
         selection.selectedOption.label;
+     
+      const isLanguageSubject =
+        (selection.subjectName || '').toString().trim().toLowerCase() === 'languages';
+      const gradeSubjectValue = (title: string) =>
+        isLanguageSubject ? displayLabel : `${displayLabel} : ${title}`;
 
       const base = {
         class: classKey,
@@ -144,7 +167,7 @@ export const buildFinalBookSelections = (
         finalData.push({
           ...base,
           component: 'core',
-          grade_subject: `${displayLabel} : ${coreTitle}`,
+          grade_subject: gradeSubjectValue(coreTitle),
           core: selection.selectedOption.coreId,
           core_cover: selection.selectedOption.coreCover,
           core_cover_title: selection.customCoreTitle || selection.selectedOption.defaultCoreCoverTitle,
@@ -158,7 +181,7 @@ export const buildFinalBookSelections = (
         finalData.push({
           ...base,
           component: 'work',
-          grade_subject: `${displayLabel} : ${workTitle}`,
+          grade_subject: gradeSubjectValue(workTitle),
           core: undefined,
           work: selection.selectedOption.workId,
           work_cover: selection.selectedOption.workCover,
@@ -167,12 +190,13 @@ export const buildFinalBookSelections = (
           addOn: undefined
         });
       }
-
+     
       if (hasActiveAddon) {
+        
         finalData.push({
           ...base,
           component: 'addon',
-          grade_subject: `${displayLabel} : ${addonTitle}`,
+          grade_subject: gradeSubjectValue(addonTitle),
           core: undefined,
           work: undefined,
           addOn: selection.selectedOption.addOnId,
@@ -183,20 +207,28 @@ export const buildFinalBookSelections = (
       }
     });
 
-    const normalizedClassName = (className || '').toString().trim().toLowerCase();
-    const isPlaygroup = normalizedClassName === 'playgroup' || normalizedClassName === 'pg';
-
-    if (!excludedSet.has(normalizedClassName) && !isPlaygroup) {
+    if (!excludedSet.has(normalizedClassName)) {
+      
       // Skip assessment only when all three subjects are absent
       if (!hasCoreSubjects) {
         return;
       }
+      if (isPlaygroup) {
+        return;
+      }
+      const normalizedClass = (className || '').toString().trim().toLowerCase();
+   
+      const variant = assessmentVariants[className] || assessmentVariants[normalizedClass] || 'WITH_MARKS';
+      
+     
       const assessment = getAssessmentForClass(
         className,
         englishSelection,
         mathsSelection,
-        assessmentVariants[className] || 'WITH_MARKS'
+        evsSelection,
+        variant
       );
+      
 
         if (assessment) {
           const assessmentTitle = customAssessmentTitles[className] || assessment.defaultCoreCoverTitle || assessment.label;

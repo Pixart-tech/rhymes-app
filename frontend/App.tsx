@@ -59,7 +59,8 @@ export default function App() {
     if (!excludedAssessments.includes(className)) {
         const englishSelection = classSelections.find(s => s.subjectName === "English")?.selectedOption || null;
         const mathsSelection = classSelections.find(s => s.subjectName === "Maths")?.selectedOption || null;
-        const assessment = getAssessmentForClass(className, englishSelection, mathsSelection, getAssessmentVariant(className));
+        const evsSelection = classSelections.find(s => s.subjectName === "EVS")?.selectedOption || null;
+        const assessment = getAssessmentForClass(className, englishSelection, mathsSelection, evsSelection, getAssessmentVariant(className));
         if (assessment) count++;
     }
 
@@ -234,7 +235,8 @@ export default function App() {
       const classSelections = selections.filter(s => s.className === currentClassData.name);
       const englishSelection = classSelections.find(s => s.subjectName === "English")?.selectedOption || null;
       const mathsSelection = classSelections.find(s => s.subjectName === "Maths")?.selectedOption || null;
-      return getAssessmentForClass(currentClassData.name, englishSelection, mathsSelection, getAssessmentVariant(currentClassData.name));
+      const evsSelection = classSelections.find(s => s.subjectName === "EVS")?.selectedOption || null;
+      return getAssessmentForClass(currentClassData.name, englishSelection, mathsSelection, evsSelection, getAssessmentVariant(currentClassData.name));
   };
 
   // --- Renderers ---

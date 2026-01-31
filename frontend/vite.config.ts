@@ -15,17 +15,20 @@ export default defineConfig({
     open: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'https://book.eshiksavikas.in',
+        // target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       },
       '/public': {
-        target: 'http://localhost:8000',
+        target: 'https://book.eshiksavikas.in',
+        // target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       },
       '/cover-library': {
-        target: 'http://localhost:8000',
+        target: 'https://book.eshiksavikas.in',
+        // target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       },

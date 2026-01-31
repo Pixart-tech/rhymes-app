@@ -6,7 +6,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
-import { CheckCircle2, ChevronLeft, ImageOff, X } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ImageOff, Star, X } from 'lucide-react';
 
 import {
   API_BASE_URL,
@@ -194,6 +194,7 @@ const CoverPageWorkflow = ({
   onBackToMode,
   coverDefaults,
   isReadOnly = false,
+  onNavigateToBooks,
 }) => {
   const { getIdToken, user, loading: authLoading } = useAuth();
   const persistedApp = loadPersistedAppState?.();
@@ -831,6 +832,9 @@ const CoverPageWorkflow = ({
     const ok = await persistStatus('2', { suppressToast: true });
     if (ok) {
       toast.success('Cover page selections are successfully saved to DB.');
+      if (typeof onBackToMode === 'function') {
+        onBackToMode();
+      }
       setSelectedThemeId('');
       setSelectedColourId('');
       setPngAssignments({});
@@ -882,6 +886,7 @@ const CoverPageWorkflow = ({
   const handleFinish = () => {
     void handleFinishSave();
   };
+  const showBookSelectionCta = !isAdmin && typeof onNavigateToBooks === 'function' && workflowStatus !== '1';
 
   const handleRemoveGradeSelection = useCallback(
     async (gradeKey) => {
@@ -1303,6 +1308,17 @@ const CoverPageWorkflow = ({
                 </p>
               </CardContent>
             </Card>
+            {showBookSelectionCta && (
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+                  onClick={() => onNavigateToBooks?.()}
+                >
+                  Continue to book selection
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       );
@@ -1372,6 +1388,17 @@ const CoverPageWorkflow = ({
               </p>
             </CardContent>
           </Card>
+          {showBookSelectionCta && (
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+                onClick={() => onNavigateToBooks?.()}
+              >
+                Continue to book selection
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1483,7 +1510,8 @@ const CoverPageWorkflow = ({
             )}
 
             <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-y-6 gap-x-4 sm:gap-y-10 sm:gap-x-12 lg:gap-x-14 xl:gap-x-16 max-w-[520px] sm:max-w-6xl mx-auto">
-              {themes.map((theme) => {
+              {themes.map((theme, index) => {
+                const isPopular = index === 0;
                 const isSelected = selectedThemeId === theme.id;
                 const sources = buildThemeSources(theme);
                 const cardSrc = sources?.cover || sources?.original || '';
@@ -1500,6 +1528,12 @@ const CoverPageWorkflow = ({
                     aria-pressed={isSelected}
                     disabled={effectiveReadOnly}
                   >
+                    {isPopular && (
+                      <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 shadow-sm">
+                        <Star size={12} className="text-blue-600 fill-blue-500" />
+                        Popular
+                      </div>
+                    )}
                     <div className="h-full w-full overflow-hidden">
                       {cardSrc ? (
                         <img

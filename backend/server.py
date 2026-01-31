@@ -878,10 +878,13 @@ app = FastAPI(
     version="1.0.0",
     openapi_version="3.0.3",
 )
+
+"""
 origins = [
     
     "http://localhost:3000" , "http://192.168.0.102:3000" # remove * in production
 ]
+"""
 
 app.add_middleware(
     CORSMiddleware,
@@ -1822,7 +1825,7 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
     stickers: Dict[str, str] = {}
     for item in book_selections:
         grade_label = (item.get("class_label") or item.get("class") or "").strip()
-        grade_key = grade_label.lower()
+        grade_key = (item.get("class") or item.get("class_name") or grade_label).strip().lower()
         subject = (item.get("subject") or "").strip().lower()
         component = (item.get("component") or "").strip().lower()
         has_book = item.get("core") or item.get("work") or item.get("addOn")
@@ -1832,7 +1835,7 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
         title_text = " ".join([core_title, work_title, addon_title])
         has_skillbook = ("maths skillbook" in title_text) or ("english skillbook" in title_text)
         if subject in {"english", "maths"} and component in {"core", "work", "addon"} and has_book and has_skillbook and grade_key in STICKER_CODES:
-            stickers[grade_label or grade_key] = STICKER_CODES[grade_key]
+            stickers[grade_key] = STICKER_CODES[grade_key]
 
     rhyme_selections = get_selected_rhymes(school_id)
 
@@ -1969,13 +1972,16 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
 
 
 @api_router.post("/book-selections")
+
 async def save_book_selections(
     payload: BookSelectionPayload, authorization: Optional[str] = Header(None)
 ):
+    
     """Persist book selections grouped per class under the school_id (book_selections/{school_id}/classes/{class})."""
     decoded_token = _verify_and_decode_token(authorization)
 
     now = datetime.utcnow()
+    batch = db.batch()
     # Build lookup maps from grade_names (keyed by canonical grade id) to stabilize document ids and labels.
     # Use grade names from the school profile (payload.grade_names) as canonical document ids and labels.
     grade_names_map = {
@@ -2010,11 +2016,14 @@ async def save_book_selections(
                 continue
         class_groups.setdefault(mapped_key or normalized_raw, []).append(item)
 
+    # Delete all existing grade documents before writing the fresh snapshot (single atomic batch).
+    existing_docs = list(_book_collection_for_school(payload.school_id).stream())
+    for doc in existing_docs:
+        batch.delete(doc.reference)
+
     for class_key, items in class_groups.items():
         doc_id = class_key if class_key in grade_names_map else _normalize_class_doc_id(class_key)
         doc_ref = _book_collection_for_school(payload.school_id).document(doc_id)
-        existing_doc = doc_ref.get()
-        existing_data: Dict[str, Any] = existing_doc.to_dict() if existing_doc.exists else {}
 
         # De-duplicate incoming items for this class; replace existing items entirely.
         def _item_key(entry: Dict[str, Any]) -> str:
@@ -2058,37 +2067,30 @@ async def save_book_selections(
             if decoded_token.get("email"):
                 class_record["updated_by_email"] = decoded_token.get("email")
 
-        doc_ref.set(class_record)
+        batch.set(doc_ref, class_record)
 
-    # Handle explicit deletions
-    for class_name in payload.deleted_classes:
-        if not class_name:
-            continue
-        doc_id = _normalize_class_doc_id(class_name)
-        if not doc_id:
-            continue
-        _book_collection_for_school(payload.school_id).document(doc_id).delete()
+    batch.commit()
 
     return {"ok": True, "updated_at": now.isoformat()}
 
 
-@api_router.get("/book-selections/{school_id}/classes/{class_name}")
-def get_book_selection_for_class(
-    school_id: str, class_name: str, authorization: Optional[str] = Header(None)
-):
-    """Return saved book selection for a single class without streaming the entire collection."""
-    _verify_and_decode_token(authorization)
-    doc_id = _normalize_class_doc_id(class_name)
-    if not doc_id:
-        raise HTTPException(status_code=400, detail="class_name is required")
-    doc_ref = _book_collection_for_school(school_id).document(doc_id)
-    snapshot = doc_ref.get()
-    if not snapshot.exists:
-        raise HTTPException(status_code=404, detail="Class selection not found")
+# @api_router.get("/book-selections/{school_id}/classes/{class_name}")
+# def get_book_selection_for_class(
+#     school_id: str, class_name: str, authorization: Optional[str] = Header(None)
+# ):
+#     """Return saved book selection for a single class without streaming the entire collection."""
+#     _verify_and_decode_token(authorization)
+#     doc_id = _normalize_class_doc_id(class_name)
+#     if not doc_id:
+#         raise HTTPException(status_code=400, detail="class_name is required")
+#     doc_ref = _book_collection_for_school(school_id).document(doc_id)
+#     snapshot = doc_ref.get()
+#     if not snapshot.exists:
+#         raise HTTPException(status_code=404, detail="Class selection not found")
 
-    data = snapshot.to_dict() or {}
-    data.setdefault("class", data.get("class") or snapshot.id)
-    return data
+#     data = snapshot.to_dict() or {}
+#     data.setdefault("class", data.get("class") or snapshot.id)
+#     return data
 
 
 @api_router.get("/book-selections/{school_id}")
@@ -2970,7 +2972,7 @@ async def delete_library_colour(version: str, grade_code: str, request: Request)
 
 # ---------------------------------------------------------------------------
 # Subject PDF uploads (static)
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------ge-----------
 
 
 @api_router.post("/subject-pdfs/{class_name}/{subject_name}")
@@ -3158,7 +3160,7 @@ async def get_cover_assets_network_paths(selection_key: str):
     
 
     try:
-        print(selection_fs_path)
+        
         exists = Path(selection_fs_path).exists()
        
         is_directory = selection_fs_path.is_dir()
@@ -3188,7 +3190,7 @@ async def get_cover_assets_network_paths(selection_key: str):
         # Build a raw UNC string (for example r"\\pixartnas\share\folder") so the
         # network lookup uses the exact Windows path supplied by administrators.
         network_file = unc_path_utils.format_unc_path(selection_unc_path / svg_file.name)
-        print(network_file)
+       
         svg_markup: Optional[str] = None
 
         svg_source_path: Optional[Path] = None
@@ -3259,7 +3261,7 @@ async def get_cover_asset_image(file_name: str):
 @api_router.get("/cover-assets/svg/{relative_path:path}")
 async def get_cover_asset(relative_path: str):
     """Return the raw SVG bytes for the cover asset ``relative_path``."""
-    print("Iam running")
+   
     base_path = _ensure_cover_assets_base_path()
    
 

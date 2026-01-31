@@ -188,18 +188,9 @@ const ModeSelectionPage = ({
   onBackToAdmin,
   onBackToDashboard,
   onEditProfile,
-  modePending
+  modePending,
+  hasBookSelections
 }) => {
-  const hasBookSelections = useMemo(() => {
-    const schoolId = school?.school_id;
-    if (!schoolId) return false;
-    return GRADE_OPTIONS.some((grade) => {
-      const stored = loadBookWorkflowState(schoolId, grade.id);
-      const count = Array.isArray(stored?.selectedBooks) ? stored.selectedBooks.length : 0;
-      return count > 0;
-    });
-  }, [school?.school_id]);
-
   const coverStatus = useMemo(() => {
     const rank: Record<string, number> = { '1': 1, '2': 2, '3': 3, '4': 4 };
     let status = (school?.cover_status || '1').toString();
@@ -239,13 +230,13 @@ const ModeSelectionPage = ({
       gradient: 'from-blue-400 to-indigo-500',
       icon: BookMarked
     },
-    {
-      id: 'rhymes',
-      title: 'Rhymes',
-      description: 'Select and organise rhymes to build your customised binders.',
-      gradient: 'from-orange-400 to-red-400',
-      icon: Music
-    }
+    // {
+    //   id: 'rhymes',
+    //   title: 'Rhymes',
+    //   description: 'Select and organise rhymes to build your customised binders.',
+    //   gradient: 'from-orange-400 to-red-400',
+    //   icon: Music
+    // }
   ];
 
   return (
@@ -284,18 +275,22 @@ const ModeSelectionPage = ({
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
               {options.map((option) => {
+                
                 const IconComponent = option.icon;
                 const showCoverButton = !(option.id === 'cover' && coverStatus !== '1');
                 const isBooksOption = option.id === 'books';
-                const buttonLabel = isBooksOption && hasBookSelections ? 'View selections' : `Explore ${option.title}`;
+                const buttonLabel = isBooksOption && hasBookSelections ? 'View book selections' : `Explore ${option.title}`;
                 return (
+                  
                   <Card
                     key={option.id}
                     className="group h-full min-h-[220px] sm:min-h-[240px] flex flex-col cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg border border-slate-200 bg-white"
                     onClick={() => onModeSelect(option.id)}
                   >
                     <CardContent className="flex-1 flex flex-col justify-between p-3 sm:p-4 text-center gap-2">
+                      
                       <div className="space-y-2">
+                        
                         <div className={`w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-lg sm:text-xl shadow`}>
                           <IconComponent className="h-6 w-6 sm:h-7 sm:w-7" />
                         </div>
@@ -2037,7 +2032,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
       if (newPages > 0.5) {
         return true;
       }
-
+    
       if (existingPages > 0.5) {
         return true;
       }
@@ -2263,18 +2258,18 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
 
     const position = resolveRhymePosition(rhyme, { explicitPosition });
 
-    console.log("→ Deleting rhyme (request):", {
-      code: rhyme.code,
-      position,
-      currentPageIndex,
-      grade
-    });
+    // console.log("→ Deleting rhyme (request):", {
+    //   code: rhyme.code,
+    //   position,
+    //   currentPageIndex,
+    //   grade
+    // });
 
     try {
       const res = await axios.delete(
         `/api/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`
       );
-      console.log("← Delete response:", res.data);
+      
 
       setSelectedRhymes(prev => {
         const filtered = prev.filter(r => {
@@ -2837,6 +2832,8 @@ export function RhymesWorkflowApp() {
     () => persistedState.workspaceUser ?? null
   );
   const [modePending, setModePending] = useState(false);
+  const [coverStatusChecking, setCoverStatusChecking] = useState(false);
+  const [hasBookSelections, setHasBookSelections] = useState(false);
   const [school, setSchool] = useState<SchoolProfile | null>(() => persistedState.school ?? null);
   const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
   const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
@@ -2862,23 +2859,9 @@ export function RhymesWorkflowApp() {
   const [isEditingSchoolProfile, setIsEditingSchoolProfile] = useState(false);
   const [schoolFormSubmitting, setSchoolFormSubmitting] = useState(false);
   const isSuperAdminUser = workspaceUser?.role === 'super-admin';
-  const coverStatus = useMemo(() => {
-    const rank: Record<string, number> = { '1': 1, '2': 2, '3': 3, '4': 4 };
-    let status = (school?.cover_status || '1').toString();
-    const schoolId = school?.school_id;
-    if (schoolId) {
-      let best = status;
-      GRADE_OPTIONS.forEach((grade) => {
-        const state = loadCoverWorkflowState(schoolId, grade.id);
-        const s = (state?.status || '').toString();
-        if (rank[s] && (!rank[best] || rank[s] > rank[best])) {
-          best = s;
-        }
-      });
-      status = best || status || '1';
-    }
-    return status;
-  }, [school?.cover_status, school?.school_id]);
+  const [coverSelectionsReady, setCoverSelectionsReady] = useState(false);
+  const [coverStatusCode, setCoverStatusCode] = useState<string>('1');
+  const coverStatus = useMemo(() => coverStatusCode, [coverStatusCode]);
 
   const selectionsFrozen = useMemo(() => {
     const status = (coverStatus || '1').toString();
@@ -2899,6 +2882,8 @@ export function RhymesWorkflowApp() {
       setSelectedMode(null);
       setSelectedGrade(null);
       setCoverDefaults(mergeCoverDefaults());
+      preflightCheckRef.current = { schoolId: null, done: false };
+      setCoverStatusChecking(false);
     }
   }, [authLoading, user]);
 
@@ -3103,10 +3088,12 @@ export function RhymesWorkflowApp() {
   const ensureCoverSelectionsExist = useCallback(async () => {
     if (!school?.school_id) {
       toast.error('School information is missing. Please reload and try again.');
+      setCoverSelectionsReady(false);
       return false;
     }
     try {
       const token = await getIdToken?.();
+      
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       const response = await axios.get(`${API}/cover-selections/${school.school_id}/exists`, {
         headers,
@@ -3114,20 +3101,168 @@ export function RhymesWorkflowApp() {
       });
       if (response.status >= 400) {
         toast.warning('Please complete cover page selections before moving to books.');
+        setCoverSelectionsReady(false);
         return false;
       }
       const hasCovers = response.data?.has_covers === true;
       if (!hasCovers) {
         toast.warning('Please complete cover page selections before moving to books.');
+        setCoverSelectionsReady(false);
         return false;
       }
+      setCoverSelectionsReady(true);
       return true;
     } catch (error) {
       console.warn('Unable to verify cover selections', error);
       toast.error('Unable to verify cover selections. Please try again.');
+      setCoverSelectionsReady(false);
       return false;
     }
   }, [API, getIdToken, school?.school_id]);
+
+  const bookPresenceFetchRef = useRef<{ inFlight: boolean; schoolId: string | null }>({
+    inFlight: false,
+    schoolId: null
+  });
+  const preflightCheckRef = useRef<{ schoolId: string | null; done: boolean }>({
+    schoolId: null,
+    done: false
+  });
+  const coverStatusFetchRef = useRef<{ inFlight: boolean; schoolId: string | null }>({
+    inFlight: false,
+    schoolId: null
+  });
+
+  const refreshBookSelectionsPresence = useCallback(async (force: boolean = false) => {
+    // Defer until Firebase auth is ready so the first request carries a token.
+    if (authLoading || !user) {
+      return;
+    }
+    if (!school?.school_id) {
+      setHasBookSelections(false);
+      bookPresenceFetchRef.current = { inFlight: false, schoolId: null };
+      return;
+    }
+    if (!force) {
+      if (bookPresenceFetchRef.current.inFlight && bookPresenceFetchRef.current.schoolId === school.school_id) {
+        return;
+      }
+      if (bookPresenceFetchRef.current.schoolId === school.school_id) {
+        return;
+      }
+    }
+    bookPresenceFetchRef.current = { inFlight: true, schoolId: school.school_id };
+    try {
+      const token = await getIdToken?.();
+      if (!token) {
+        throw new Error('Unable to fetch Firebase token');
+      }
+      const headers = { Authorization: `Bearer ${token}` };
+      const response = await axios.get(`${API}/book-selections/${school.school_id}`, {
+        headers,
+        validateStatus: () => true
+      });
+      if (response.status >= 400) {
+        setHasBookSelections(false);
+        return;
+      }
+      const payload = response.data;
+      const selectionsArray = Array.isArray(payload?.classes)
+        ? payload.classes
+        : Array.isArray(payload?.selections)
+          ? payload.selections
+          : Array.isArray(payload?.items)
+            ? payload.items
+            : Array.isArray(payload)
+              ? payload
+              : [];
+      const hasAny = Array.isArray(selectionsArray)
+        ? selectionsArray.length > 0
+        : Boolean(payload && Object.keys(payload || {}).length);
+      setHasBookSelections(hasAny);
+    } catch (error) {
+      console.warn('Unable to verify book selections', error);
+      setHasBookSelections(false);
+    } finally {
+      bookPresenceFetchRef.current.inFlight = false;
+    }
+  }, [API, authLoading, getIdToken, school?.school_id, user]);
+
+  useEffect(() => {
+    if (authLoading || !user) {
+      return;
+    }
+    if (!school?.school_id) {
+      return;
+    }
+    // Only check presence when the mode selection (main menu) is showing.
+    if (selectedMode !== null) {
+      return;
+    }
+    // Ensure a fresh check on each entry to mode page
+    bookPresenceFetchRef.current = { inFlight: false, schoolId: null };
+    void refreshBookSelectionsPresence(true);
+  }, [authLoading, refreshBookSelectionsPresence, school?.school_id, selectedMode, user]);
+
+  useEffect(() => {
+    if (!school?.school_id) {
+      preflightCheckRef.current = { schoolId: null, done: false };
+      setCoverSelectionsReady(false);
+      setCoverStatusCode('1');
+      setCoverStatusChecking(false);
+      return;
+    }
+    // Sync status code from persisted school metadata (no network)
+    const statusVal = (school.cover_status || '1').toString();
+    setCoverStatusCode(statusVal === 'finished' ? '4' : statusVal);
+    if (selectedMode !== null) {
+      return;
+    }
+    if (preflightCheckRef.current.schoolId === school.school_id && preflightCheckRef.current.done) {
+      setCoverStatusChecking(false);
+      return;
+    }
+    preflightCheckRef.current = { schoolId: school.school_id, done: true };
+    setCoverStatusChecking(true);
+    void (async () => {
+      try {
+        const statusHeaders: Record<string, string> = {};
+        const token = await getIdToken?.();
+        
+        
+        if (token) {
+          statusHeaders.Authorization = `Bearer ${token}`;
+        }
+        if (!coverStatusFetchRef.current.inFlight || coverStatusFetchRef.current.schoolId !== school.school_id) {
+          coverStatusFetchRef.current = { inFlight: true, schoolId: school.school_id };
+          const existsResp = await axios.get(`${API}/cover-status/${school.school_id}`, {
+            headers: statusHeaders, 
+            validateStatus: () => true,
+          });
+          if (existsResp.status < 400) {
+            const statusVal = (existsResp.data?.status || existsResp.data?.cover_status || '1').toString();
+            setCoverStatusCode(statusVal === 'finished' ? '4' : statusVal);
+            setCoverSelectionsReady(existsResp.data?.has_covers === true);
+          }
+          coverStatusFetchRef.current.inFlight = false;
+        }
+      } catch (_) {
+        coverStatusFetchRef.current.inFlight = false;
+      }
+      if (!hasBookSelections) {
+        await refreshBookSelectionsPresence(true);
+      }
+      setCoverStatusChecking(false);
+    })();
+  }, [getIdToken, refreshBookSelectionsPresence, school?.cover_status, school?.school_id, selectedMode, hasBookSelections]);
+
+  // Force a book presence refresh when school loads (e.g., after reload).
+  useEffect(() => {
+    if (!school?.school_id) return;
+    // Reset guard so this fetch always runs for the current school.
+    bookPresenceFetchRef.current = { inFlight: false, schoolId: null };
+    void refreshBookSelectionsPresence(true);
+  }, [refreshBookSelectionsPresence, school?.school_id]);
 
   const resolveFirstEnabledGrade = useCallback(() => {
     for (const option of GRADE_OPTIONS) {
@@ -3146,9 +3281,15 @@ export function RhymesWorkflowApp() {
       setModePending(true);
       try {
         if (mode === 'books') {
-          const ok = await ensureCoverSelectionsExist();
-          if (!ok) {
-            return;
+          // Only check covers/presence for Explore flow; skip for View
+          if (!hasBookSelections) {
+            if (!coverSelectionsReady) {
+              const ok = await ensureCoverSelectionsExist();
+              if (!ok) {
+                return;
+              }
+            }
+            await refreshBookSelectionsPresence(true);
           }
           if (typeof window !== 'undefined') {
             if (school?.school_id) {
@@ -3180,11 +3321,16 @@ export function RhymesWorkflowApp() {
       ensureCoverSelectionsExist,
       modePending,
       resolveFirstEnabledGrade,
+      refreshBookSelectionsPresence,
       selectionsFrozen,
       navigate,
       school
     ]
   );
+
+  const handleGoToBooksFromCover = useCallback(() => {
+    void handleModeSelect('books');
+  }, [handleModeSelect]);
 
   const handleGradeSelect = (grade, mode) => {
     if (mode) {
@@ -3293,16 +3439,25 @@ export function RhymesWorkflowApp() {
             isSuperAdmin={isSuperAdminUser}
           />
       ) : !selectedMode ? (
+        coverStatusChecking ? (
+          <div className="flex min-h-screen items-center justify-center bg-slate-50">
+            <div className="flex flex-col items-center gap-3 bg-white shadow-lg rounded-lg px-6 py-6 text-slate-700 border border-slate-200">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-orange-400" />
+              <div className="text-sm font-medium text-slate-600">Preparing your dashboard…</div>
+            </div>
+          </div>
+        ) : (
         <ModeSelectionPage
           school={school}
           onModeSelect={handleModeSelect}
           isSuperAdmin={isSuperAdminUser}
           isFrozen={selectionsFrozen}
+          hasBookSelections={hasBookSelections}
           onBackToAdmin={handleReturnToAdminDashboard}
           onBackToDashboard={!isSuperAdminUser ? handleReturnToBranchList : undefined}
           onEditProfile={() => setIsEditingSchoolProfile(true)}
           modePending={modePending}
-        />
+        />)
       ) : !selectedGrade && (selectedMode === 'rhymes' || selectedMode === 'cover') ? (
         <GradeSelectionPage
           school={school}
@@ -3313,7 +3468,8 @@ export function RhymesWorkflowApp() {
           onEditCoverDetails={handleEditCoverDetails}
           onCoverIntentChange={setCoverWorkflowIntent}
         />
-      ) : selectedMode === 'rhymes' ? (
+      ) : 
+      selectedMode === 'rhymes' ? (
         <RhymeSelectionPage
           school={school}
           grade={selectedGrade}
@@ -3323,13 +3479,15 @@ export function RhymesWorkflowApp() {
           isReadOnly={selectionsFrozen}
           isFrozen={selectionsFrozen}
         />
-      ) : selectedMode === 'cover' && selectedGrade ? (
+      ) : 
+      selectedMode === 'cover' && selectedGrade ? (
         <CoverPageWorkflow
           school={school}
           grade={selectedGrade}
           onBackToMode={handleBackToModeSelection}
           coverDefaults={coverDefaults}
           isReadOnly={selectionsFrozen || coverWorkflowIntent === 'view'}
+          onNavigateToBooks={handleGoToBooksFromCover}
         />
       ) : (
         <FeaturePlaceholderPage

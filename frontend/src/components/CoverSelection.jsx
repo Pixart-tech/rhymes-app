@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Star } from 'lucide-react';
 import { Button } from './ui/button';
 import {
   cn,
@@ -365,7 +366,7 @@ const CoverSelection = () => {
       const base = API_BASE_URL || '/api';
       const token = await getIdToken?.();
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-      console.log('Fetching saved cover selections for school ID:', headers);
+      
       const response = await fetch(`${base}/cover-selections/${schoolId}`, { headers });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -701,7 +702,8 @@ const CoverSelection = () => {
             Tap a theme to select. Previews now show the full PNG inside a clean container.
           </p>
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl-grid-cols-4 gap-4 sm:gap-6 max-w-[520px] sm:max-w-6xl mx-auto">
-          {themeCatalogue.map((item) => {
+          {themeCatalogue.map((item, index) => {
+            const isPopular = index === 0;
             const isActive = item.id === selectedThemeId;
             const sources = buildThemeSources(item);
             const imgSrc = sources?.cover || sources?.original || '';
@@ -717,7 +719,13 @@ const CoverSelection = () => {
                 )}
                 aria-pressed={isActive}
               >
-                <div className="h-full w-full overflow-hidden">
+                <div className="relative h-full w-full overflow-hidden">
+                  {isPopular && (
+                    <div className="pointer-events-none absolute -left-0.5 -top-0.5 sm:left-1 sm:top-1 z-10 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 shadow-sm">
+                      <Star size={12} className="text-blue-600 fill-blue-500" />
+                      Popular
+                    </div>
+                  )}
                   {imgSrc ? (
                     <img
                       src={imgSrc}
