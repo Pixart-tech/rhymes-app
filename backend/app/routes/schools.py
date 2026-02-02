@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import base64
 import logging
 from datetime import datetime
 from io import BytesIO
-import imghdr
 import mimetypes
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
+import fitz
 from PIL import Image, UnidentifiedImageError
 
 from .. import school_profiles
@@ -147,6 +148,10 @@ class SchoolAddonsPayload(BaseModel):
         return cls(**provided)
 
 
+class LogoPreviewResponse(BaseModel):
+    preview: str
+
+
 router = APIRouter()
 
 
@@ -207,35 +212,116 @@ async def _read_upload_file(upload_file: Optional[UploadFile]) -> Tuple[Optional
     contents = await upload_file.read()
     if not contents:
         return None, None
-    mime_type = (upload_file.content_type or "").lower()
-    allowed_mimes = {"image/png", "image/jpeg", "image/jpg"}
-    if mime_type and mime_type not in allowed_mimes:
-        raise HTTPException(status_code=400, detail="Files must be PNG or JPEG images.")
+    try:
+        converted = _convert_upload_bytes_to_png(
+            contents,
+            filename=upload_file.filename,
+            content_type=upload_file.content_type,
+            remove_background=False,
+        )
+    except HTTPException:
+        raise
+    return converted, "image/png"
+
+
+def _is_pdf_file(content_type: Optional[str], filename: Optional[str]) -> bool:
+    if content_type:
+        if "pdf" in content_type.lower():
+            return True
+    if filename:
+        if filename.lower().endswith(".pdf"):
+            return True
+    return False
+
+
+def _convert_pdf_bytes_to_png(contents: bytes) -> bytes:
+    try:
+        document = fitz.open(stream=contents, filetype="pdf")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Uploaded PDF is not valid.")
 
     try:
+        if document.page_count == 0:
+            raise HTTPException(status_code=400, detail="Uploaded PDF has no pages.")
+        page = document.load_page(0)
+        matrix = fitz.Matrix(2, 2)
+        pixmap = page.get_pixmap(matrix=matrix, alpha=True)
+        png_bytes = pixmap.tobytes("png")
+    finally:
+        document.close()
+
+    return png_bytes
+
+
+def _convert_raster_bytes_to_png(contents: bytes, remove_background: bool) -> bytes:
+    try:
         with Image.open(BytesIO(contents)) as image:
-            if image.format not in {"PNG", "JPEG"}:
-                raise HTTPException(status_code=400, detail="Files must be PNG or JPEG images.")
+            image = image.convert("RGBA")
+            if remove_background:
+                image = _remove_white_background(image)
             output = BytesIO()
             image.save(output, format="PNG")
-            return output.getvalue(), "image/png"
+            return output.getvalue()
     except UnidentifiedImageError:
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid image.")
 
 
-def _determine_image_media_type(blob: bytes) -> str:
-    kind = imghdr.what(None, blob)
-    if not kind:
-        return "image/jpeg"
-    normalized = kind.lower()
-    if normalized == "jpg":
-        normalized = "jpeg"
-    mapped = mimetypes.types_map.get(f".{normalized}")
-    if mapped:
-        return mapped
-    if normalized == "jpeg":
-        return "image/jpeg"
-    return f"image/{normalized}"
+def _convert_upload_bytes_to_png(
+    contents: bytes,
+    *,
+    filename: Optional[str],
+    content_type: Optional[str],
+    remove_background: bool,
+) -> bytes:
+    if _is_pdf_file(content_type, filename):
+        return _convert_pdf_bytes_to_png(contents)
+    return _convert_raster_bytes_to_png(contents, remove_background=remove_background)
+
+
+@router.post("/schools/logo-preview", response_model=LogoPreviewResponse)
+async def preview_school_logo(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = verify_and_decode_token(authorization)
+    ensure_user_document(decoded_token)
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    try:
+        preview_bytes = _convert_upload_bytes_to_png(
+            contents,
+            filename=file.filename,
+            content_type=file.content_type,
+            remove_background=False,
+        )
+    except HTTPException:
+        raise HTTPException(status_code=400, detail="Unable to process the uploaded file")
+
+    encoded = base64.b64encode(preview_bytes).decode("ascii")
+    return LogoPreviewResponse(preview=encoded)
+
+
+@router.options("/schools/logo-preview")
+def preview_school_logo_options():
+    return Response(status_code=200)
+
+
+def _remove_white_background(image: Image.Image) -> Image.Image:
+    pixels = image.getdata()
+    cleaned_pixels = []
+    for r, g, b, a in pixels:
+        if a == 0:
+            cleaned_pixels.append((r, g, b, a))
+            continue
+        if r >= 240 and g >= 240 and b >= 240:
+            cleaned_pixels.append((r, g, b, 0))
+        else:
+            cleaned_pixels.append((r, g, b, a))
+    image.putdata(cleaned_pixels)
+    return image
 
 
 @router.post("/schools", response_model=school_profiles.School)
@@ -430,6 +516,8 @@ async def update_school_profile(
     updates["timestamp"] = now
     doc_ref.update(updates)
     existing.update(updates)
+    if role == "super-admin" and email_provided and normalized_email:
+        school_profiles.grant_school_access_to_user_by_email(db, normalized_email, school_id)
     existing.setdefault("id", snapshot.id)
     existing.setdefault("school_id", snapshot.id)
     _sync_zoho_metadata(
@@ -654,9 +742,16 @@ def get_school_logo(school_id: str):
     if not isinstance(logo_blob, (bytes, bytearray)):
         raise HTTPException(status_code=404, detail="Logo not found")
 
-    media_type = _determine_image_media_type(logo_blob)
-    headers = {"Cache-Control": "no-store"}
-    return Response(content=bytes(logo_blob), media_type=media_type, headers=headers)
+    try:
+        download_blob = _convert_raster_bytes_to_png(bytes(logo_blob), remove_background=True)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Unable to process logo for download")
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'inline; filename="{school_id}.png"',
+    }
+    return Response(content=download_blob, media_type="image/png", headers=headers)
 
 
 @router.get("/schools/{school_id}/images/{image_index}")

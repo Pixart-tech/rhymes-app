@@ -782,6 +782,50 @@ def _find_user_by_email(
     return None, None
 
 
+def find_school_ids_by_email(
+    db_client: firestore.Client, email: Optional[str]
+) -> Set[str]:
+    """Return the school IDs whose login email or principal email matches the supplied value."""
+    normalized = _normalize_email(email)
+    if not normalized:
+        return set()
+
+    school_ids: Set[str] = set()
+    for field in ("email", "principal_email"):
+        snapshots = (
+            db_client.collection("schools")
+            .where(field, "==", normalized)
+            .stream()
+        )
+        for snapshot in snapshots:
+            school_ids.add(snapshot.id)
+    return school_ids
+
+
+def grant_school_access_to_user_by_email(
+    db_client: firestore.Client, email: Optional[str], school_id: str
+) -> Optional[str]:
+    """Ensure the user with the provided email has access to the specified school."""
+    normalized_email = _normalize_email(email)
+    if not normalized_email:
+        return None
+
+    user_id, user_record = _find_user_by_email(db_client, normalized_email)
+    if not user_id:
+        return None
+
+    now = datetime.utcnow()
+    db_client.collection("users").document(user_id).update(
+        {"school_ids": firestore.ArrayUnion([school_id]), "updated_at": now}
+    )
+    if user_record is not None:
+        existing_ids = set(user_record.get("school_ids", []))
+        existing_ids.add(school_id)
+        user_record["school_ids"] = list(existing_ids)
+
+    return user_id
+
+
 def build_school_from_record(record: Dict[str, Any]) -> School:
     now = datetime.utcnow()
     school_id = record.get("school_id") or record.get("id")
@@ -1094,6 +1138,8 @@ __all__ = [
     "BranchStatus",
     "BRANCH_STATUS_ACTIVE",
     "BRANCH_STATUS_INACTIVE",
+    "find_school_ids_by_email",
+    "grant_school_access_to_user_by_email",
     "get_zoho_customer_id",
     "set_zoho_customer_id",
     "set_zoho_grade_mapping",

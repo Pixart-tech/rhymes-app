@@ -51,6 +51,24 @@ def _build_workspace_user(record: Dict[str, Any]) -> WorkspaceUser:
 def get_current_workspace_user(authorization: Optional[str] = Header(None)):
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
+    user_email = user_record.get("email")
+    if user_email:
+        school_ids_for_email = school_profiles.find_school_ids_by_email(db, user_email)
+        if school_ids_for_email:
+            existing_ids_list = list(user_record.get("school_ids", []))
+            existing_ids_set = set(existing_ids_list)
+            new_ids = [
+                school_id
+                for school_id in sorted(school_ids_for_email)
+                if school_id not in existing_ids_set
+            ]
+            if new_ids:
+                updated_ids = existing_ids_list + new_ids
+                now = datetime.utcnow()
+                db.collection("users").document(user_record["uid"]).update(
+                    {"school_ids": updated_ids, "updated_at": now}
+                )
+                user_record["school_ids"] = updated_ids
     workspace_user = _build_workspace_user(user_record)
     zoho_cache: Dict[str, Optional[str]] = {}
     schools: List[School] = []
