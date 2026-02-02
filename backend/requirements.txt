@@ -26,3 +26,4 @@ svglib>=1.5.1
 motor>=4.4.0
 dotenv>=0.21.0
 pydantic[email]>=2.6.4
+pymupdf>=1.25.0

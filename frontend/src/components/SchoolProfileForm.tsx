@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils';
+import { API_BASE_URL, cn } from '@/lib/utils';
 import axios from 'axios';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, ArrowLeft } from 'lucide-react';
@@ -22,6 +22,7 @@ import {
 import ImageCropperDialog from './ImageCropper';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { ID_CARD_FIELD_OPTIONS, MAX_ID_CARD_FIELDS } from '@/constants/idCardFields';
+import { useAuth } from '../hooks/useAuth';
 
 const getLogoPreview = (vals: SchoolFormValues) => vals.logo_url || '';
 const DEFAULT_GRADE_LABELS: Record<GradeKey, string> = {
@@ -37,6 +38,8 @@ const formatGradeLabelTitle = (grade: GradeKey): string => {
   }
   return grade.charAt(0).toUpperCase() + grade.slice(1);
 };
+
+const API = API_BASE_URL || '/api';
 
 const SERVICE_OPTIONS: { value: SchoolServiceType; prompt: string }[] = [
   { value: 'id_cards', prompt: 'Are you taking ID cards?' },
@@ -205,6 +208,11 @@ const composeAddress = (
   return segments.join(', ');
 };
 
+const isPdfFile = (file: File) => {
+  const name = file.name?.toLowerCase() ?? '';
+  return file.type === 'application/pdf' || name.endsWith('.pdf');
+};
+
 export interface SchoolFormProps {
   mode: 'create' | 'edit';
   initialValues: SchoolFormValues;
@@ -229,7 +237,32 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
   const [values, setValues] = useState<SchoolFormValues>(initialValues);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string>(getLogoPreview(initialValues));
   const logoPreviewUrlRef = useRef<string | null>(null);
-  const imageSrcUrlRef = useRef<string | null>(null);
+  const { getIdToken } = useAuth();
+  const requestPdfPreview = useCallback(
+    async (file: File) => {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error('Unable to obtain authentication token');
+      }
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await axios.post<{ preview: string }>(
+        `${API}/schools/logo-preview`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      if (!response.data?.preview) {
+        throw new Error('Preview not available');
+      }
+      return `data:image/png;base64,${response.data.preview}`;
+    },
+    [getIdToken]
+  );
   const [isCompressingLogo, setIsCompressingLogo] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [currentSection, setCurrentSection] = useState(1);
@@ -358,28 +391,15 @@ const handleAddressFieldChange =
   };
 
   const handleCropperClose = useCallback(() => {
-    if (imageSrcUrlRef.current) {
-      URL.revokeObjectURL(imageSrcUrlRef.current);
-      imageSrcUrlRef.current = null;
-    }
     setImageSrc(null);
   }, [setImageSrc]);
 
   const handleLogoChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
       const input = event.target;
       const file = input?.files?.[0] ?? null;
       if (!file) {
         handleCropperClose();
-        return;
-      }
-
-      const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
-      if (!allowedTypes.includes(file.type)) {
-        toast.error('Invalid file type. Please select a PNG or JPEG image.');
-        handleCropperClose();
-        setValues((prev) => ({ ...prev, logo_file: null }));
-        input.value = '';
         return;
       }
 
@@ -392,16 +412,45 @@ const handleAddressFieldChange =
         return;
       }
 
-      if (imageSrcUrlRef.current) {
-        URL.revokeObjectURL(imageSrcUrlRef.current);
+      if (isPdfFile(file)) {
+        try {
+          const previewSrc = await requestPdfPreview(file);
+          setImageSrc(previewSrc);
+        } catch (error) {
+          console.error(error);
+          toast.error('Unable to render the PDF. Please try another file.');
+          handleCropperClose();
+          setValues((prev) => ({ ...prev, logo_file: null }));
+        } finally {
+          input.value = '';
+        }
+        return;
       }
 
-      const objectUrl = URL.createObjectURL(file);
-      imageSrcUrlRef.current = objectUrl;
-      setImageSrc(objectUrl);
+      const isImageFile = file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp|tiff?)$/i.test(file.name);
+      if (!isImageFile) {
+        toast.error('Please select an image file.');
+        handleCropperClose();
+        setValues((prev) => ({ ...prev, logo_file: null }));
+        input.value = '';
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result === 'string') {
+          setImageSrc(result);
+        }
+      };
+      reader.onerror = () => {
+        toast.error('Unable to preview this image. Please try a different file.');
+        setImageSrc(null);
+      };
+      reader.readAsDataURL(file);
       input.value = '';
     },
-    [handleCropperClose]
+    [handleCropperClose, requestPdfPreview]
   );
 
   const onCropComplete = useCallback(
@@ -425,10 +474,6 @@ const handleAddressFieldChange =
 
   useEffect(() => {
     return () => {
-      if (imageSrcUrlRef.current) {
-        URL.revokeObjectURL(imageSrcUrlRef.current);
-        imageSrcUrlRef.current = null;
-      }
       if (logoPreviewUrlRef.current) {
         URL.revokeObjectURL(logoPreviewUrlRef.current);
         logoPreviewUrlRef.current = null;
@@ -743,15 +788,14 @@ const handleAddressFieldChange =
                   <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="logo">School logo</Label>
-                    <Input
-                      id="logo"
-                      type="file"
-                      accept="image/png"
-                      onChange={handleLogoChange}
-                      disabled={submitting}
-                      required={!logoPreviewUrl}
-                      className={cn(invalidFields.has('logo') && 'border-red-500')}
-                    />
+                      <Input
+                        id="logo"
+                        type="file"
+                        onChange={handleLogoChange}
+                        disabled={submitting}
+                        required={!logoPreviewUrl}
+                        className={cn(invalidFields.has('logo') && 'border-red-500')}
+                      />
                     {logoPreviewUrl && (
                       <div className="mt-2 flex items-center gap-4">
                         <img

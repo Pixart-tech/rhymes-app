@@ -24,7 +24,7 @@ class CoverUploaderApp:
 
         self.folder_var = StringVar()
         self.upload_url_var = StringVar(value="http://31.97.236.164/api/cover-uploads")
-        self.finalize_url_var = StringVar(value="http://31.97.236.164/api/mark-complete")
+        # self.finalize_url_var = StringVar(value="http://31.97.236.164/api/mark-complete")
         self.status_var = StringVar(value="Idle")
         self.progress_var = DoubleVar(value=0.0)
         self.progress_count_var = StringVar(value="0 / 0")
@@ -52,11 +52,11 @@ class CoverUploaderApp:
         upload_entry = ttk.Entry(self.root, textvariable=self.upload_url_var, width=60)
         upload_entry.grid(row=1, column=1, columnspan=2, sticky="we", **padding)
 
-        finalize_label = ttk.Label(self.root, text="Finalize API URL")
-        finalize_label.grid(row=2, column=0, sticky="w", **padding)
+        # finalize_label = ttk.Label(self.root, text="Finalize API URL")
+        # finalize_label.grid(row=2, column=0, sticky="w", **padding)
 
-        finalize_entry = ttk.Entry(self.root, textvariable=self.finalize_url_var, width=60)
-        finalize_entry.grid(row=2, column=1, columnspan=2, sticky="we", **padding)
+        # finalize_entry = ttk.Entry(self.root, textvariable=self.finalize_url_var, width=60)
+        # finalize_entry.grid(row=2, column=1, columnspan=2, sticky="we", **padding)
 
         self.upload_btn = ttk.Button(self.root, text="Validate and Upload", command=self.start_upload)
         self.upload_btn.grid(row=3, column=0, columnspan=3, sticky="we", **padding)
@@ -99,7 +99,7 @@ class CoverUploaderApp:
         try:
             folder = Path(self.folder_var.get()).expanduser()
             upload_url = self.upload_url_var.get().strip()
-            finalize_url = self.finalize_url_var.get().strip()
+            # finalize_url = self.finalize_url_var.get().strip()
 
             if not folder.is_dir():
                 raise FileNotFoundError(f"Folder not found: {folder}")
@@ -150,15 +150,16 @@ class CoverUploaderApp:
 
                 self._update_progress(index, total, status=f"Uploaded {index}/{total}")
 
-            try:
-                finalize_response = session.get(finalize_url, params={"school_id": school_id}, timeout=30)
-                finalize_response.raise_for_status()
-                self._log(
-                    f"Finalize call succeeded (status {finalize_response.status_code}): "
-                    f"{finalize_response.text[:200]}"
-                )
-            except Exception as exc:
-                raise RuntimeError(f"Finalize GET failed: {exc}") from exc
+            # finalize_url = self.finalize_url_var.get().strip()
+            # try:
+            #     finalize_response = session.get(finalize_url, params={"school_id": school_id}, timeout=30)
+            #     finalize_response.raise_for_status()
+            #     self._log(
+            #         f"Finalize call succeeded (status {finalize_response.status_code}): "
+            #         f"{finalize_response.text[:200]}"
+            #     )
+            # except Exception as exc:
+            #     raise RuntimeError(f"Finalize GET failed: {exc}") from exc
 
             self._update_progress(total, total, status="All uploads completed.")
             self._notify("Success", "All cover pages uploaded and finalized.")
