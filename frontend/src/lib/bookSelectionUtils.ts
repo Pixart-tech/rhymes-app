@@ -18,14 +18,18 @@ const canonicalOptionIndex: Record<string, BookOption> = (() => {
   return index;
 })();
 
-const mergeWithCanonicalOption = (option: BookOption | null): BookOption | null => {
+const 
+mergeWithCanonicalOption = (option: BookOption | null): BookOption | null => {
+  
+  return option;
+
   if (!option) return null;
   const canonical =
   
     (option.addOnId && canonicalOptionIndex[`addon:${option.addOnId}`])||
     (option.coreId && canonicalOptionIndex[`core:${option.coreId}`]) ||
     (option.workId && canonicalOptionIndex[`work:${option.workId}`]);
-
+  
   if (!canonical) return option;
   
   return {
@@ -144,6 +148,7 @@ export const buildFinalBookSelections = (
         selection.customAddonTitle ||
         selection.selectedOption.defaultAddonCoverTitle ||
         selection.selectedOption.label;
+
      
       const isLanguageSubject =
         (selection.subjectName || '').toString().trim().toLowerCase() === 'languages';
@@ -168,10 +173,10 @@ export const buildFinalBookSelections = (
           ...base,
           component: 'core',
           grade_subject: gradeSubjectValue(coreTitle),
-          core: selection.selectedOption.coreId,
+          core: selection.customCoreId || selection.selectedOption.coreId,
           core_cover: selection.selectedOption.coreCover,
           core_cover_title: selection.customCoreTitle || selection.selectedOption.defaultCoreCoverTitle,
-          core_spine: selection.selectedOption.coreSpine,
+          core_spine: selection.customCoreSpine || selection.selectedOption.coreSpine,
           work: undefined,
           addOn: undefined
         });
@@ -183,10 +188,10 @@ export const buildFinalBookSelections = (
           component: 'work',
           grade_subject: gradeSubjectValue(workTitle),
           core: undefined,
-          work: selection.selectedOption.workId,
+          work: selection.customWorkId || selection.selectedOption.workId,
           work_cover: selection.selectedOption.workCover,
           work_cover_title: selection.customWorkTitle || selection.selectedOption.defaultWorkCoverTitle,
-          work_spine: selection.selectedOption.workSpine,
+          work_spine: selection.customWorkSpine || selection.selectedOption.workSpine,
           addOn: undefined
         });
       }
@@ -199,14 +204,15 @@ export const buildFinalBookSelections = (
           grade_subject: gradeSubjectValue(addonTitle),
           core: undefined,
           work: undefined,
-          addOn: selection.selectedOption.addOnId,
+          addOn: selection.customAddonId || selection.selectedOption.addOnId,
           addon_cover: selection.selectedOption.addOnCover,
           addon_cover_title: selection.customAddonTitle || selection.selectedOption.defaultAddonCoverTitle,
-          addon_spine: selection.selectedOption.addOnSpine
+          addon_spine: selection.customAddonSpine || selection.selectedOption.addOnSpine
         });
       }
     });
-
+    
+    /*
     if (!excludedSet.has(normalizedClassName)) {
       
       // Skip assessment only when all three subjects are absent
@@ -253,8 +259,9 @@ export const buildFinalBookSelections = (
             cover_status: coverMeta?.status ?? null
         });
       }
-    }
+    }*/
   });
+
 
   // Deduplicate entries per class/subject/component by keeping the record with more populated fields.
   const pickScore = (item: FinalOutputItem): number => {

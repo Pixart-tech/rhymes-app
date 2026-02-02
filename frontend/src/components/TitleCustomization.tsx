@@ -6,6 +6,24 @@ import { ArrowRight, ArrowLeft, Edit3, Hash, BookTemplate } from 'lucide-react';
 type DraftVariant = 'core' | 'work' | 'addon';
 type DraftValue = { title: string; id: string; spine: string };
 
+export const numTo3Caps = (n: number): string | null => {
+  const MIN = 20000;
+  const MAX = 30000;
+  if (!Number.isInteger(n) || n < MIN || n > MAX) {
+    return null;
+  }
+  const MOD = 26 * 26 * 26;
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const A = 9721;
+  const B = 4213;
+  const i = n - MIN;
+  const x = (A * i + B) % MOD;
+  const c1 = Math.floor(x / (26 * 26));
+  const c2 = Math.floor((x / 26) % 26);
+  const c3 = x % 26;
+  return letters[c1] + letters[c2] + letters[c3];
+};
+
 interface InputGroupProps {
   label: string;
   colorClass: string;
@@ -19,6 +37,7 @@ interface InputGroupProps {
   defaultId?: string;
   defaultSpine?: string;
   showCodes?: boolean;
+  schoolId?: string | null;
 }
 
 const InputGroup = React.memo(
@@ -35,6 +54,7 @@ const InputGroup = React.memo(
     defaultId,
     defaultSpine,
     showCodes,
+    schoolId,
   }: InputGroupProps) => (
     <div className="bg-slate-50 p-3 rounded-md border border-slate-200">
       <div className="flex items-center gap-2 mb-2">
@@ -71,13 +91,42 @@ const InputGroup = React.memo(
               <div className="relative">
                 <input
                   type="text"
-                  className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-xs md:text-sm placeholder-slate-400 bg-white text-slate-900 font-mono !bg-white !text-slate-900 !border-slate-300"
+                  className="w-full pl-8 pr-20 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-xs md:text-sm placeholder-slate-400 bg-white text-slate-900 font-mono !bg-white !text-slate-900 !border-slate-300"
                   style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
                   value={idValue}
                   onChange={(e) => onIdChange(e.target.value)}
                   placeholder={defaultId}
                 />
                 <Hash size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="p-1 text-indigo-500 hover:text-indigo-700 disabled:text-slate-300"
+                    onClick={() => onIdChange(defaultId ?? '')}
+                    disabled={!defaultId}
+                    title={defaultId ? 'Use default book code' : 'No default available'}
+                  >
+                    <BookTemplate size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className="p-1 text-amber-500 hover:text-amber-700 disabled:text-slate-300"
+                    onClick={() =>  {
+                      if (!defaultId) {
+                        onIdChange('');
+                        return;
+                      }
+                      
+                      const last4 = defaultId.toString().slice(-4);
+                      const next = `${schoolId ?? ''}${last4}`;
+                      onIdChange(next);
+                    }}
+                    disabled={!defaultId}
+                    title="Favorite / reuse this code"
+                  >
+                    ★
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -88,13 +137,42 @@ const InputGroup = React.memo(
               <div className="relative">
                 <input
                   type="text"
-                  className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-xs md:text-sm placeholder-slate-400 bg-white text-slate-900 font-mono !bg-white !text-slate-900 !border-slate-300"
+                  className="w-full pl-8 pr-20 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-xs md:text-sm placeholder-slate-400 bg-white text-slate-900 font-mono !bg-white !text-slate-900 !border-slate-300"
                   style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
                   value={spineValue}
                   onChange={(e) => onSpineChange(e.target.value)}
                   placeholder={defaultSpine}
                 />
                 <BookTemplate size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="p-1 text-indigo-500 hover:text-indigo-700 disabled:text-slate-300"
+                    onClick={() => onSpineChange(defaultSpine ?? '')}
+                    disabled={!defaultSpine}
+                    title={defaultSpine ? 'Use default spine code' : 'No default available'}
+                  >
+                    <BookTemplate size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className="p-1 text-amber-500 hover:text-amber-700 disabled:text-slate-300"
+                    onClick={() => {
+                      if (!defaultSpine) {
+                        onSpineChange('');
+                        return;
+                      }
+                      const numericId = schoolId ? parseInt(schoolId, 10) : NaN;
+                      const prefix = numTo3Caps(numericId);
+                      const next = `${prefix ?? ''}-${defaultSpine.toString()}`;
+                      onSpineChange(next);
+                    }}
+                    disabled={!defaultSpine}
+                    title="Fill: 3-letter code from school_id + default spine"
+                  >
+                    ★
+                  </button>
+                </div>
               </div>
             </div>
           </>
@@ -116,17 +194,18 @@ interface TitleCustomizationProps {
 
   onNext: () => void;
   onBack: () => void;
+  schoolId?: string | null;
 }
 
 const TitleCustomization: React.FC<TitleCustomizationProps> = ({ 
     classData, selections, onUpdateSelections, showCodes = true,
     assessmentDetails, customAssessmentTitle, onUpdateAssessmentTitle,
-    onNext, onBack
+    onNext, onBack, schoolId
 }) => {
   const [drafts, setDrafts] = useState<Record<string, DraftValue>>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const lastHydratedClass = useRef<string | null>(null);
-
+  
   const classSelections = useMemo(
     () => selections.filter((s) => s.className === classData.name),
     [classData.name, selections]
@@ -220,7 +299,6 @@ const TitleCustomization: React.FC<TitleCustomizationProps> = ({
       };
     });
 
-
     onUpdateSelections(updatedSelections);
     
     setHasUnsavedChanges(false);
@@ -280,6 +358,7 @@ const TitleCustomization: React.FC<TitleCustomizationProps> = ({
                                 defaultTitle={opt.defaultCoreCoverTitle}
                                 defaultId={opt.coreId}
                                 defaultSpine={opt.coreSpine}
+                                schoolId={schoolId}
                                 onTitleChange={(val: string) =>
                                   updateDraft(draftFor(s.subjectName, opt.typeId, 'core').key, 'title', val)
                                 }
@@ -303,6 +382,7 @@ const TitleCustomization: React.FC<TitleCustomizationProps> = ({
                                 defaultTitle={opt.defaultWorkCoverTitle}
                                 defaultId={opt.workId}
                                 defaultSpine={opt.workSpine}
+                                schoolId={schoolId}
                                 onTitleChange={(val: string) =>
                                   updateDraft(draftFor(s.subjectName, opt.typeId, 'work').key, 'title', val)
                                 }
@@ -326,6 +406,7 @@ const TitleCustomization: React.FC<TitleCustomizationProps> = ({
                                 defaultTitle={opt.defaultAddonCoverTitle}
                                 defaultId={opt.addOnId}
                                 defaultSpine={opt.addOnSpine}
+                                schoolId={schoolId}
                                 onTitleChange={(val: string) =>
                                   updateDraft(draftFor(s.subjectName, opt.typeId, 'addon').key, 'title', val)
                                 }

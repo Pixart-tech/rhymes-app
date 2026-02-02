@@ -237,7 +237,7 @@ const ModeSelectionPage = ({
     //   gradient: 'from-orange-400 to-red-400',
     //   icon: Music
     // }
-  ];
+  ].filter((option) => isSuperAdmin || option.id !== 'books');
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
@@ -3023,10 +3023,10 @@ export function RhymesWorkflowApp() {
         return;
       }
       const hasSelectedService = Object.values(values.service_status).some((status) => status === 'yes');
-      if (!hasSelectedService) {
+      /*if (!hasSelectedService) {
         toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
         return;
-      }
+      }*/
       setSchoolFormSubmitting(true);
       try {
         const token = await getIdToken();
@@ -3270,6 +3270,7 @@ export function RhymesWorkflowApp() {
         return option.id;
       }
     }
+    
     return null;
   }, [resolveEnabledGrade]);
 

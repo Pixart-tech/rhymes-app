@@ -22,13 +22,12 @@ export default defineConfig({
       },
       '/public': {
         target: 'https://book.eshiksavikas.in',
-        // target: 'http://localhost:8000',
+        
         changeOrigin: true,
         secure: false,
       },
       '/cover-library': {
         target: 'https://book.eshiksavikas.in',
-        // target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       },

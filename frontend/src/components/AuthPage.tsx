@@ -28,6 +28,7 @@ import {
   BranchStatus,
   GradeKey,
   GradeMap,
+  GradeSetting,
   SchoolProfile,
   SchoolFormValues,
   SchoolServiceType,
@@ -63,6 +64,11 @@ const normalizeSchoolId = (value?: string | null) => {
     return '';
   }
   return value.trim().toLowerCase();
+};
+
+const normalizeGradeKey = (value?: string | null) => {
+  if (!value) return '';
+  return value.toString().trim().toLowerCase().replace(/\s+/g, '_');
 };
 
 const matchesParentId = (branchParentId: string | undefined | null, parent?: SchoolProfile | null) => {
@@ -148,7 +154,7 @@ const DEFAULT_SERVICE_STATUS: ServiceStatusMap = {
   "Children's Day Gifting Book": 'no',
   'Calendars 26': 'no'
 };
-type AdminServiceFilter = 'all' | SchoolServiceType;
+type AdminServiceFilter = 'all' | SchoolServiceType | 'cover-status' | 'book-status';
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
 const BRANCH_NAME_MIN_LENGTH = 2;
 const COORDINATOR_NAME_MIN_LENGTH = 2;
@@ -275,6 +281,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [logoMap, setLogoMap] = useState<Record<string, string>>({});
   const [adminSearch, setAdminSearch] = useState('');
   const [serviceFilter, setServiceFilter] = useState<AdminServiceFilter>('all');
+  const [coverStatusFilter, setCoverStatusFilter] = useState<'all' | '1' | '2' | '3' | '4' | 'unknown'>('all');
+  const [bookStatusFilter, setBookStatusFilter] = useState<'all' | 'done' | 'not done' | 'unknown'>('all');
+  const [coverStatusMap, setCoverStatusMap] = useState<Record<string, string>>({});
+  const [bookStatusMap, setBookStatusMap] = useState<Record<string, string>>({});
   const [approvingSchoolId, setApprovingSchoolId] = useState<string | null>(null);
   const [addonsDialogSchool, setAddonsDialogSchool] = useState<AdminSchoolProfile | null>(null);
   const [addonsDialogServiceStatus, setAddonsDialogServiceStatus] = useState<ServiceStatusMap>(DEFAULT_SERVICE_STATUS);
@@ -704,9 +714,21 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       const matchesService =
         serviceFilter === 'all' ||
         Boolean(school.service_type && school.service_type.includes(serviceFilter));
+      const coverValue = coverStatusMap[school.school_id] ?? 'unknown';
+      const bookValue = bookStatusMap[school.school_id] ?? 'unknown';
+      const matchesCover =
+        coverStatusFilter === 'all' || coverValue === coverStatusFilter;
+      const matchesBook = bookStatusFilter === 'all' || bookValue === bookStatusFilter;
       return matchesSearch && matchesService;
+    }).filter((school) => {
+      const coverValue = coverStatusMap[school.school_id] ?? 'unknown';
+      const bookValue = bookStatusMap[school.school_id] ?? 'unknown';
+      const matchesCover =
+        coverStatusFilter === 'all' || coverValue === coverStatusFilter;
+      const matchesBook = bookStatusFilter === 'all' || bookValue === bookStatusFilter;
+      return matchesCover && matchesBook;
     });
-  }, [adminSchools, adminSearch, serviceFilter]);
+  }, [adminSchools, adminSearch, serviceFilter, coverStatusFilter, bookStatusFilter, coverStatusMap, bookStatusMap]);
   const adminStats = useMemo(() => {
     const totalSelections = adminSchools.reduce((sum, school) => sum + (school.total_selections || 0), 0);
     const lastUpdated = adminSchools.reduce<Date | null>((latest, school) => {
@@ -725,6 +747,91 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       lastUpdated
     };
   }, [adminSchools]);
+
+  useEffect(() => {
+    if (workspaceUser?.role !== 'super-admin' || filteredAdminSchools.length === 0) {
+      return;
+    }
+    let cancelled = false;
+
+    const fetchStatuses = async () => {
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          return;
+        }
+        const headers = { Authorization: `Bearer ${token}` };
+
+        await Promise.all(
+          filteredAdminSchools.map(async (school) => {
+            const schoolId = school.school_id;
+            if (!schoolId) {
+              return;
+            }
+
+            try {
+              const resp = await axios.get(`${API}/cover-status/${schoolId}`, {
+                headers,
+                validateStatus: () => true
+              });
+              const statusVal = (resp.data?.status || 'unknown').toString();
+              if (!cancelled) {
+                setCoverStatusMap((prev) =>
+                  prev[schoolId] === statusVal ? prev : { ...prev, [schoolId]: statusVal }
+                );
+              }
+            } catch (_) {
+              if (!cancelled) {
+                setCoverStatusMap((prev) => ({ ...prev, [schoolId]: 'unknown' }));
+              }
+            }
+
+            try {
+              const resp = await axios.get(`${API}/book-selections/${schoolId}/grades`, {
+                headers,
+                validateStatus: () => true
+              });
+              const classes = Array.isArray(resp.data?.classes) ? resp.data.classes : [];
+              const enabledGrades = Object.entries(school.grades || {})
+                .filter(([, grade]) => Boolean((grade as GradeSetting | undefined)?.enabled))
+                .map(([key]) => normalizeGradeKey(key))
+                .filter(Boolean);
+              const presentGrades = new Set(
+                classes
+                  .map(
+                    (entry: any) =>
+                      normalizeGradeKey(entry?.doc_id) ||
+                      normalizeGradeKey(entry?.class) ||
+                      normalizeGradeKey(entry?.class_label)
+                  )
+                  .filter(Boolean)
+              );
+              const allPresent =
+                enabledGrades.length === 0 ||
+                enabledGrades.every((gradeKey) => presentGrades.has(gradeKey));
+              const bookStatus = allPresent ? 'done' : 'not done';
+              if (!cancelled) {
+                setBookStatusMap((prev) =>
+                  prev[schoolId] === bookStatus ? prev : { ...prev, [schoolId]: bookStatus }
+                );
+              }
+            } catch (_) {
+              if (!cancelled) {
+                setBookStatusMap((prev) => ({ ...prev, [schoolId]: 'not done' }));
+              }
+            }
+          })
+        );
+      } catch (_) {
+        // ignore token or network failures; status cells will stay unset
+      }
+    };
+
+    void fetchStatuses();
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredAdminSchools, getIdToken, workspaceUser?.role]);
   const adminBranchCount = useMemo(
     () => adminSchools.filter((school) => Boolean(school.branch_parent_id)).length,
     [adminSchools]
@@ -1392,10 +1499,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         const hasSelectedService = Object.values(values.service_status).some(
           (status) => status === 'yes'
         );
-        if (!hasSelectedService) {
+        /*if (!hasSelectedService) {
           toast.error('Please let us know whether you are taking ID cards, report cards, or certificates.');
           return;
-        }
+        }*/
       }
       setSubmitting(true);
       try {
@@ -1721,6 +1828,20 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       { label: 'All services', value: 'all' },
       ...SERVICE_KEYS.map((key) => ({ value: key, label: SERVICE_LABELS[key] }))
     ];
+    const coverFilterOptions = [
+      { value: 'all', label: 'All cover statuses' },
+      { value: '1', label: '1 - Explore' },
+      { value: '2', label: '2 - Preparing' },
+      { value: '3', label: '3 - Review' },
+      { value: '4', label: '4 - Frozen' },
+      
+    ];
+    const bookFilterOptions = [
+      { value: 'all', label: 'All book statuses' },
+      { value: 'done', label: 'Done' },
+      { value: 'not done', label: 'Not done' },
+      
+    ];
     const schoolsToRender = filteredAdminSchools;
     const emptyStateMessage =
       adminSchools.length === 0 ? 'No schools available yet.' : 'No schools match the current filters.';
@@ -1834,6 +1955,40 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-slate-100 px-4 py-3 shadow-sm">
+                <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                  Cover status
+                </span>
+                <Select value={coverStatusFilter} onValueChange={(value) => setCoverStatusFilter(value as any)}>
+                  <SelectTrigger className="w-44 rounded-2xl border border-slate-200 bg-white px-3 shadow-sm">
+                    <SelectValue placeholder="All cover statuses" />
+                  </SelectTrigger>
+                  <SelectContent className="border border-slate-100 bg-white shadow-lg">
+                    {coverFilterOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-slate-100 px-4 py-3 shadow-sm">
+                <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                  Book status
+                </span>
+                <Select value={bookStatusFilter} onValueChange={(value) => setBookStatusFilter(value as any)}>
+                  <SelectTrigger className="w-40 rounded-2xl border border-slate-200 bg-white px-3 shadow-sm">
+                    <SelectValue placeholder="All book statuses" />
+                  </SelectTrigger>
+                  <SelectContent className="border border-slate-100 bg-white shadow-lg">
+                    {bookFilterOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
@@ -1885,6 +2040,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                           Selections
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Cover-selection status
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Book-selection status
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                           Grades
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1906,6 +2067,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                         const isApproved = isSchoolApproved(school);
                         const isApproving = approvingSchoolId === school.school_id;
                         const services = school.service_type ?? [];
+                        const coverSelectionStatus = coverStatusMap[school.school_id] ?? '—';
+                        const bookSelectionStatus = bookStatusMap[school.school_id] ?? '—';
 
                         return (
                           <tr key={school.school_id} className="hover:bg-slate-50 transition-colors">
@@ -1974,6 +2137,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                                   </span>
                                 )}
                               </div>
+                            </td>
+                            <td className="px-4 py-4 text-slate-700">
+                              {coverSelectionStatus}
+                            </td>
+                            <td className="px-4 py-4 text-slate-700">
+                              {bookSelectionStatus}
                             </td>
                             <td className="px-4 py-4 text-slate-700">{gradeCount}</td>
                             <td className="px-4 py-4 text-slate-700">

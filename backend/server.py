@@ -82,9 +82,9 @@ MAX_RHYME_PAGES = 44
 
 COVER_GRADE_LABELS = ["Playgroup", "Nursery", "LKG", "UKG"]
 STICKER_CODES = {
-    "nursery": "100000238",
-    "lkg": "100000318",
-    "ukg": "100000421",
+    "nursery": "100000238s",
+    "lkg": "100000338s",
+    "ukg": "100000438s",        
 }
 
 _sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib

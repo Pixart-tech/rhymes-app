@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { SCHOOL_DATA, getAssessmentForClass, CLASS_THEMES, DEFAULT_THEME } from '../constants/constants';
+import { SCHOOL_DATA, getAssessmentForClass, getAllAssessmentClass, CLASS_THEMES, DEFAULT_THEME } from '../constants/constants';
 import { BookOption, SelectionRecord, AssessmentVariant, FinalOutputItem } from '../types/types';
 import ClassSummary from '../components/ClassSummary';
 import TitleCustomization from '../components/TitleCustomization';
 import { Check, Book, Home, ChevronLeft, Info, Square, CheckSquare, Star } from 'lucide-react';
 import { buildFinalBookSelections } from '../lib/bookSelectionUtils';
+import { Toaster } from '../components/ui/sonner';
 import { useAuth } from '../hooks/useAuth';
 import { API_BASE_URL, normalizeAssetUrl } from '../lib/utils';
 import { loadPersistedAppState, savePersistedAppState } from '../lib/storage';
@@ -294,16 +295,28 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     }
     const { englishSelection, mathsSelection, evsSelection, hasAllCore } = getActiveCoreSelections(classSelections);
 
+    const assessmentSelectedOption = classSelections.find(
+      (s) => normalizeClassKey(s.subjectName) === 'assessment'
+    )?.selectedOption;
+
+    // If an assessment already exists and its coreId doesn't match the current assessment option for this class,
+    // leave selections untouched (do not regenerate/overwrite).
+    if (assessmentSelectedOption) {
+      const allowedIds = getAllAssessmentClass(className);
+
+      if (assessmentSelectedOption.coreId && allowedIds && !allowedIds.includes(assessmentSelectedOption.coreId)) {
+        return classSelections;
+      }
+    }
+
     const variant = getAssessmentVariantForClass(className);
     const assessmentOpt = hasAllCore
       ? getAssessmentForClass(className, englishSelection, mathsSelection, evsSelection, variant)
       : null;
-
+    
     const withoutAssessment = classSelections.filter(
       (s) => normalizeClassKey(s.subjectName) !== 'assessment'
     );
-
-
 
     if (!assessmentOpt) {
       return withoutAssessment;
@@ -504,6 +517,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     
     const match = findOptionForSavedItem(className, item);
 
+
     const baseOption: BookOption =
       match?.option || {
         typeId: item.core || item.work || item.addOn || item.type || `${className}-${item.subject || 'item'}`,
@@ -547,7 +561,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       skipAddon,
       customCoreTitle: item.core_cover_title,
       customWorkTitle: item.work_cover_title,
-      customAddonTitle: item.addon_cover_title
+      customAddonTitle: item.addon_cover_title,
+      customCoreId: item.core,
+      customWorkId: item.work,
+      customAddonId: item.addOn || item.addon,
+      customCoreSpine: item.core_spine,
+      customWorkSpine: item.work_spine,
+      customAddonSpine: item.addon_spine,
     };
   }, [findOptionForSavedItem]);
 
@@ -885,6 +905,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       coreId: coreCode,
       coreCover: coreCover || undefined,
       coreSpine: coreSpine || undefined,
+      defaultCoreCoverTitle: subjectName || undefined,
       isRecommended: false,
       jsonSubject: subjectName
     };
@@ -1109,6 +1130,66 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       customAssessmentTitles,   
       latestGradeNames
     );
+
+
+    const validateFinalSelections = (items: ReturnType<typeof buildFinalBookSelections>): string[] => {
+      const errors: string[] = [];
+      const isNineDigit = (val: any) =>
+        val !== undefined && val !== null && /^\d{9}$/.test(val.toString().trim());
+      const isNonBlank = (val: any) => val !== undefined && val !== null && val.toString().trim().length > 0;
+
+      items.forEach((item) => {
+        const cls = (item as any).class_name || item.class_label || item.class || 'Unknown class';
+        const subj = item.subject || 'Unknown subject';
+
+        if (item.component === 'core') {
+          if (!isNineDigit(item.core)) {
+            errors.push(`${cls} / ${subj}: core cover must be numeric and 9 digits`);
+          }
+          if (!isNonBlank(item.core_cover_title)) {
+            errors.push(`${cls} / ${subj}: core cover title is required`);
+          }
+          if (!isNonBlank(item.core_spine)) {
+            errors.push(`${cls} / ${subj}: core spine is required`);
+          }
+        }
+
+        if (item.component === 'work') {
+          if (!isNineDigit(item.work)) {
+            errors.push(`${cls} / ${subj}: workbook cover must be numeric and 9 digits`);
+          }
+          if (!isNonBlank(item.work_cover_title)) {
+            errors.push(`${cls} / ${subj}: workbook cover title is required`);
+          }
+          if (!isNonBlank(item.work_spine)) {
+            errors.push(`${cls} / ${subj}: workbook spine is required`);
+          }
+        }
+
+        if (item.component === 'addon') {
+          if (!isNineDigit(item.addOn)) {
+            errors.push(`${cls} / ${subj}: add-on cover must be numeric and 9 digits`);
+          }
+          if (!isNonBlank(item.addon_cover_title)) {
+            errors.push(`${cls} / ${subj}: add-on cover title is required`);
+          }
+          if (!isNonBlank(item.addon_spine)) {
+            errors.push(`${cls} / ${subj}: add-on spine is required`);
+          }
+        }
+      });
+      
+     
+      
+      return errors;
+    };
+
+    const validationErrors = validateFinalSelections(finalSelections);
+    if (validationErrors.length > 0) {
+      const message = validationErrors.join('\n');
+      toast.error(message, { duration: 6000 });
+      return false;
+    }
     
     
     const sanitizedSelections = finalSelections.map(
@@ -1416,6 +1497,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           : false;
 
       // Hard-reset working state to the latest saved snapshot
+      
       setSelections(nextSelections);
       setExplicitExcludedAssessments(Array.from(nextExcluded));
       // Infer assessment variant from assessment selections when not provided by server
@@ -1475,6 +1557,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   if (viewState === 'TITLES' && currentClassData) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
+        <Toaster position="top-right" />
         <Header
           onHome={handleGoHome}
           hasFinish={false}
@@ -1488,11 +1571,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             onAccept={handleAcceptTerms}
             onClose={handleDismissTerms}
           /> */}
+          
           <TitleCustomization
             classData={currentClassData}
             selections={selections}
             onUpdateSelections={handleUpdateSelection}
             showCodes={isAdmin}
+            schoolId={bookSelectionSchoolId || persistedState?.school?.school_id ||window.localStorage.getItem('bookSelectionSchoolId') || null}
             assessmentDetails={getCurrentAssessmentDetails()}
             customAssessmentTitle={customAssessmentTitles[currentClassData.name]}
             onUpdateAssessmentTitle={(title) => handleUpdateAssessmentTitle(currentClassData.name, title)}
@@ -1567,6 +1652,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     // );
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
+        <Toaster position="top-right" />
         <Header
           onHome={handleGoHome}
           hasFinish={false}
@@ -1585,6 +1671,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             selections={summaryClassSelections}
             excludedAssessments={summaryClassExcluded}
             assessmentVariants={baseAssessmentVariants}
+            schoolId={bookSelectionSchoolId || persistedState?.school?.school_id || null}
             serverMissingAssessments={serverMissingAssessments}
             gradeLabel={getGradeLabelForClass(currentClassData.name)}
             readOnly={readOnlySummary}
@@ -1628,6 +1715,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
+        <Toaster position="top-right" />
         <Header
           onHome={handleGoHome}
           hasFinish={false}
@@ -1811,6 +1899,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
+      <Toaster position="top-right" />
       <Header
         onHome={handleGoHome}
         hasFinish={false}
@@ -1939,7 +2028,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         </div>
 
         {viewState === 'LANDING' && canFinish && (
-          <div className="mt-6 flex justify-end">
+          <div className="mt-6 flex justify-center">
             <button
               type="button"
               onClick={handleFinishAll}

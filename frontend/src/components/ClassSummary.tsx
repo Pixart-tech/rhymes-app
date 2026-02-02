@@ -5,6 +5,7 @@ import { getAssessmentForClass, CLASS_THEMES, DEFAULT_THEME } from '../constants
 import { Eye, EyeOff, AlertTriangle, Book, Trash2, ArrowLeft, Check, RotateCcw, Plus, X } from 'lucide-react';
 import PdfViewer from './PdfViewer';
 import { API_BASE_URL } from '../lib/utils';
+import { numTo3Caps } from './TitleCustomization';
 
 interface ClassSummaryProps {
   classData: ClassData;
@@ -15,6 +16,7 @@ interface ClassSummaryProps {
   readOnly?: boolean;
   isAdmin?: boolean;
   gradeLabel?: string;
+  schoolId?: string | null;
   onUpdateSelections: (newSelections: SelectionRecord[]) => void;
   onExcludeAssessment: (className: string) => void;
   onRestoreAssessment: (className: string) => void;
@@ -42,7 +44,7 @@ interface PhysicalBookItem {
 }
 
 const ClassSummary: React.FC<ClassSummaryProps> = ({ 
-    classData, selections, excludedAssessments, assessmentVariants, serverMissingAssessments = [], readOnly = false, isAdmin = false, gradeLabel,
+    classData, selections, excludedAssessments, assessmentVariants, serverMissingAssessments = [], readOnly = false, isAdmin = false, gradeLabel, schoolId,
     onUpdateSelections, onExcludeAssessment, onRestoreAssessment, onAssessmentVariantChange, onAddManualSubject,
     onConfirm, onBack 
 }) => {
@@ -52,6 +54,30 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   const [manualForm, setManualForm] = useState({ subject: '', coreCode: '', coreCover: '', coreSpine: '' });
   const resolveBookLink = (book: PhysicalBookItem) => book.link || book.link1 || book.link2 || book.link3 || '';
   
+  const gradeCodeForClass = (name: string): { id: string; letter: string } => {
+    const key = (name || '').toString().trim().toLowerCase();
+    if (key === 'playgroup' || key === 'pg') return { id: '01', letter: 'P' };
+    if (key === 'nursery') return { id: '02', letter: 'N' };
+    if (key === 'lkg') return { id: '03', letter: 'L' };
+    if (key === 'ukg') return { id: '04', letter: 'U' };
+    return { id: '00', letter: 'X' };
+  };
+
+  const computeNextSuffix = (): string => {
+    let max = 49; // start from 50
+    classSelections.forEach((s) => {
+      const code = s.selectedOption?.coreCover || '';
+      const match = code.match(/(\d{2})$/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!Number.isNaN(num)) {
+          max = Math.max(max, num);
+        }
+      }
+    });
+    return String(Math.max(50, max + 1)).padStart(2, '0');
+  };
+
   const normalize = (value: string) => (value || '').toString().trim().toLowerCase();
   const excludedAssessmentSet = useMemo(
     () => new Set((excludedAssessments || []).map((c) => normalize(c))),
@@ -816,6 +842,31 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                                     onChange={e => setManualForm({...manualForm, coreSpine: e.target.value})}
                                 />
                             </div>
+                        </div>
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            className="px-4 py-2 bg-indigo-600 text-white text-xs font-bold uppercase rounded hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                            disabled={!schoolId}
+                            onClick={() => {
+                              const { id: gradeId, letter } = gradeCodeForClass(classData.name);
+                              const suffix = computeNextSuffix();
+                              const schoolDigits = (schoolId || '').replace(/\D/g, '').padStart(5, '0').slice(-5);
+                              const coverCode = `${schoolDigits}${gradeId}${suffix}`;
+                              const numericId = schoolId ? parseInt(schoolId, 10) : NaN;
+                              const prefix = numTo3Caps(numericId) || '';
+                              const spineCode = `${prefix ? prefix + '-' : ''}${letter}${suffix}`;
+                              setManualForm((prev) => ({
+                                ...prev,
+                                coreCode: coverCode,
+                                coreCover: coverCode,
+                                coreSpine: spineCode,
+                              }));
+                            }}
+                            title="Generate book/cover/spine codes"
+                          >
+                            Generate all codes
+                          </button>
                         </div>
                         <div className="flex justify-end">
                             <button 

@@ -13,7 +13,7 @@ const ensureAbsoluteUrl = (url) => {
 
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
 const DEFAULT_LAN_HOST = window.location.hostname;
-// const DEFAULT_LAN_BASE = `http://${DEFAULT_LAN_HOST}:8000`;
+  
 const DEFAULT_LAN_BASE = `https://book.eshiksavikas.in`;
 
 const deriveApiBaseUrl = (backendUrl) => {

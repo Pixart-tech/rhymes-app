@@ -574,13 +574,13 @@ const handleAddressFieldChange =
 
   const validateSection3 = () => {
     const hasSelection = Object.values(values.service_status).some((status) => status !== '');
-    if (!hasSelection) {
+    /*if (!hasSelection) {
       const errors = new Set<string>();
       errors.add('service_status');
       setInvalidFields(errors);
       toast.error('Please select at least one service option.');
       return false;
-    }
+    }*/
     if (values.service_status.id_cards === 'yes' && values.id_card_fields.length === 0 && !idFieldDialogSkipped) {
       const errors = new Set<string>();
       errors.add('id_card_fields');

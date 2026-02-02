@@ -239,10 +239,10 @@ const RAW_SCHOOL_DATA: ClassData[] = [
         name: "Languages",
         isMultiSelect: true,
         options: [
-          { typeId: generateId(), label: "Swara", jsonSubject: "Kannada", coreId: "100000314", coreCover: "0310", coreSpine: "L10", defaultCoreCoverTitle: "Kannada", isRecommended: false, link1: "LKG_Kannada", info: "Kannada letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
-          { typeId: generateId(), label: "Swara", jsonSubject: "Hindi", coreId: "100000315", coreCover: "0311", coreSpine: "L9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link1: "LKG_Hindi", info: "Hindi letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
-          { typeId: generateId(), label: "Swara", jsonSubject: "Tamil", coreId: "100000316", coreCover: "0312", coreSpine: "L11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link1: "LKG_Tamil", info: "Telugu letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
-          { typeId: generateId(), label: "Swara", jsonSubject: "Telugu", coreId: "100000317", coreCover: "0313", coreSpine: "L12", defaultCoreCoverTitle: "Telugu", isRecommended: false, link1: "LKG_Telugu", info: "Tamil letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
+          { typeId: generateId(), label: "Kannada Swara", jsonSubject: "Kannada", coreId: "100000314", coreCover: "0310", coreSpine: "L10", defaultCoreCoverTitle: "Kannada", isRecommended: false, link1: "LKG_Kannada", info: "Kannada letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
+          { typeId: generateId(), label: "Hindi Swara", jsonSubject: "Hindi", coreId: "100000315", coreCover: "0311", coreSpine: "L9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link1: "LKG_Hindi", info: "Hindi letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
+          { typeId: generateId(), label: "Tamil Swara", jsonSubject: "Tamil", coreId: "100000316", coreCover: "0312", coreSpine: "L11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link1: "LKG_Tamil", info: "Telugu letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
+          { typeId: generateId(), label: "Telugu Swara", jsonSubject: "Telugu", coreId: "100000317", coreCover: "0313", coreSpine: "L12", defaultCoreCoverTitle: "Telugu", isRecommended: false, link1: "LKG_Telugu", info: "Tamil letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
         ]
       }
     ]
@@ -289,10 +289,10 @@ const RAW_SCHOOL_DATA: ClassData[] = [
         name: "Languages",
         isMultiSelect: true,
         options: [
-          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Kannada", coreId: "100000418", coreCover: "0411", coreSpine: "U10", defaultCoreCoverTitle: "Kannada", isRecommended: false, link1: "UKG_Kannada", info: "The book covers Kannada letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
-          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Hindi", coreId: "100000419", coreCover: "0412", coreSpine: "U9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link1: "UKG_Hindi", info: "The book covers Hindi letter practice (varnamala) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
-          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Tamil", coreId: "100000420", coreCover: "0413", coreSpine: "U11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link1: "UKG_Tamil", info: "The book covers Tamil letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
-          { typeId: generateId(), label: "Swara & vyanjana", jsonSubject: "Telugu", coreId: "100000421", coreCover: "0414", coreSpine: "U21", defaultCoreCoverTitle: "Telugu", isRecommended: false, link1: "UKG_Telugu", info: "The book covers Telugu letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
+          { typeId: generateId(), label: "Kannada Swara & vyanjana", jsonSubject: "Kannada", coreId: "100000418", coreCover: "0411", coreSpine: "U10", defaultCoreCoverTitle: "Kannada", isRecommended: false, link1: "UKG_Kannada", info: "The book covers Kannada letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
+          { typeId: generateId(), label: "Hindi Swara & vyanjana", jsonSubject: "Hindi", coreId: "100000419", coreCover: "0412", coreSpine: "U9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link1: "UKG_Hindi", info: "The book covers Hindi letter practice (varnamala) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
+          { typeId: generateId(), label: "Tamil Swara & vyanjana", jsonSubject: "Tamil", coreId: "100000420", coreCover: "0413", coreSpine: "U11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link1: "UKG_Tamil", info: "The book covers Tamil letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
+          { typeId: generateId(), label: "Telugu Swara & vyanjana", jsonSubject: "Telugu", coreId: "100000421", coreCover: "0414", coreSpine: "U21", defaultCoreCoverTitle: "Telugu", isRecommended: false, link1: "UKG_Telugu", info: "The book covers Telugu letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
         ]
       }
     ]
@@ -302,33 +302,55 @@ const RAW_SCHOOL_DATA: ClassData[] = [
     subjects: [
       {
         name: "EVS",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000101", coreCover: "0101", coreSpine: "PG1", defaultCoreCoverTitle: "EVS", isRecommended: true, link1: "PG_EVS", info: "All About Me, About Myself, My Face, Myself, Body Hygiene, My Birthday, Family, My Family Tree, Home, Different Rooms at Home, Living Room, Kitchen, Bathroom, Bedroom, Seasons, Farm Animals, Wild Animals, Birds, Transportation, Flowers, Vegetables and Fruits" }]
+        options: [{ typeId: generateId(), label: "EVS", coreId: "100000101", coreCover: "0101", coreSpine: "PG1", defaultCoreCoverTitle: "EVS", isRecommended: true, link1: "PG_EVS", info: "All About Me, About Myself, My Face, Myself, Body Hygiene, My Birthday, Family, My Family Tree, Home, Different Rooms at Home, Living Room, Kitchen, Bathroom, Bedroom, Seasons, Farm Animals, Wild Animals, Birds, Transportation, Flowers, Vegetables and Fruits" }]
       },
       {
         name: "Rhymes and stories",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000102", coreCover: "0102", coreSpine: "PG6", defaultCoreCoverTitle: "Rhymes and stories", isRecommended: true, link1: "PG_Rhymes and stories", info: "24 Rhymes & 5 stories" }]
+        options: [{ typeId: generateId(), label: "Rhymes and stories", coreId: "100000102", coreCover: "0102", coreSpine: "PG6", defaultCoreCoverTitle: "Rhymes and stories", isRecommended: true, link1: "PG_Rhymes and stories", info: "24 Rhymes & 5 stories" }]
       },
       {
         name: "English",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000103", coreCover: "0103", coreSpine: "PG2", defaultCoreCoverTitle: "English", isRecommended: true, link1: "PG_English", info: "Upper case introduction, recognition , finger tracing and colouring activities" }]
+        options: [{ typeId: generateId(), label: "English", coreId: "100000103", coreCover: "0103", coreSpine: "PG2", defaultCoreCoverTitle: "English", isRecommended: true, link1: "PG_English", info: "Upper case introduction, recognition , finger tracing and colouring activities" }]
       },
       {
         name: "Maths",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000104", coreCover: "0104", coreSpine: "PG3", defaultCoreCoverTitle: "Maths", isRecommended: true, link1: "PG_Maths", info: "Premath concepts, basic colours and shapes and 1-10 introduction and recognition" }]
+        options: [{ typeId: generateId(), label: "Maths", coreId: "100000104", coreCover: "0104", coreSpine: "PG3", defaultCoreCoverTitle: "Maths", isRecommended: true, link1: "PG_Maths", info: "Premath concepts, basic colours and shapes and 1-10 introduction and recognition" }]
       },
       {
         name: "Art & craft",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000105", coreCover: "0105", coreSpine: "PG4", defaultCoreCoverTitle: "Art & craft", isRecommended: true, link1: "PG_Art & Craft", info: "A to Z aphabetical colouring activities" }]
+        options: [{ typeId: generateId(), label: "Art & craft", coreId: "100000105", coreCover: "0105", coreSpine: "PG4", defaultCoreCoverTitle: "Art & craft", isRecommended: true, link1: "PG_Art & Craft", info: "A to Z aphabetical colouring activities" }]
       },
       {
         name: "Pattern",
-        options: [{ typeId: generateId(), label: "Standard", coreId: "100000106", coreCover: "0106", coreSpine: "PG5", defaultCoreCoverTitle: "Pattern", isRecommended: true, link1: "PG_Pattern", info: "12 Different pre writing strokes" }]
+        options: [{ typeId: generateId(), label: "Pattern", coreId: "100000106", coreCover: "0106", coreSpine: "PG5", defaultCoreCoverTitle: "Pattern", isRecommended: true, link1: "PG_Pattern", info: "12 Different pre writing strokes" }]
       },
     ]
   }
 ];
 
 export const SCHOOL_DATA: ClassData[] = mapSubjectLinks(RAW_SCHOOL_DATA);
+
+export const getAllAssessmentClass = (className: string) => {
+  
+  const normalizedClassName = (className || '').trim().toLowerCase();
+  
+  if (normalizedClassName === "nursery") {
+    
+    return ["100000218","100000219","100000220", "100000221", "100000222", "100000223", "100000224", "100000225", "100000226", "100000227","100000228","100000229","100000230", "100000231", "100000232", "100000233", "100000234", "100000235", "100000236", "100000237"];
+  
+  }
+  if(normalizedClassName === "lkg") {
+    
+    return ["100000312","100000313","100000318", "100000319"];
+  }
+  
+  if(normalizedClassName === "ukg") {
+    return ["100000412","100000413","100000414", "100000415", "100000416", "100000417"];
+  }
+  return null;
+
+}
+
 
 export const getAssessmentForClass = (
     className: string, 
