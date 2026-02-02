@@ -41,6 +41,10 @@ export interface SchoolProfile {
   principal_email?: string | null;
   principal_phone?: string | null;
   website?: string | null;
+  facebook_link?: string | null;
+  instagram_link?: string | null;
+  facebook_image_url?: string | null;
+  instagram_image_url?: string | null;
   service_status?: ServiceStatusMap;
   grades?: GradeMap;
   grade_default_labels?: Record<string, string>;
@@ -68,12 +72,18 @@ export interface SchoolFormValues {
   pin: string;
   tagline?: string;
   website: string;
+  facebook_link: string;
+  instagram_link: string;
+  facebook_image_url?: string | null;
+  instagram_image_url?: string | null;
   principal_name: string;
   principal_email: string;
   principal_phone: string;
   service_status: ServiceStatusMap;
   grades: GradeMap;
   id_card_fields: string[];
+  facebook_image_file?: File | null;
+  instagram_image_file?: File | null;
 }
 
 export interface RhymeSelectionDetail {

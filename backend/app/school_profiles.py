@@ -297,6 +297,8 @@ class SchoolCreatePayload(BaseModel):
     state: Optional[str] = None
     pin: Optional[str] = None
     website: Optional[str] = None
+    facebook_link: Optional[str] = None
+    instagram_link: Optional[str] = None
     principal_name: str = Field(..., min_length=2)
     principal_email: EmailStr
     principal_phone: str = Field(..., min_length=5)
@@ -399,6 +401,8 @@ class SchoolCreatePayload(BaseModel):
         state: Optional[str] = Form(default=None),
         pin: Optional[str] = Form(default=None),
         website: Optional[str] = Form(default=None),
+        facebook_link: Optional[str] = Form(default=None),
+        instagram_link: Optional[str] = Form(default=None),
         principal_name: str = Form(...),
         principal_email: EmailStr = Form(...),
         principal_phone: str = Form(...),
@@ -419,6 +423,8 @@ class SchoolCreatePayload(BaseModel):
             state=state,
             pin=pin,
             website=website,
+            facebook_link=facebook_link,
+            instagram_link=instagram_link,
             address=address,
             principal_name=principal_name,
             principal_email=principal_email,
@@ -473,6 +479,8 @@ class SchoolUpdatePayload(BaseModel):
     state: Optional[str] = None
     pin: Optional[str] = None
     website: Optional[str] = None
+    facebook_link: Optional[str] = None
+    instagram_link: Optional[str] = None
     principal_name: Optional[str] = Field(default=None, min_length=2)
     principal_email: Optional[EmailStr] = None
     principal_phone: Optional[str] = Field(default=None, min_length=5)
@@ -484,7 +492,7 @@ class SchoolUpdatePayload(BaseModel):
     id_card_fields: Optional[List[str]] = None
     zoho_customer_id: Optional[str] = None
 
-    @field_validator("school_name", "tagline", "address", "city", "state", "pin", "website", mode="before")
+    @field_validator("school_name", "tagline", "address", "city", "state", "pin", "website", "facebook_link", "instagram_link", mode="before")
     @classmethod
     def _normalize_optional_str_fields(cls, value: Any, info: FieldValidationInfo) -> Optional[str]:
         return _coerce_optional_string(value, (info.field_name, "value"))
@@ -647,6 +655,8 @@ class SchoolUpdatePayload(BaseModel):
         state: Optional[str] = Form(default=FORM_UNSET),
         pin: Optional[str] = Form(default=FORM_UNSET),
         website: Optional[str] = Form(default=FORM_UNSET),
+        facebook_link: Optional[str] = Form(default=FORM_UNSET),
+        instagram_link: Optional[str] = Form(default=FORM_UNSET),
         principal_name: Optional[str] = Form(default=FORM_UNSET),
         principal_email: Optional[EmailStr] = Form(default=FORM_UNSET),
         principal_phone: Optional[str] = Form(default=FORM_UNSET),
@@ -670,6 +680,8 @@ class SchoolUpdatePayload(BaseModel):
             "state": state,
             "pin": pin,
             "website": website,
+            "facebook_link": facebook_link,
+            "instagram_link": instagram_link,
             "principal_name": principal_name,
             "principal_email": principal_email,
             "principal_phone": principal_phone,
@@ -841,6 +853,13 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         if record.get(key):
             school_image_urls.append(f"/api/schools/{school_id}/images/{idx}")
 
+    facebook_image_url: Optional[str] = None
+    if record.get("facebook_image_blob"):
+        facebook_image_url = f"/api/schools/{school_id}/social/facebook"
+    instagram_image_url: Optional[str] = None
+    if record.get("instagram_image_blob"):
+        instagram_image_url = f"/api/schools/{school_id}/social/instagram"
+
     grades_from_record = record.get("grades")
     logging.debug(f"build_school_from_record: grades from record type: {type(grades_from_record)}, value: {grades_from_record}")
 
@@ -858,9 +877,13 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         pin=_coerce_record_string(record, "pin"),
         tagline=_coerce_record_string(record, "tagline"),
         website=_coerce_record_string(record, "website"),
+        facebook_link=_coerce_record_string(record, "facebook_link"),
+        instagram_link=_coerce_record_string(record, "instagram_link"),
         principal_name=_coerce_record_string(record, "principal_name"),
         principal_email=_coerce_record_string(record, "principal_email"),
         principal_phone=_coerce_record_string(record, "principal_phone"),
+        facebook_image_url=facebook_image_url,
+        instagram_image_url=instagram_image_url,
         service_type=extract_service_type(record.get("service_type")),
         service_status=normalize_service_status(record.get("service_status")),
         grades=normalize_grades(grades_from_record),
@@ -959,6 +982,10 @@ def create_school_profile(
     user_record: Dict[str, Any],
     logo_blob: Optional[bytes] = None,
     school_image_blobs: Optional[List[Tuple[Optional[bytes], Optional[str]]]] = None,
+    facebook_image_blob: Optional[bytes] = None,
+    facebook_image_mime: Optional[str] = None,
+    instagram_image_blob: Optional[bytes] = None,
+    instagram_image_mime: Optional[str] = None,
 ) -> School:
     user_id = user_record.get("uid")
     if not user_id:
@@ -1007,6 +1034,8 @@ def create_school_profile(
         "pin": pin,
         "tagline": _clean_optional_string(payload.tagline),
         "website": _clean_optional_string(payload.website),
+        "facebook_link": _clean_optional_string(payload.facebook_link),
+        "instagram_link": _clean_optional_string(payload.instagram_link),
         "principal_name": _clean_optional_string(payload.principal_name),
         "principal_email": normalized_principal_email,
         "principal_phone": _clean_optional_string(payload.principal_phone),
@@ -1026,6 +1055,16 @@ def create_school_profile(
             if blob:
                 school_payload[f"school_image_{idx}"] = blob
                 school_payload[f"school_image_{idx}_mime"] = mime
+
+    if facebook_image_blob is not None:
+        school_payload["facebook_image_blob"] = facebook_image_blob
+        if facebook_image_mime:
+            school_payload["facebook_image_mime"] = facebook_image_mime
+
+    if instagram_image_blob is not None:
+        school_payload["instagram_image_blob"] = instagram_image_blob
+        if instagram_image_mime:
+            school_payload["instagram_image_mime"] = instagram_image_mime
 
     # Zoho customer id stored separately in zoho_details collection.
     db.collection("schools").document(school_id).set(school_payload)

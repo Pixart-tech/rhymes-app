@@ -332,6 +332,8 @@ async def create_school_profile(
     school_image_2: Optional[UploadFile] = File(None),
     school_image_3: Optional[UploadFile] = File(None),
     school_image_4: Optional[UploadFile] = File(None),
+    facebook_image: Optional[UploadFile] = File(None),
+    instagram_image: Optional[UploadFile] = File(None),
     authorization: Optional[str] = Header(None),
 ):
     decoded_token = verify_and_decode_token(authorization)
@@ -346,7 +348,19 @@ async def create_school_profile(
         school_image_blobs.append((blob, mime))
     if total_image_bytes > 2 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Total school images must be 2MB or less")
-    return school_profiles.create_school_profile(db, payload, user_record, logo_blob, school_image_blobs)
+    facebook_blob, facebook_mime = await _read_upload_file(facebook_image)
+    instagram_blob, instagram_mime = await _read_upload_file(instagram_image)
+    return school_profiles.create_school_profile(
+        db,
+        payload,
+        user_record,
+        logo_blob,
+        school_image_blobs,
+        facebook_image_blob=facebook_blob,
+        facebook_image_mime=facebook_mime,
+        instagram_image_blob=instagram_blob,
+        instagram_image_mime=instagram_mime,
+    )
 
 
 @router.get("/schools/email-availability")
@@ -380,6 +394,8 @@ async def update_school_profile(
     school_image_2: Optional[UploadFile] = File(None),
     school_image_3: Optional[UploadFile] = File(None),
     school_image_4: Optional[UploadFile] = File(None),
+    facebook_image: Optional[UploadFile] = File(None),
+    instagram_image: Optional[UploadFile] = File(None),
     authorization: Optional[str] = Header(None),
     update_zoho_details: Optional[str] = Form(default=None),
 ):
@@ -430,6 +446,8 @@ async def update_school_profile(
         school_image_blobs.append((blob, mime))
     if total_image_bytes > 2 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Total school images must be 2MB or less")
+    facebook_blob, facebook_mime = await _read_upload_file(facebook_image)
+    instagram_blob, instagram_mime = await _read_upload_file(instagram_image)
 
     raw_service_status = raw_updates.pop("service_status", None)
     raw_service_type = raw_updates.pop("service_type", None)
@@ -486,6 +504,12 @@ async def update_school_profile(
             if blob:
                 updates[f"school_image_{idx}"] = blob
                 updates[f"school_image_{idx}_mime"] = mime
+    if facebook_blob is not None:
+        updates["facebook_image_blob"] = facebook_blob
+        updates["facebook_image_mime"] = facebook_mime
+    if instagram_blob is not None:
+        updates["instagram_image_blob"] = instagram_blob
+        updates["instagram_image_mime"] = instagram_mime
 
     if email_provided:
         updates["email"] = normalized_email
@@ -781,6 +805,66 @@ def get_school_image(school_id: str, image_index: int):
     media_type = record.get(f"{key}_mime") or "image/jpeg"
     extension = _guess_image_extension(media_type)
     filename = f"{school_id}_{image_index}{extension}"
+    headers = {
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'inline; filename="{filename}"',
+    }
+    return Response(content=bytes(blob_value), media_type=media_type, headers=headers)
+
+
+@router.get("/schools/{school_id}/social/facebook")
+def get_school_facebook_image(school_id: str):
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    record = snapshot.to_dict() or {}
+    blob_value = record.get("facebook_image_blob")
+    if blob_value is None:
+        raise HTTPException(status_code=404, detail="Facebook image not found")
+
+    if isinstance(blob_value, memoryview):
+        blob_value = blob_value.tobytes()
+    elif isinstance(blob_value, bytearray):
+        blob_value = bytes(blob_value)
+
+    if not isinstance(blob_value, (bytes, bytearray)):
+        raise HTTPException(status_code=404, detail="Facebook image not found")
+
+    media_type = record.get("facebook_image_mime") or "image/png"
+    extension = _guess_image_extension(media_type)
+    filename = f"{school_id}_facebook{extension}"
+    headers = {
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'inline; filename="{filename}"',
+    }
+    return Response(content=bytes(blob_value), media_type=media_type, headers=headers)
+
+
+@router.get("/schools/{school_id}/social/instagram")
+def get_school_instagram_image(school_id: str):
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    record = snapshot.to_dict() or {}
+    blob_value = record.get("instagram_image_blob")
+    if blob_value is None:
+        raise HTTPException(status_code=404, detail="Instagram image not found")
+
+    if isinstance(blob_value, memoryview):
+        blob_value = blob_value.tobytes()
+    elif isinstance(blob_value, bytearray):
+        blob_value = bytes(blob_value)
+
+    if not isinstance(blob_value, (bytes, bytearray)):
+        raise HTTPException(status_code=404, detail="Instagram image not found")
+
+    media_type = record.get("instagram_image_mime") or "image/png"
+    extension = _guess_image_extension(media_type)
+    filename = f"{school_id}_instagram{extension}"
     headers = {
         "Cache-Control": "no-store",
         "Content-Disposition": f'inline; filename="{filename}"',

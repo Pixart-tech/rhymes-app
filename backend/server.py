@@ -1671,6 +1671,13 @@ def _coerce_to_bytes(value: Any) -> Optional[bytes]:
     return None
 
 
+def _build_binder_folder_name(school_id: str, school_record: Dict[str, Any]) -> str:
+    raw_name = (school_record.get("school_name") or "").strip()
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "", raw_name)
+    snippet = cleaned[:10] if cleaned else school_id
+    return f"{school_id}_{snippet}_binder"
+
+
 def _guess_file_extension(mime_type: Optional[str], default: str = ".bin") -> str:
     """Best-effort file extension for a mime type, with a safe fallback."""
 
@@ -1965,6 +1972,15 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
             text_value = raw_school_record.get(key)
             if isinstance(text_value, str):
                 zf.writestr(f"{school_id}_{idx}.txt", text_value)
+        for social in ("facebook", "instagram"):
+            blob_key = f"{social}_image_blob"
+            mime_key = f"{social}_image_mime"
+            social_blob = _coerce_to_bytes(raw_school_record.get(blob_key))
+            if not social_blob:
+                continue
+            mime_type = raw_school_record.get(mime_key)
+            extension = _guess_file_extension(mime_type, ".png")
+            zf.writestr(f"{school_id}_{social}{extension}", social_blob)
 
     buffer.seek(0)
     headers = {"Content-Disposition": f"attachment; filename={school_id}_binder.zip"}

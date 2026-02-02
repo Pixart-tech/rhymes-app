@@ -18,10 +18,14 @@ class School(BaseModel):
     state: Optional[str] = None
     pin: Optional[str] = None
     website: Optional[str] = None
+    facebook_link: Optional[str] = None
+    instagram_link: Optional[str] = None
     tagline: Optional[str] = None
     principal_name: Optional[str] = None
     principal_email: Optional[str] = None
     principal_phone: Optional[str] = None
+    facebook_image_url: Optional[str] = None
+    instagram_image_url: Optional[str] = None
     service_type: Optional[List[str]] = None
     service_status: Optional[Dict[str, str]] = None
     grades: Optional[Dict[str, Dict[str, Any]]] = None

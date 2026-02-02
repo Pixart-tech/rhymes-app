@@ -137,9 +137,15 @@ export const buildSchoolFormValuesFromProfile = (
     pin: profile?.pin ?? '',
     tagline: profile?.tagline ?? '',
     website: profile?.website ?? '',
+    facebook_link: profile?.facebook_link ?? '',
+    instagram_link: profile?.instagram_link ?? '',
+    facebook_image_url: profile?.facebook_image_url ?? null,
+    instagram_image_url: profile?.instagram_image_url ?? null,
     principal_name: profile?.principal_name ?? '',
     principal_email: profile?.principal_email ?? '',
     principal_phone: profile?.principal_phone ?? '',
+    facebook_image_file: null,
+    instagram_image_file: null,
     service_status: buildServiceStatusFromProfile(profile),
     grades: buildGradeMapFromProfile(profile),
     id_card_fields: profile?.id_card_fields ?? []
@@ -157,6 +163,8 @@ export const buildSchoolFormData = (values: SchoolFormValues): FormData => {
   formData.append('pin', values.pin);
   formData.append('tagline', values.tagline ?? '');
   formData.append('website', values.website ?? '');
+  formData.append('facebook_link', values.facebook_link ?? '');
+  formData.append('instagram_link', values.instagram_link ?? '');
   formData.append('principal_name', values.principal_name);
   formData.append('principal_email', values.principal_email);
   formData.append('principal_phone', values.principal_phone);
@@ -168,6 +176,12 @@ export const buildSchoolFormData = (values: SchoolFormValues): FormData => {
   formData.append('id_card_fields', JSON.stringify(values.id_card_fields));
   if (values.logo_file) {
     formData.append('logo_file', values.logo_file);
+  }
+  if (values.facebook_image_file) {
+    formData.append('facebook_image', values.facebook_image_file);
+  }
+  if (values.instagram_image_file) {
+    formData.append('instagram_image', values.instagram_image_file);
   }
   return formData;
 };
@@ -213,6 +227,14 @@ const isPdfFile = (file: File) => {
   return file.type === 'application/pdf' || name.endsWith('.pdf');
 };
 
+const isImageFile = (file: File) => {
+  const name = file.name ?? '';
+  return (
+    file.type.startsWith('image/') ||
+    /\.(png|jpe?g|gif|webp|svg|bmp|tiff?)$/i.test(name)
+  );
+};
+
 export interface SchoolFormProps {
   mode: 'create' | 'edit';
   initialValues: SchoolFormValues;
@@ -237,6 +259,14 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
   const [values, setValues] = useState<SchoolFormValues>(initialValues);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string>(getLogoPreview(initialValues));
   const logoPreviewUrlRef = useRef<string | null>(null);
+  const [facebookImagePreviewUrl, setFacebookImagePreviewUrl] = useState<string | null>(
+    initialValues.facebook_image_url ?? null
+  );
+  const [instagramImagePreviewUrl, setInstagramImagePreviewUrl] = useState<string | null>(
+    initialValues.instagram_image_url ?? null
+  );
+  const facebookImagePreviewUrlRef = useRef<string | null>(null);
+  const instagramImagePreviewUrlRef = useRef<string | null>(null);
   const { getIdToken } = useAuth();
   const requestPdfPreview = useCallback(
     async (file: File) => {
@@ -281,10 +311,20 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
   const prevIdCardStatus = useRef(initialValues.service_status.id_cards);
   const [isEmailChecking, setIsEmailChecking] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [facebookInputMode, setFacebookInputMode] = useState<'link' | 'image'>(
+    initialValues.facebook_image_url ? 'image' : 'link'
+  );
+  const [instagramInputMode, setInstagramInputMode] = useState<'link' | 'image'>(
+    initialValues.instagram_image_url ? 'image' : 'link'
+  );
  
   useEffect(() => {
     setValues(initialValues);
     setLogoPreviewUrl(getLogoPreview(initialValues));
+    setFacebookImagePreviewUrl(initialValues.facebook_image_url ?? null);
+    setInstagramImagePreviewUrl(initialValues.instagram_image_url ?? null);
+    setFacebookInputMode(initialValues.facebook_image_url ? 'image' : 'link');
+    setInstagramInputMode(initialValues.instagram_image_url ? 'image' : 'link');
     setLinkPrincipalEmail(Boolean(initialValues.email && initialValues.email === initialValues.principal_email));
     setLinkPrincipalPhone(Boolean(initialValues.phone && initialValues.phone === initialValues.principal_phone));
     setCurrentSection(1);
@@ -338,6 +378,54 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
     }
     setLogoPreviewUrl(values.logo_url ?? '');
   }, [values.logo_file, values.logo_url]);
+
+  useEffect(() => {
+    if (values.facebook_image_file) {
+      const previewUrl = URL.createObjectURL(values.facebook_image_file);
+      if (facebookImagePreviewUrlRef.current) {
+        URL.revokeObjectURL(facebookImagePreviewUrlRef.current);
+      }
+      facebookImagePreviewUrlRef.current = previewUrl;
+      setFacebookImagePreviewUrl(previewUrl);
+
+      return () => {
+        if (facebookImagePreviewUrlRef.current === previewUrl) {
+          URL.revokeObjectURL(previewUrl);
+          facebookImagePreviewUrlRef.current = null;
+        }
+      };
+    }
+
+    if (facebookImagePreviewUrlRef.current) {
+      URL.revokeObjectURL(facebookImagePreviewUrlRef.current);
+      facebookImagePreviewUrlRef.current = null;
+    }
+    setFacebookImagePreviewUrl(values.facebook_image_url ?? null);
+  }, [values.facebook_image_file, values.facebook_image_url]);
+
+  useEffect(() => {
+    if (values.instagram_image_file) {
+      const previewUrl = URL.createObjectURL(values.instagram_image_file);
+      if (instagramImagePreviewUrlRef.current) {
+        URL.revokeObjectURL(instagramImagePreviewUrlRef.current);
+      }
+      instagramImagePreviewUrlRef.current = previewUrl;
+      setInstagramImagePreviewUrl(previewUrl);
+
+      return () => {
+        if (instagramImagePreviewUrlRef.current === previewUrl) {
+          URL.revokeObjectURL(previewUrl);
+          instagramImagePreviewUrlRef.current = null;
+        }
+      };
+    }
+
+    if (instagramImagePreviewUrlRef.current) {
+      URL.revokeObjectURL(instagramImagePreviewUrlRef.current);
+      instagramImagePreviewUrlRef.current = null;
+    }
+    setInstagramImagePreviewUrl(values.instagram_image_url ?? null);
+  }, [values.instagram_image_file, values.instagram_image_url]);
 
   useEffect(() => {
     if (currentSection > totalSections) {
@@ -427,8 +515,7 @@ const handleAddressFieldChange =
         return;
       }
 
-      const isImageFile = file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp|tiff?)$/i.test(file.name);
-      if (!isImageFile) {
+      if (!isImageFile(file)) {
         toast.error('Please select an image file.');
         handleCropperClose();
         setValues((prev) => ({ ...prev, logo_file: null }));
@@ -452,6 +539,64 @@ const handleAddressFieldChange =
     },
     [handleCropperClose, requestPdfPreview]
   );
+
+  const handleFacebookImageChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const input = event.target;
+      const file = input?.files?.[0] ?? null;
+      if (!file) {
+        return;
+      }
+      if (!isImageFile(file)) {
+        toast.error('Please select an image file.');
+        input.value = '';
+        return;
+      }
+      setValues((prev) => ({ ...prev, facebook_image_file: file }));
+      input.value = '';
+    },
+    []
+  );
+
+  const handleFacebookModeChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setFacebookInputMode(event.target.value as 'link' | 'image');
+    },
+    []
+  );
+
+  const handleInstagramImageChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const input = event.target;
+      const file = input?.files?.[0] ?? null;
+      if (!file) {
+        return;
+      }
+      if (!isImageFile(file)) {
+        toast.error('Please select an image file.');
+        input.value = '';
+        return;
+      }
+      setValues((prev) => ({ ...prev, instagram_image_file: file }));
+      input.value = '';
+    },
+    []
+  );
+
+  const handleInstagramModeChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setInstagramInputMode(event.target.value as 'link' | 'image');
+    },
+    []
+  );
+
+  const clearFacebookImageSelection = useCallback(() => {
+    setValues((prev) => ({ ...prev, facebook_image_file: null }));
+  }, []);
+
+  const clearInstagramImageSelection = useCallback(() => {
+    setValues((prev) => ({ ...prev, instagram_image_file: null }));
+  }, []);
 
   const onCropComplete = useCallback(
     async (croppedImage: Blob) => {
@@ -477,6 +622,14 @@ const handleAddressFieldChange =
       if (logoPreviewUrlRef.current) {
         URL.revokeObjectURL(logoPreviewUrlRef.current);
         logoPreviewUrlRef.current = null;
+      }
+      if (facebookImagePreviewUrlRef.current) {
+        URL.revokeObjectURL(facebookImagePreviewUrlRef.current);
+        facebookImagePreviewUrlRef.current = null;
+      }
+      if (instagramImagePreviewUrlRef.current) {
+        URL.revokeObjectURL(instagramImagePreviewUrlRef.current);
+        instagramImagePreviewUrlRef.current = null;
       }
     };
   }, []);
@@ -846,6 +999,150 @@ const handleAddressFieldChange =
                         placeholder="Play. Learn. Grow."
                         className={cn(invalidFields.has('tagline') && 'border-red-500')}
                       />
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-slate-700">Facebook</span>
+                          <div className="flex items-center gap-2 text-sm text-slate-600">
+                            <label className="flex items-center gap-1">
+                              <input
+                                type="radio"
+                                name="facebook-mode"
+                                value="link"
+                                checked={facebookInputMode === 'link'}
+                                onChange={handleFacebookModeChange}
+                                className="scale-110"
+                              />
+                              Link
+                            </label>
+                            <label className="flex items-center gap-1">
+                              <input
+                                type="radio"
+                                name="facebook-mode"
+                                value="image"
+                                checked={facebookInputMode === 'image'}
+                                onChange={handleFacebookModeChange}
+                                className="scale-110"
+                              />
+                              Image
+                            </label>
+                          </div>
+                        </div>
+                        {facebookInputMode === 'link' ? (
+                          <div className="space-y-2">
+                            <Label htmlFor="facebook-link">Facebook link</Label>
+                            <Input
+                              id="facebook-link"
+                              value={values.facebook_link}
+                              onChange={handleInputChange('facebook_link')}
+                              placeholder="https://www.facebook.com/your-school"
+                            />
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <Label htmlFor="facebook-image">Facebook image</Label>
+                            <Input
+                              id="facebook-image"
+                              type="file"
+                              accept="image/*"
+                              onChange={handleFacebookImageChange}
+                            />
+                            {facebookImagePreviewUrl && (
+                              <div className="mt-2 flex items-center gap-3">
+                                <img
+                                  src={facebookImagePreviewUrl}
+                                  alt="Facebook preview"
+                                  className="h-16 w-16 border object-cover bg-white"
+                                />
+                                {values.facebook_image_file && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={clearFacebookImageSelection}
+                                    className="whitespace-nowrap"
+                                  >
+                                    Remove
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-slate-700">Instagram</span>
+                          <div className="flex items-center gap-2 text-sm text-slate-600">
+                            <label className="flex items-center gap-1">
+                              <input
+                                type="radio"
+                                name="instagram-mode"
+                                value="link"
+                                checked={instagramInputMode === 'link'}
+                                onChange={handleInstagramModeChange}
+                                className="scale-110"
+                              />
+                              Link
+                            </label>
+                            <label className="flex items-center gap-1">
+                              <input
+                                type="radio"
+                                name="instagram-mode"
+                                value="image"
+                                checked={instagramInputMode === 'image'}
+                                onChange={handleInstagramModeChange}
+                                className="scale-110"
+                              />
+                              Image
+                            </label>
+                          </div>
+                        </div>
+                        {instagramInputMode === 'link' ? (
+                          <div className="space-y-2">
+                            <Label htmlFor="instagram-link">Instagram link</Label>
+                            <Input
+                              id="instagram-link"
+                              value={values.instagram_link}
+                              onChange={handleInputChange('instagram_link')}
+                              placeholder="https://www.instagram.com/your-school"
+                            />
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <Label htmlFor="instagram-image">Instagram image</Label>
+                            <Input
+                              id="instagram-image"
+                              type="file"
+                              accept="image/*"
+                              onChange={handleInstagramImageChange}
+                            />
+                            {instagramImagePreviewUrl && (
+                              <div className="mt-2 flex items-center gap-3">
+                                <img
+                                  src={instagramImagePreviewUrl}
+                                  alt="Instagram preview"
+                                  className="h-16 w-16 border object-cover bg-white"
+                                />
+                                {values.instagram_image_file && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={clearInstagramImageSelection}
+                                    className="whitespace-nowrap"
+                                  >
+                                    Remove
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </section>
