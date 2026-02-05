@@ -1303,7 +1303,7 @@ def _set_cover_status_for_school(
         status_payload["status_updated_by"] = decoded_token.get("uid") or decoded_token.get("user_id")
         if decoded_token.get("email"):
             status_payload["status_updated_by_email"] = decoded_token.get("email")
-
+    
     _cover_root_doc(school_id).set(status_payload, merge=True)
 
 
@@ -1415,6 +1415,68 @@ async def get_cover_status(school_id: str, authorization: Optional[str] = Header
         "freeze_updated_by": root_data.get("freeze_updated_by"),
         "freeze_updated_by_email": root_data.get("freeze_updated_by_email"),
     }
+
+@api_router.get("/admin/cover-status")
+async def list_cover_statuses_admin(
+    school_ids: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Admin helper: return cover status for many schools in one call.
+    If ``school_ids`` is provided (comma-separated), restrict to that set; otherwise return all.
+    """
+    decoded_token = _verify_and_decode_token(authorization)
+    # Be permissive when role claim is missing; enforce only if present.
+    if decoded_token.get("role") and decoded_token.get("role") != "super-admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+
+    ids: Optional[List[str]] = None
+    if school_ids:
+        ids = [entry.strip() for entry in school_ids.split(",") if entry.strip()]
+        if not ids:
+            ids = None
+
+    if ids:
+        doc_refs = [_cover_root_doc(sid) for sid in ids]
+        snapshots = list(db.get_all(doc_refs))
+    else:
+        snapshots = list(
+            db.collection("cover_selections")
+            .select(
+                [
+                    "status",
+                    "status_updated_at",
+                    "status_updated_by",
+                    "status_updated_by_email",
+                    "freeze",
+                    "freeze_updated_at",
+                    "freeze_updated_by",
+                    "freeze_updated_by_email",
+                ]
+            )
+            .stream()
+        )
+
+    statuses: List[Dict[str, Any]] = []
+    for snap in snapshots:
+        if not snap:
+            continue
+        data = snap.to_dict() or {}
+        statuses.append(
+            {
+                "school_id": snap.id,
+                "status": _normalize_cover_status(data.get("status")),
+                "status_updated_at": data.get("status_updated_at"),
+                "status_updated_by": data.get("status_updated_by"),
+                "status_updated_by_email": data.get("status_updated_by_email"),
+                "freeze": bool(data.get("freeze")) if "freeze" in data else False,
+                "freeze_updated_at": data.get("freeze_updated_at"),
+                "freeze_updated_by": data.get("freeze_updated_by"),
+                "freeze_updated_by_email": data.get("freeze_updated_by_email"),
+            }
+        )
+
+    return {"statuses": statuses}
 
 def _ensure_cover_status_default(
     school_id: str,
@@ -1574,15 +1636,48 @@ async def upload_cover_file(
 
     return {"ok": True, "filename": target.name, "path": str(target), "url": f"/api/cover-uploads/{school_id}/{target.name}"}
 
-
-@api_router.post("/cover-uploads/{school_id}/finalize")
-async def finalize_cover_uploads(
+@api_router.patch("/cover-upload-status/{school_id}")
+async def cover_upload_status(
     school_id: str,
-    authorization: Optional[str] = Header(None),
+    status: str = Form(...),
+    status_query: Optional[str] = Query(None),
 ):
-    """Placeholder finalize endpoint for GUI clients; simply acknowledges upload completion."""
-    # Auth optional for GUI convenience
-    return {"ok": True, "message": "Cover uploads acknowledged", "school_id": school_id}
+    """
+    Lightweight endpoint used by cover_uploader_gui.py to set cover status.
+    Accepts school_id and status via JSON body or query param; auth optional.
+    """
+   
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+
+    resolved_status = status if status is not None else status_query
+    status_value = _normalize_cover_status(resolved_status)
+    if status_value is None:
+        raise HTTPException(status_code=400, detail="status is required")
+
+    decoded_token = None
+    now = datetime.utcnow()
+
+    _set_cover_status_for_school(
+        safe_school,
+        status_value,
+        now=now,
+        decoded_token=decoded_token or None,
+    )
+    return {"ok": True, "school_id": safe_school, "status": status_value, "updated_at": now.isoformat()}
+
+    
+    
+
+# @api_router.post("/cover-uploads/{school_id}/finalize")
+# async def finalize_cover_uploads(
+#     school_id: str,
+#     authorization: Optional[str] = Header(None),
+# ):
+#     """Placeholder finalize endpoint for GUI clients; simply acknowledges upload completion."""
+#     # Auth optional for GUI convenience
+#     return {"ok": True, "message": "Cover uploads acknowledged", "school_id": school_id}
 
 def _format_cover_theme(theme_id: Optional[str]) -> Optional[str]:
     if not theme_id:
@@ -2169,8 +2264,64 @@ def get_book_selections(school_id: str, authorization: Optional[str] = Header(No
 
 @api_router.get("/book-selections/{school_id}/grades")
 def get_book_selections_grades(school_id: str, authorization: Optional[str] = Header(None)):
-    """Return saved book selections grouped per grade (alias to main endpoint)."""
-    return get_book_selections(school_id, authorization)
+    """
+    Lightweight status view for book selections.
+
+    Returns which enabled grades (from the school record) have a book-selection
+    document. Keeps the legacy `classes` field for compatibility with the
+    existing AuthPage check but avoids loading full doc payloads.
+    """
+    _verify_and_decode_token(authorization)
+
+    # Determine enabled grades from the school profile.
+    enabled_grades: List[str] = []
+    school_doc = db.collection("schools").document(school_id).get()
+    if school_doc.exists:
+        record = school_doc.to_dict() or {}
+        grades_map = school_profiles.normalize_grades(record.get("grades"))
+        enabled_grades = [
+            key for key, entry in grades_map.items() if isinstance(entry, dict) and entry.get("enabled")
+        ]
+
+    # Fetch only doc ids (no payload) from the book selections collection.
+    class_docs = list(_book_collection_for_school(school_id).select([]).stream())
+
+    # Include legacy path ids if any.
+    try:
+        legacy_docs = list(_book_collection_for_school_legacy_classes(school_id).select([]).stream())
+        existing_ids = {doc.id for doc in class_docs}
+        for doc in legacy_docs:
+            if doc.id not in existing_ids:
+                class_docs.append(doc)
+    except Exception:
+        pass
+
+    def _norm(key: str) -> str:
+        try:
+            return key.strip().lower().replace(" ", "_")
+        except Exception:
+            return ""
+
+    present_grades: Set[str] = set()
+    classes: List[Dict[str, Any]] = []
+    for doc in class_docs:
+        doc_id = doc.id
+        norm_id = _norm(doc_id)
+        if norm_id:
+            present_grades.add(norm_id)
+        classes.append({"doc_id": doc_id, "class": doc_id, "class_label": doc_id})
+
+    enabled_norm = [_norm(g) for g in enabled_grades if _norm(g)]
+    missing = [g for g in enabled_norm if g not in present_grades]
+    all_present = len(missing) == 0
+
+    return {
+        "all_present": all_present,
+        "enabled_grades": enabled_norm,
+        "present_grades": sorted(present_grades),
+        "missing_grades": missing,
+        "classes": classes,  # legacy/compat with AuthPage set-building
+    }
 
 
 @api_router.post("/cover-selections")

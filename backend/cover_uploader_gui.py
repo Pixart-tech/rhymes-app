@@ -23,12 +23,14 @@ class CoverUploaderApp:
         self.root.title("Cover Page Uploader")
 
         self.folder_var = StringVar()
-        self.upload_url_var = StringVar(value="http://31.97.236.164/api/cover-uploads")
+        self.upload_url_var = StringVar(value="http://localhost:8000/api/cover-uploads")
+
         # self.finalize_url_var = StringVar(value="http://31.97.236.164/api/mark-complete")
         self.status_var = StringVar(value="Idle")
         self.progress_var = DoubleVar(value=0.0)
         self.progress_count_var = StringVar(value="0 / 0")
         self.is_running = False
+        self._last_school_id: Optional[str] = None
 
         self._build_layout()
 
@@ -85,6 +87,10 @@ class CoverUploaderApp:
         folder = filedialog.askdirectory(title="Select folder containing binder JSON and png/")
         if folder:
             self.folder_var.set(folder)
+            try:
+                self._auto_configure_upload_url(Path(folder))
+            except Exception as exc:
+                self._log(f"Unable to auto configure upload URL: {exc}")
 
     def start_upload(self) -> None:
         if self.is_running:
@@ -98,7 +104,8 @@ class CoverUploaderApp:
     def _process_upload(self) -> None:
         try:
             folder = Path(self.folder_var.get()).expanduser()
-            upload_url = self.upload_url_var.get().strip()
+            upload_url_base = self._strip_school_id_from_url(self.upload_url_var.get().strip())
+            
             # finalize_url = self.finalize_url_var.get().strip()
 
             if not folder.is_dir():
@@ -115,6 +122,13 @@ class CoverUploaderApp:
             school_id = str(school.get("school_id") or "").strip()
             if not school_id:
                 raise ValueError("school_id missing in JSON.")
+
+            self._apply_school_id_to_upload_url(school_id)
+
+            if not upload_url_base:
+                raise ValueError("Upload URL is required.")
+            upload_url = f"{upload_url_base.rstrip('/')}/{school_id}"
+            
 
             selections = (data.get("books") or {}).get("selections") or []
             if not selections:
@@ -163,6 +177,17 @@ class CoverUploaderApp:
 
             self._update_progress(total, total, status="All uploads completed.")
             self._notify("Success", "All cover pages uploaded and finalized.")
+            self.update_url_var=f"http://localhost:8000/api/cover-upload-status/{school_id}"
+            response=session.patch(
+                self.update_url_var,
+                data={"school_id":school_id,"status":"3"},
+                timeout=60
+            )
+            print(response)
+           
+                
+            
+            
         except Exception as exc:  # broad catch to surface errors in UI
             self._log(f"ERROR: {exc}")
             self._update_status(f"Error: {exc}")
@@ -172,6 +197,9 @@ class CoverUploaderApp:
             self.is_running = False
 
     def _find_json(self, folder: Path) -> Path:
+        preferred = folder / "binder.json"
+        if preferred.is_file():
+            return preferred
         json_files = sorted(folder.glob("*.json"))
         if not json_files:
             raise FileNotFoundError(f"No JSON file found in {folder}")
@@ -204,6 +232,34 @@ class CoverUploaderApp:
             else:
                 missing.append(path)
         return ready, missing
+
+    def _auto_configure_upload_url(self, folder: Path) -> None:
+        json_path = self._find_json(folder)
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        school = data.get("school") or {}
+        school_id = str(school.get("school_id") or "").strip()
+        if not school_id:
+            raise ValueError("school_id missing in JSON.")
+        self._apply_school_id_to_upload_url(school_id)
+
+    def _apply_school_id_to_upload_url(self, school_id: str) -> None:
+        current_url = self.upload_url_var.get().strip()
+        base = self._strip_school_id_from_url(current_url)
+        if not base:
+            return
+        base = base.rstrip("/")
+        self.upload_url_var.set(f"{base}/{school_id}")
+        self._last_school_id = school_id
+
+    def _strip_school_id_from_url(self, url: str) -> str:
+        if not url:
+            return ""
+        trimmed = url.rstrip("/")
+        if self._last_school_id:
+            suffix = f"/{self._last_school_id}"
+            if trimmed.endswith(suffix):
+                return trimmed[: -len(suffix)]
+        return trimmed
 
     def _log(self, message: str) -> None:
         def append() -> None:

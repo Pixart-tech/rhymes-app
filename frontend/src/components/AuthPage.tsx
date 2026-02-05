@@ -332,6 +332,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const workspaceFetchInFlight = useRef(false);
   const lastFetchedWorkspaceUserId = useRef<string | null>(null);
   const workspaceCacheRef = useRef<{ userId: string; session: WorkspaceSession; updatedAt: number } | null>(null);
+  const coverStatusLoadedKey = useRef<string | null>(null);
   const allSchoolsForLogos = useMemo(() => {
     const deduped: Record<string, SchoolProfile> = {};
     [...schools, ...adminSchools].forEach((school) => {
@@ -748,8 +749,20 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     };
   }, [adminSchools]);
 
+  const visibleSchoolIds = useMemo(
+    () =>
+      filteredAdminSchools
+        .map((school) => school.school_id)
+        .filter((id): id is string => Boolean(id)),
+    [filteredAdminSchools]
+  );
+  const visibleSchoolIdsKey = useMemo(() => visibleSchoolIds.slice().sort().join(','), [visibleSchoolIds]);
+
   useEffect(() => {
-    if (workspaceUser?.role !== 'super-admin' || filteredAdminSchools.length === 0) {
+    if (workspaceUser?.role !== 'super-admin' || visibleSchoolIds.length === 0) {
+      return;
+    }
+    if (coverStatusLoadedKey.current === visibleSchoolIdsKey) {
       return;
     }
     let cancelled = false;
@@ -761,65 +774,90 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
           return;
         }
         const headers = { Authorization: `Bearer ${token}` };
+        // Fetch all cover statuses in one batch; no repeat for the same set of schools
+        try {
+          const resp = await axios.get(`${API}/admin/cover-status`, {
+            params: { school_ids: visibleSchoolIds.join(',') },
+            headers,
+            validateStatus: () => true
+          });
+          const statuses = Array.isArray(resp.data?.statuses) ? resp.data.statuses : [];
+          if (!cancelled) {
+            setCoverStatusMap((prev) => {
+              const next = { ...prev };
+              statuses.forEach((entry: any) => {
+                const sid = entry?.school_id;
+                if (!sid) return;
+                const statusVal = (entry?.status ?? '1').toString();
+                next[sid] = statusVal;
+              });
+              visibleSchoolIds.forEach((sid) => {
+                if (next[sid] === undefined) {
+                  next[sid] = '1';
+                }
+              });
+              return next;
+            });
+            coverStatusLoadedKey.current = visibleSchoolIdsKey;
+          }
+        } catch (_) {
+          if (!cancelled) {
+            setCoverStatusMap((prev) => {
+              const next = { ...prev };
+              visibleSchoolIds.forEach((sid) => {
+                if (next[sid] === undefined) {
+                  next[sid] = 'unknown';
+                }
+              });
+              return next;
+            });
+            coverStatusLoadedKey.current = visibleSchoolIdsKey;
+          }
+        }
+
+        const missingBookIds = visibleSchoolIds.filter((sid) => bookStatusMap[sid] === undefined);
 
         await Promise.all(
           filteredAdminSchools.map(async (school) => {
             const schoolId = school.school_id;
-            if (!schoolId) {
+            if (!schoolId || !missingBookIds.includes(schoolId)) {
               return;
             }
 
-            // try {
-            //   const resp = await axios.get(`${API}/cover-status/${schoolId}`, {
-            //     headers,
-            //     validateStatus: () => true
-            //   });
-            //   const statusVal = (resp.data?.status || 'unknown').toString();
-            //   if (!cancelled) {
-            //     setCoverStatusMap((prev) =>
-            //       prev[schoolId] === statusVal ? prev : { ...prev, [schoolId]: statusVal }
-            //     );
-            //   }
-            // } catch (_) {
-            //   if (!cancelled) {
-            //     setCoverStatusMap((prev) => ({ ...prev, [schoolId]: 'unknown' }));
-            //   }
-            // }
-
-            // try {
-            //   const resp = await axios.get(`${API}/book-selections/${schoolId}/grades`, {
-            //     headers,
-            //     validateStatus: () => true
-            //   });
-            //   const classes = Array.isArray(resp.data?.classes) ? resp.data.classes : [];
-            //   const enabledGrades = Object.entries(school.grades || {})
-            //     .filter(([, grade]) => Boolean((grade as GradeSetting | undefined)?.enabled))
-            //     .map(([key]) => normalizeGradeKey(key))
-            //     .filter(Boolean);
-            //   const presentGrades = new Set(
-            //     classes
-            //       .map(
-            //         (entry: any) =>
-            //           normalizeGradeKey(entry?.doc_id) ||
-            //           normalizeGradeKey(entry?.class) ||
-            //           normalizeGradeKey(entry?.class_label)
-            //       )
-            //       .filter(Boolean)
-            //   );
-            //   const allPresent =
-            //     enabledGrades.length === 0 ||
-            //     enabledGrades.every((gradeKey) => presentGrades.has(gradeKey));
-            //   const bookStatus = allPresent ? 'done' : 'not done';
-            //   if (!cancelled) {
-            //     setBookStatusMap((prev) =>
-            //       prev[schoolId] === bookStatus ? prev : { ...prev, [schoolId]: bookStatus }
-            //     );
-            //   }
-            // } catch (_) {
-            //   if (!cancelled) {
-            //     setBookStatusMap((prev) => ({ ...prev, [schoolId]: 'not done' }));
-            //   }
-            // }
+            try {
+              const resp = await axios.get(`${API}/book-selections/${schoolId}/grades`, {
+                headers,
+                validateStatus: () => true
+              });
+              const classes = Array.isArray(resp.data?.classes) ? resp.data.classes : [];
+              const enabledGrades = Object.entries(school.grades || {})
+                .filter(([, grade]) => Boolean((grade as GradeSetting | undefined)?.enabled))
+                .map(([key]) => normalizeGradeKey(key))
+                .filter(Boolean);
+              const presentGrades = new Set(
+                classes
+                  .map(
+                    (entry: any) =>
+                      normalizeGradeKey(entry?.doc_id) ||
+                      normalizeGradeKey(entry?.class) ||
+                      normalizeGradeKey(entry?.class_label)
+                  )
+                  .filter(Boolean)
+              );
+              const allPresent =
+                enabledGrades.length === 0 ||
+                enabledGrades.every((gradeKey) => presentGrades.has(gradeKey));
+              const bookStatus = allPresent ? 'done' : 'not done';
+              if (!cancelled) {
+                setBookStatusMap((prev) =>
+                  prev[schoolId] === bookStatus ? prev : { ...prev, [schoolId]: bookStatus }
+                );
+              }
+            } catch (_) {
+              if (!cancelled) {
+                setBookStatusMap((prev) => ({ ...prev, [schoolId]: 'not done' }));
+              }
+            }
           })
         );
       } catch (_) {
@@ -831,7 +869,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     return () => {
       cancelled = true;
     };
-  }, [filteredAdminSchools, getIdToken, workspaceUser?.role]);
+  }, [visibleSchoolIdsKey, getIdToken, workspaceUser?.role]);
   const adminBranchCount = useMemo(
     () => adminSchools.filter((school) => Boolean(school.branch_parent_id)).length,
     [adminSchools]
@@ -1164,26 +1202,37 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   );
 
   const handleUnapproveSelections = useCallback(
-    (school: SchoolProfile) => {
+    async (school: SchoolProfile) => {
       if (!workspaceUser || workspaceUser.role !== 'super-admin') {
         return;
       }
       setApprovingSchoolId(school.school_id);
-      const updatedSchool = {
-        ...school,
-        selections_approved: false,
-        selection_status: 'active',
-      };
-      setAdminSchools((prev) =>
-        prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))
-      );
-      setSchools((prev) =>
-        prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))
-      );
-      setApprovingSchoolId(null);
-      toast.success('Selections are unfrozen for this school.');
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+        const response = await axios.patch<SchoolProfile>(
+          `${API}/admin/schools/${school.school_id}/approve-selections`,
+          { approve: false },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const updatedSchool = response.data;
+        setAdminSchools((prev) =>
+          prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))
+        );
+        setSchools((prev) =>
+          prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))
+        );
+        toast.success('Selections are unfrozen for this school.');
+      } catch (error) {
+        console.error('Failed to unapprove selections', error);
+        toast.error('Unable to unapprove selections. Please try again.');
+      } finally {
+        setApprovingSchoolId(null);
+      }
     },
-    [workspaceUser]
+    [workspaceUser, getIdToken]
   );
 
   const handleBranchSubmit = useCallback(
@@ -1828,20 +1877,20 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       { label: 'All services', value: 'all' },
       ...SERVICE_KEYS.map((key) => ({ value: key, label: SERVICE_LABELS[key] }))
     ];
-    // const coverFilterOptions = [
-    //   { value: 'all', label: 'All cover statuses' },
-    //   { value: '1', label: '1 - Explore' },
-    //   { value: '2', label: '2 - Preparing' },
-    //   { value: '3', label: '3 - Review' },
-    //   { value: '4', label: '4 - Frozen' },
+    const coverFilterOptions = [
+      { value: 'all', label: 'All cover statuses' },
+      { value: '1', label: '1 - Explore' },
+      { value: '2', label: '2 - Preparing' },
+      { value: '3', label: '3 - Review' },
+      { value: '4', label: '4 - Frozen' },
       
-    // ];
-    // const bookFilterOptions = [
-    //   { value: 'all', label: 'All book statuses' },
-    //   { value: 'done', label: 'Done' },
-    //   { value: 'not done', label: 'Not done' },
+    ];
+    const bookFilterOptions = [
+      { value: 'all', label: 'All book statuses' },
+      { value: 'done', label: 'Done' },
+      { value: 'not done', label: 'Not done' },
       
-    // ];
+    ];
     const schoolsToRender = filteredAdminSchools;
     const emptyStateMessage =
       adminSchools.length === 0 ? 'No schools available yet.' : 'No schools match the current filters.';
@@ -1955,7 +2004,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                   </SelectContent>
                 </Select>
               </div>
-              {/* <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-slate-100 px-4 py-3 shadow-sm">
+              { <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-slate-100 px-4 py-3 shadow-sm">
                 <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">
                   Cover status
                 </span>
@@ -1971,8 +2020,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                     ))}
                   </SelectContent>
                 </Select>
-              </div> */}
-              {/* <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-slate-100 px-4 py-3 shadow-sm">
+              </div> }
+              { <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-slate-100 px-4 py-3 shadow-sm">
                 <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">
                   Book status
                 </span>
@@ -1988,7 +2037,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                     ))}
                   </SelectContent>
                 </Select>
-              </div> */}
+              </div> }
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
@@ -2037,14 +2086,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                           Status
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          Selections
+                          BOOK Selections 
                         </th>
-                        {/* <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                           Cover-selection status
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                           Book-selection status
-                        </th> */}
+                        </th> 
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                           Grades
                         </th>
@@ -2067,8 +2116,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                         const isApproved = isSchoolApproved(school);
                         const isApproving = approvingSchoolId === school.school_id;
                         const services = school.service_type ?? [];
-                        // const coverSelectionStatus = coverStatusMap[school.school_id] ?? '—';
-                        // const bookSelectionStatus = bookStatusMap[school.school_id] ?? '—';
+                        const coverSelectionStatus = coverStatusMap[school.school_id] ?? '—';
+                        const bookSelectionStatus = bookStatusMap[school.school_id] ?? '—';
 
                         return (
                           <tr key={school.school_id} className="hover:bg-slate-50 transition-colors">
@@ -2130,20 +2179,27 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                             </td>
                             <td className="px-4 py-4 text-slate-700">
                               <div className="flex items-center gap-2">
-                                <span>{school.total_selections ?? 0}</span>
-                                {isApproved && (
+                                {/* <span>{school.total_selections ?? 0}</span> */}
+                                {isApproved ==true&& (
                                   <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                                     Frozen
                                   </span>
                                 )}
+                                  {isApproved ==false&& ( 
+                                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                                    Unfrozen
+                                  </span>
+
+                                  )}
+                                
                               </div>
                             </td>
-                            {/* <td className="px-4 py-4 text-slate-700">
+                            <td className="px-4 py-4 text-slate-700">
                               {coverSelectionStatus}
                             </td>
                             <td className="px-4 py-4 text-slate-700">
                               {bookSelectionStatus}
-                            </td> */}
+                            </td> 
                             <td className="px-4 py-4 text-slate-700">{gradeCount}</td>
                             <td className="px-4 py-4 text-slate-700">
                               {formatDate(school.last_updated ?? school.timestamp ?? null)}
