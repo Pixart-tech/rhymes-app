@@ -272,6 +272,7 @@ const CoverPageWorkflow = ({
   const [approvalCovers, setApprovalCovers] = useState([]);
   const [approvalLoading, setApprovalLoading] = useState(false);
   const [approvalError, setApprovalError] = useState('');
+  const [approvalRatios, setApprovalRatios] = useState({});
   const fetchInFlightRef = useRef(false);
   const [serverVersion, setServerVersion] = useState(0);
   const normalizeGradeKey = useCallback((value) => {
@@ -1010,7 +1011,7 @@ const CoverPageWorkflow = ({
               <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-xs uppercase tracking-wide">{gradeLabel}</span>
               <span className="text-xs text-slate-500">({items.length} cover{items.length !== 1 ? 's' : ''})</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
               {items.map((item) => {
                 const component = (item.component || '').toString().trim().toLowerCase();
                 const subject = (item.subject || '').toString().trim().toLowerCase();
@@ -1027,19 +1028,32 @@ const CoverPageWorkflow = ({
                   return item.name ? item.name.replace(/\.[^.]+$/, '') : 'Cover';
                 })();
                 const imageUrl = item.uploadedUrl || item.url;
+                const ratioKey = item.name || imageUrl || `${gradeLabel}-${displayTitle}`;
+                const ratioValue = approvalRatios[ratioKey];
                 return (
-                <div key={`${gradeLabel}-${item.name}`} className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div
+                  key={`${gradeLabel}-${item.name}`}
+                  className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden"
+                >
                   <div
-                    className="bg-slate-50 flex items-center justify-center"
-                    style={{ aspectRatio: '8 / 11', minHeight: '240px', maxHeight: '420px' }}
+                    className="bg-slate-50 flex w-full items-center justify-center overflow-hidden"
+                    style={{
+                      aspectRatio: ratioValue ? `${ratioValue}` : '8 / 11',
+                      width: '100%',
+                    }}
                   >
                     <img
                       src={imageUrl}
                       alt={displayTitle}
-                      className="h-full w-full object-contain"
-                      width={1000}
-                      height={1400}
-                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                      className="block h-full w-full object-cover"
+                      onLoad={(e) => {
+                        const { naturalWidth, naturalHeight } = e.currentTarget;
+                        if (!naturalWidth || !naturalHeight) return;
+                        const ratio = naturalWidth / naturalHeight;
+                        setApprovalRatios((prev) =>
+                          prev[ratioKey] ? prev : { ...prev, [ratioKey]: ratio }
+                        );
+                      }}
                       onError={(e) => {
                         e.currentTarget.style.opacity = '0.3';
                       }}
@@ -1308,8 +1322,11 @@ const CoverPageWorkflow = ({
                 </p>
               </CardContent>
             </Card>
+            
+            
             {showBookSelectionCta && (
               <div className="flex justify-end">
+              
                 <Button
                   type="button"
                   className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"

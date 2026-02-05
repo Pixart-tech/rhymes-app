@@ -2261,7 +2261,7 @@ def get_book_selections(school_id: str, authorization: Optional[str] = Header(No
 
     return {"classes": classes}
 
-
+#checking presbce of all enabled grades in book selections and return status
 @api_router.get("/book-selections/{school_id}/grades")
 def get_book_selections_grades(school_id: str, authorization: Optional[str] = Header(None)):
     """

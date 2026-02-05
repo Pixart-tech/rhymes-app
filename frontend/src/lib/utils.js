@@ -15,8 +15,8 @@ const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
 const DEFAULT_LAN_HOST = window.location.hostname;
   
 
-// const DEFAULT_LAN_BASE = `http://${DEFAULT_LAN_HOST}`;
-const DEFAULT_LAN_BASE = `https://book.eshiksavikas.in`;
+const DEFAULT_LAN_BASE = `http://${DEFAULT_LAN_HOST}`;
+//const DEFAULT_LAN_BASE = `https://book.eshiksavikas.in`;
 
 const deriveApiBaseUrl = (backendUrl) => {
   const fallback = `${DEFAULT_LAN_BASE}/api`;

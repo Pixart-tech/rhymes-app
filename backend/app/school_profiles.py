@@ -991,8 +991,17 @@ def create_school_profile(
     if not user_id:
         raise HTTPException(status_code=400, detail="User record is missing a user id")
 
-    normalized_school_email = _ensure_unique_email(db, str(payload.email), "school email")
-    normalized_principal_email = _ensure_unique_email(db, str(payload.principal_email), "principal email")
+    allow_conflict = user_record.get("role") == "super-admin"
+    normalized_school_email = (
+        _ensure_unique_email(db, str(payload.email), "school email")
+        if not allow_conflict
+        else _normalize_email(str(payload.email))
+    )
+    normalized_principal_email = (
+        _ensure_unique_email(db, str(payload.principal_email), "principal email")
+        if not allow_conflict
+        else _normalize_email(str(payload.principal_email))
+    )
     phone_query = (
         db.collection("schools").where("phone", "==", payload.phone).limit(1).get()
     )

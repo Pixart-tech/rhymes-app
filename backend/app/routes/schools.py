@@ -235,6 +235,7 @@ def _is_pdf_file(content_type: Optional[str], filename: Optional[str]) -> bool:
 
 
 def _convert_pdf_bytes_to_png(contents: bytes) -> bytes:
+   
     try:
         document = fitz.open(stream=contents, filetype="pdf")
     except Exception:
