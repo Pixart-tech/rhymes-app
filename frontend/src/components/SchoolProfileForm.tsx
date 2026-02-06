@@ -486,6 +486,7 @@ const handleAddressFieldChange =
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const input = event.target;
       const file = input?.files?.[0] ?? null;
+      
       if (!file) {
         handleCropperClose();
         return;
@@ -503,6 +504,7 @@ const handleAddressFieldChange =
       if (isPdfFile(file)) {
         try {
           const previewSrc = await requestPdfPreview(file);
+          
           setImageSrc(previewSrc);
         } catch (error) {
           console.error(error);

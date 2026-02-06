@@ -1180,7 +1180,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         }
         const response = await axios.patch<SchoolProfile>(
           `${API}/admin/schools/${school.school_id}/approve-selections`,
-          {},
+          {approval:true},
           { headers: { Authorization: `Bearer ${token}` } }
         );
         const updatedSchool = response.data;
@@ -1214,9 +1214,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         }
         const response = await axios.patch<SchoolProfile>(
           `${API}/admin/schools/${school.school_id}/approve-selections`,
-          { approve: false },
+          { approval: false },
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        
         const updatedSchool = response.data;
         setAdminSchools((prev) =>
           prev.map((entry) => (entry.school_id === school.school_id ? { ...entry, ...updatedSchool } : entry))

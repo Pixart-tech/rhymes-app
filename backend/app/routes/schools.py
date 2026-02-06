@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
-import fitz
+import pymupdf as fitz
 from PIL import Image, UnidentifiedImageError
 
 from .. import school_profiles
