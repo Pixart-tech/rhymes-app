@@ -7,7 +7,7 @@ from io import BytesIO
 import mimetypes
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 import pymupdf as fitz
@@ -712,9 +712,11 @@ def update_branch_status(
     return school_profiles.build_school_from_record(record)
 
 
+
 @router.patch("/admin/schools/{school_id}/approve-selections", response_model=school_profiles.School)
 def approve_school_selections(
     school_id: str,
+    approval: bool = Body(... ,embed=True),
     authorization: Optional[str] = Header(None),
 ):
     decoded_token = verify_and_decode_token(authorization)
@@ -730,14 +732,25 @@ def approve_school_selections(
 
     now = datetime.utcnow()
     approver = user_record.get("email") or user_record.get("uid") or "super-admin"
-    updates = {
-        "selection_status": "approved",
-        "selections_approved": True,
+    if approval:
+        
+        updates = {
+            "selection_status": "approved",
+            "selections_approved": True,
+            "selection_locked_at": now,
+            "selection_locked_by": approver,
+            "updated_at": now,
+            "timestamp": now,
+        }
+    else:
+     updates = {
+        "selection_status": "unapproved",
+        "selections_approved": False,
         "selection_locked_at": now,
         "selection_locked_by": approver,
         "updated_at": now,
         "timestamp": now,
-    }
+        }
     doc_ref.update(updates)
     record = snapshot.to_dict() or {}
     record.update(updates)
