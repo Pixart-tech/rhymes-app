@@ -351,7 +351,7 @@ async def create_school_profile(
         raise HTTPException(status_code=400, detail="Total school images must be 2MB or less")
     facebook_blob, facebook_mime = await _read_upload_file(facebook_image)
     instagram_blob, instagram_mime = await _read_upload_file(instagram_image)
-    return school_profiles.create_school_profile(
+    created=school_profiles.create_school_profile(
         db,
         payload,
         user_record,
@@ -362,7 +362,19 @@ async def create_school_profile(
         instagram_image_blob=instagram_blob,
         instagram_image_mime=instagram_mime,
     )
-
+    cover_doc=db.collection("cover_selections").document(created.school_id)
+    now=datetime.utcnow()
+    default_cover_status="1"
+    status_payload: Dict[str, Any] = {
+        "status": default_cover_status,
+        "status_updated_at": now,
+    }
+    if decoded_token:
+        status_payload["status_updated_by"] = decoded_token.get("uid") or decoded_token.get("user_id")
+        if decoded_token.get("email"):
+            status_payload["status_updated_by_email"] = decoded_token.get("email")
+    cover_doc.set(status_payload,merge=True)
+    return created 
 
 @router.get("/schools/email-availability")
 async def check_school_email_availability(
@@ -429,6 +441,7 @@ async def update_school_profile(
     cleaned_zoho_customer_id = _clean(raw_zoho_customer_id)
     normalized_email = None
     normalized_principal_email = None
+    
     if email_provided:
         normalized_email = school_profiles._ensure_unique_email(
             db, raw_email_value, "school email", exclude_school_id=school_id
