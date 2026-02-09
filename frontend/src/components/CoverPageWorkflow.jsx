@@ -887,7 +887,7 @@ const CoverPageWorkflow = ({
   const handleFinish = () => {
     void handleFinishSave();
   };
-  const showBookSelectionCta = !isAdmin && typeof onNavigateToBooks === 'function' && workflowStatus !== '1';
+  const showBookSelectionCta = isAdmin && typeof onNavigateToBooks === 'function' && workflowStatus !== '1';
 
   const handleRemoveGradeSelection = useCallback(
     async (gradeKey) => {
