@@ -1002,7 +1002,7 @@ const CoverPageWorkflow = ({
       acc[gradeKey].push(item);
       return acc;
     }, {});
-
+  
     return (
       <div className="space-y-4">
         {Object.entries(grouped).map(([gradeLabel, items]) => (
@@ -1373,9 +1373,7 @@ const CoverPageWorkflow = ({
                   ? 'Review the approved covers for this school.'
                   : 'Review the uploaded covers for this school.'}
               </p>
-              {workflowStatus === '4' && (
-                <p className="text-xs font-semibold text-indigo-700">{approvedMessage}</p>
-              )}
+            
             </CardHeader>
             <CardContent>{renderApprovalGallery(true)}</CardContent>
           </Card>
