@@ -12,6 +12,10 @@ from pydantic import BaseModel, Field
 from .models import School
 
 
+from . import school_profiles
+
+
+
 
 
 class SchoolCreate(BaseModel):
@@ -45,7 +49,7 @@ def create_auth_router(db) -> APIRouter:
 
         if doc_snapshot.exists:
             existing = doc_snapshot.to_dict()
-            return build_school_from_record(existing)
+            return school_profiles. build_school_from_record(existing)
 
         school_obj = School(id=uid, school_id=uid, school_name=school_name)
         doc_ref.set(school_obj.dict())
