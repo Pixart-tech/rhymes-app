@@ -23,7 +23,7 @@ class CoverUploaderApp:
         self.root.title("Cover Page Uploader")
 
         self.folder_var = StringVar()
-        self.upload_url_var = StringVar(value="https://book.eshiksavikas.in/api/cover-uploads")
+        self.upload_url_var = StringVar(value="http://localhost:8000/api/cover-uploads")
 
         # self.finalize_url_var = StringVar(value="http://31.97.236.164/api/mark-complete")
         self.status_var = StringVar(value="Idle")
@@ -177,7 +177,7 @@ class CoverUploaderApp:
 
             self._update_progress(total, total, status="All uploads completed.")
             self._notify("Success", "All cover pages uploaded and finalized.")
-            self.update_url_var=f"https://book.eshiksavikas.in/api/cover-upload-status/{school_id}"
+            self.update_url_var=f"http://localhost:8000/api/cover-upload-status/{school_id}"
             response=session.patch(
                 self.update_url_var,
                 data={"school_id":school_id,"status":"3"},

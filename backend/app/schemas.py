@@ -11,6 +11,7 @@ from .models import School
 
 class BranchStatusUpdatePayload(BaseModel):
     status: Literal["active", "inactive"]
+    
 
 
 class WorkspaceUser(BaseModel):
@@ -44,7 +45,7 @@ class RhymeSelectionDetail(BaseModel):
 
 
 class SchoolWithSelections(School):
-    total_selections: int = 0
+    # total_selections: int = 0
     last_updated: Optional[datetime] = None
     grade_selections: Dict[str, List[RhymeSelectionDetail]] = Field(default_factory=dict)
 

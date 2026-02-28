@@ -4,17 +4,73 @@ import base64
 import logging
 from datetime import datetime
 from io import BytesIO
-import mimetypes
-from typing import Any, Dict, List, Optional, Set, Tuple
 
+import mimetypes
+from pathlib import Path
+import struct
+import uuid
+from typing import Any, Dict, List, Optional, Set, Tuple
+import math
+from tempfile import NamedTemporaryFile
 from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 import pymupdf as fitz
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError, PngImagePlugin
+
+PngImagePlugin.MAX_TEXT_CHUNK = None
 
 from .. import school_profiles
 from pydantic import BaseModel, field_validator
+
+
+import numpy as np
+import cv2
+
+
+def open_image_safely(contents: bytes) -> Image.Image:
+    # 1) Try PIL first (your logic)
+    try:
+        with Image.open(BytesIO(bytes(contents))) as image_ctx:
+            image_ctx.load()
+            return image_ctx.copy()
+
+    except ValueError as exc:
+        message = str(exc).lower()
+        # If metadata is too large, fail fast (don’t try cv2)
+        if "max_text_chunk" in message:
+            raise HTTPException(
+                status_code=400,
+                detail="Image metadata is too large to process safely. Please re-export the image without ICC profile/metadata and try again.",
+            )
+
+        # 2) For other ValueErrors, try OpenCV decode -> convert to PIL
+        try:
+            arr = np.frombuffer(contents, dtype=np.uint8)
+            cv_img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if cv_img is None:
+                raise ValueError("cv2.imdecode returned None")
+
+            rgb = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+            return Image.fromarray(rgb)
+
+        except Exception:
+            raise HTTPException(status_code=400, detail="Uploaded file is not a valid image.")
+
+    except UnidentifiedImageError:
+        # 2) If PIL can't identify, try OpenCV decode -> convert to PIL
+        try:
+            arr = np.frombuffer(contents, dtype=np.uint8)
+            cv_img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if cv_img is None:
+                raise ValueError("cv2.imdecode returned None")
+
+            rgb = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+            return Image.fromarray(rgb)
+
+        except Exception:
+            raise HTTPException(status_code=400, detail="Uploaded file is not a valid image.")
+
 
 SchoolServiceType = school_profiles.SchoolServiceType
 ServiceStatus = school_profiles.ServiceStatus
@@ -32,6 +88,64 @@ from ..schemas import (
     PaginatedSchoolResponse,
     SchoolWithSelections,
 )
+
+PUBLIC_DIR = (Path(__file__).resolve().parents[2] / "public").resolve()
+SCHOOL_ASSETS_DIR = PUBLIC_DIR / "schools"
+MAX_LOGO_PIXELS = 1_000_000
+LOGO_MAX_DIMENSION = 1000
+TARGET_LOGO_BYTES_ON_FIRESTORE_ERROR = 600 * 1024
+
+
+
+def _encode_png_bytes(image: Image.Image) -> bytes:
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+ # safe-ish cap
+import hashlib
+
+def _shrink_png_bytes_until_under(contents: bytes, *, max_bytes: int) -> bytes:
+    
+    # if contents.startswith("_PNG_SIGNATURE"):
+    #     contents_to_decode=_strip_png_metadata_chunks(contents)
+    
+    """
+    try:
+         with Image.open(BytesIO(bytes(contents)) )as image_ctx:      
+            image_ctx.load()
+    except ValueError as exc:
+        message = str(exc).lower()
+        if "max_text_chunk" in message:
+            raise HTTPException(
+                status_code=400,
+                detail="Image metadata is too large to process safely. Please re-export the image without ICC profile/metadata and try again.",
+            )
+        raise
+    except UnidentifiedImageError as e:
+       raise HTTPException(status_code=400, detail="Uploaded file is not a valid image.")
+    
+    """
+    image_ctx = open_image_safely(contents)
+    with image_ctx as image:
+        image = image.convert("RGBA")
+        png_bytes = _encode_png_bytes(image)
+        if len(png_bytes) <= max_bytes:
+            return png_bytes
+
+        # Shrink progressively (preserve aspect ratio) until we fit the byte budget.
+        for max_dim in (900, 800, 700, 600, 500, 400, 300, 250, 200, 150, 100):
+            resized = image.copy()
+            resized.thumbnail((max_dim, max_dim), resample=Image.Resampling.LANCZOS)
+            png_bytes = _encode_png_bytes(resized)
+            if len(png_bytes) <= max_bytes:
+                return png_bytes
+
+    raise HTTPException(
+        status_code=400,
+        detail="Logo image is too large to store. Please upload a smaller logo.",
+    )
 
 
 class SchoolAddonsPayload(BaseModel):
@@ -63,7 +177,7 @@ class SchoolAddonsPayload(BaseModel):
     @classmethod
     def _coerce_service_type(cls, value: Any) -> Optional[List[SchoolServiceType]]:
         if value is None or value == "":
-            return None
+            return None 
         return school_profiles.normalize_service_types(value if isinstance(value, list) else [value])  # type: ignore[arg-type]
 
     @field_validator("grade_default_labels", mode="before")
@@ -143,6 +257,7 @@ class SchoolAddonsPayload(BaseModel):
             "id_card_fields": id_card_fields,
         }
         provided = {key: value for key, value in field_values.items() if value is not school_profiles.FORM_UNSET}
+        
         if "update_zoho_details" in provided:
             provided["update_zoho_details"] = _parse_boolean_flag(str(provided["update_zoho_details"]))
         return cls(**provided)
@@ -224,6 +339,56 @@ async def _read_upload_file(upload_file: Optional[UploadFile]) -> Tuple[Optional
     return converted, "image/png"
 
 
+async def _read_upload_file_preserve_original(
+    upload_file: Optional[UploadFile],
+) -> Tuple[Optional[bytes], Optional[str], Optional[bytes], Optional[str], Optional[str]]:
+    
+    if not upload_file:
+        return None, None, None, None, None
+    contents = await upload_file.read()
+    print(len(contents))
+    if not contents:
+        return None, None, None, None, None
+    try:
+        converted = _convert_upload_bytes_to_png(
+            contents,
+            filename=upload_file.filename,
+            content_type=upload_file.content_type,
+            remove_background=False,
+        )
+    except HTTPException as e:
+        print(e)
+        raise
+    return converted, "image/png", contents, upload_file.filename, upload_file.content_type
+
+
+def _save_school_original_asset(
+    *,
+    school_id: str,
+    contents: bytes,
+    filename: Optional[str],
+    content_type: Optional[str],
+    asset_type: str,
+) -> str:
+    ext = (Path(filename).suffix.lower() if filename else "") or ""
+    if not ext and content_type:
+        try:
+            guessed = mimetypes.guess_extension(content_type.split(";")[0].strip())
+        except Exception:
+            guessed = None
+        ext = (guessed or "").lower()
+    if not ext or not ext.startswith("."):
+        ext = ".bin"
+
+    target_dir = SCHOOL_ASSETS_DIR / school_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_name = f"{uuid.uuid4().hex}{ext}"
+    target_path = target_dir / target_name
+    target_path.write_bytes(contents)
+
+    relative_path = target_path.relative_to(PUBLIC_DIR).as_posix()
+    return f"/public/{relative_path}"
+
 def _is_pdf_file(content_type: Optional[str], filename: Optional[str]) -> bool:
     if content_type:
         if "pdf" in content_type.lower():
@@ -232,6 +397,64 @@ def _is_pdf_file(content_type: Optional[str], filename: Optional[str]) -> bool:
         if filename.lower().endswith(".pdf"):
             return True
     return False
+
+
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# Chunks that commonly carry large metadata and can trigger Pillow's safety limits
+# (e.g. "max_text_chunk") when opening PNGs.
+_PNG_METADATA_CHUNKS = [b'tEXt', b'zTXt', b'iTXt'] 
+
+
+def _strip_png_metadata_chunks(contents: bytes) -> bytes:
+    """Remove PNG metadata chunks without decoding image pixels."""
+    if not contents.startswith(_PNG_SIGNATURE):
+        return contents
+
+    offset = len(_PNG_SIGNATURE)
+    output = bytearray(_PNG_SIGNATURE)
+    changed = False
+
+    while offset + 8 <= len(contents):
+        length = struct.unpack(">I", contents[offset : offset + 4])[0]
+        chunk_type = contents[offset + 4 : offset + 8]
+        
+        chunk_start = offset
+        chunk_end = offset + 12 + length  # len(4) + type(4) + data + crc(4)
+        if chunk_end > len(contents):
+            break
+       
+
+        if chunk_type in _PNG_METADATA_CHUNKS:
+            changed = True
+        else:
+            output.extend(contents[chunk_start:chunk_end])
+
+        offset = chunk_end
+        if chunk_type == b"IEND":
+            break
+    
+    return bytes(output) if changed else contents
+
+
+
+
+def _downsize_image_if_needed(image: Image.Image) -> Image.Image:
+    width, height = image.size
+    if width <= 0 or height <= 0:
+        raise HTTPException(status_code=400, detail="Unable to process image dimensions.")
+    if (width * height) <= MAX_LOGO_PIXELS:
+        
+        return image
+    resized = image.copy()
+    aspect_ratio=width/height 
+    target_size=MAX_LOGO_PIXELS
+    
+    new_height=float(math.sqrt(target_size/aspect_ratio))
+    new_width=aspect_ratio*new_height
+    
+    
+    resized.thumbnail((new_width, new_height), resample=Image.Resampling.LANCZOS)
+    return resized
 
 
 def _convert_pdf_bytes_to_png(contents: bytes) -> bytes:
@@ -251,23 +474,36 @@ def _convert_pdf_bytes_to_png(contents: bytes) -> bytes:
     finally:
         document.close()
 
-    return png_bytes
-
+    try:
+        with Image.open(BytesIO(png_bytes)) as image:
+            image = image.convert("RGBA")
+            image = _downsize_image_if_needed(image)
+            output = BytesIO()
+            image.save(output, format="PNG")
+            return output.getvalue()
+    except UnidentifiedImageError:
+        raise HTTPException(status_code=400, detail="Unable to render PDF preview.")
 
 def _convert_raster_bytes_to_png(contents: bytes, remove_background: bool) -> bytes:
     try:
+        if contents.startswith(_PNG_SIGNATURE):
+            contents = _strip_png_metadata_chunks(contents)
         with Image.open(BytesIO(contents)) as image:
+            
             image = image.convert("RGBA")
+            image = _downsize_image_if_needed(image)
             if remove_background:
                 image = _remove_white_background(image)
             output = BytesIO()
             image.save(output, format="PNG")
             return output.getvalue()
-    except UnidentifiedImageError:
+    except UnidentifiedImageError as e:
+        
+        print(e)
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid image.")
 
 
-def _convert_upload_bytes_to_png(
+def _convert_upload_bytes_to_png(   
     contents: bytes,
     *,
     filename: Optional[str],
@@ -339,7 +575,11 @@ async def create_school_profile(
 ):
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
-    logo_blob, _ = await _read_upload_file(logo_file)
+    logo_blob, _, logo_original, logo_original_name, logo_original_type = await _read_upload_file_preserve_original(
+        logo_file
+    )
+    
+    
     school_image_blobs = []
     total_image_bytes = 0
     for upload in (school_image_1, school_image_2, school_image_3, school_image_4):
@@ -351,17 +591,52 @@ async def create_school_profile(
         raise HTTPException(status_code=400, detail="Total school images must be 2MB or less")
     facebook_blob, facebook_mime = await _read_upload_file(facebook_image)
     instagram_blob, instagram_mime = await _read_upload_file(instagram_image)
-    created=school_profiles.create_school_profile(
-        db,
-        payload,
-        user_record,
-        logo_blob,
-        school_image_blobs,
-        facebook_image_blob=facebook_blob,
-        facebook_image_mime=facebook_mime,
-        instagram_image_blob=instagram_blob,
-        instagram_image_mime=instagram_mime,
-    )
+    if len(logo_blob)>1048576:
+        
+        smaller_logo_blob = _shrink_png_bytes_until_under(
+                    logo_blob , max_bytes=TARGET_LOGO_BYTES_ON_FIRESTORE_ERROR
+                )
+        created = school_profiles.create_school_profile(
+            db,
+            payload,
+            user_record,
+            smaller_logo_blob,
+            school_image_blobs,
+            facebook_image_blob=facebook_blob,
+            facebook_image_mime=facebook_mime,
+            instagram_image_blob=instagram_blob,
+            instagram_image_mime=instagram_mime,
+        )
+    else:
+        try:
+            created = school_profiles.create_school_profile(
+                db,
+                payload,
+                user_record,
+                logo_blob,
+                school_image_blobs,
+                facebook_image_blob=facebook_blob,
+                facebook_image_mime=facebook_mime,
+                instagram_image_blob=instagram_blob,
+                instagram_image_mime=instagram_mime,
+            )
+        except Exception as exc:
+            print(exc)
+            raise
+           
+    
+    if logo_original is not None:
+        try:
+            original_path = _save_school_original_asset(
+                school_id=created.school_id,
+                contents=logo_original,
+                filename=logo_original_name,
+                content_type=logo_original_type,
+                asset_type="logo",
+            )
+            db.collection("schools").document(created.school_id).update({"logo_original_path": original_path})
+        except Exception:
+            logger.exception("Failed to save original school logo to public directory")
     cover_doc=db.collection("cover_selections").document(created.school_id)
     now=datetime.utcnow()
     default_cover_status="1"
@@ -397,7 +672,27 @@ def create_branch_profile(
     user_record = ensure_user_document(decoded_token)
     return school_profiles.create_branch_profile(db, payload, user_record)
 
+@router.get("/schools/{school_id}")
 
+async def get_school_profile(
+    school_id: str,
+    authorization: Optional[str] = Header(None)
+):
+    decoded_token = verify_and_decode_token(authorization)
+    user_record = ensure_user_document(decoded_token)
+    if not user_record:
+        raise HTTPException(status_code=404,detail="user doesnt exist ")
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
+    existing=snapshot.to_dict() 
+    existing.setdefault("id", snapshot.id)
+    existing.setdefault("school_id", snapshot.id)
+    return  school_profiles.build_school_from_record(existing)
+    
+    
+    
 @router.put("/schools/{school_id}", response_model=school_profiles.School)
 async def update_school_profile(
     school_id: str,
@@ -441,16 +736,28 @@ async def update_school_profile(
     cleaned_zoho_customer_id = _clean(raw_zoho_customer_id)
     normalized_email = None
     normalized_principal_email = None
+    sales_representative_provided = "sales_representative" in raw_updates
+    sales_representative = raw_updates.pop("sales_representative", None)
     
     if email_provided:
-        normalized_email = school_profiles._ensure_unique_email(
-            db, raw_email_value, "school email", exclude_school_id=school_id
-        )
+        if role=="super-admin":
+            normalized_email=school_profiles._normalize_email(raw_email_value)
+        else:
+            normalized_email = school_profiles._ensure_unique_email(
+                db, raw_email_value, "school email", exclude_school_id=school_id
+            )
     if principal_email_provided:
-        normalized_principal_email = school_profiles._ensure_unique_email(
-            db, raw_principal_value, "principal email", exclude_school_id=school_id
-        )
-    logo_blob, _ = await _read_upload_file(logo_file)
+        if role=="super-admin":
+            normalized_principal_email=school_profiles._normalize_email(raw_principal_value)
+        else:
+            normalized_principal_email = school_profiles._ensure_unique_email(
+                db, raw_principal_value, "principal email", exclude_school_id=school_id
+            )
+            
+    logo_blob, _, logo_original, logo_original_name, logo_original_type = await _read_upload_file_preserve_original(
+        logo_file
+    )
+     
     school_image_blobs = []
     total_image_bytes = 0
     for upload in (school_image_1, school_image_2, school_image_3, school_image_4):
@@ -473,11 +780,18 @@ async def update_school_profile(
     address_overrides: Dict[str, Any] = {field: raw_updates.pop(field) for field in address_fields if field in raw_updates}
 
     updates: Dict[str, Any] = {}
+    clearable_fields = {"tagline"}
     for key, value in raw_updates.items():
         cleaned_value = _clean(value)
         if cleaned_value is None:
+            if key in clearable_fields:
+                updates[key] = None
             continue
         updates[key] = cleaned_value
+
+    if sales_representative_provided:
+        updates["sales_representative"] = _clean(sales_representative)
+    
 
     if address_overrides:
         cleaned_address = {}
@@ -513,6 +827,19 @@ async def update_school_profile(
 
     if logo_blob is not None:
         updates["logo_blob"] = logo_blob
+
+        
+        if logo_original is not None:
+            try:
+                updates["logo_original_path"] = _save_school_original_asset(
+                    school_id=school_id,
+                    contents=logo_original,
+                    filename=logo_original_name,
+                    content_type=logo_original_type,
+                    asset_type="logo",
+                )
+            except Exception:
+                logger.exception("Failed to save original school logo to public directory")
     if school_image_blobs:
         for idx, (blob, mime) in enumerate(school_image_blobs, start=1):
             if blob:
@@ -529,7 +856,7 @@ async def update_school_profile(
         updates["email"] = normalized_email
     if principal_email_provided:
         updates["principal_email"] = normalized_principal_email
-
+    
     if not updates:
         existing.setdefault("id", snapshot.id)
         existing.setdefault("school_id", snapshot.id)
@@ -552,7 +879,20 @@ async def update_school_profile(
     now = datetime.utcnow()
     updates["updated_at"] = now
     updates["timestamp"] = now
-    doc_ref.update(updates)
+
+    if logo_blob:
+        if len(logo_blob)>1048576:
+                smaller_logo_blob = _shrink_png_bytes_until_under(
+                bytes(updates["logo_blob"]), max_bytes=TARGET_LOGO_BYTES_ON_FIRESTORE_ERROR
+            )
+                updates['logo_blob']=smaller_logo_blob
+    try:
+      
+            
+        doc_ref.update(updates)
+    except Exception as exc:
+        print(exc)
+        raise
     existing.update(updates)
     if role == "super-admin" and email_provided and normalized_email:
         school_profiles.grant_school_access_to_user_by_email(db, normalized_email, school_id)
@@ -676,7 +1016,72 @@ def get_school_zoho_details(
         "customer_id": details.get("customer_id"),
     }
 
+@router.patch("/schools/{school_id}",response_model=school_profiles.School)
+def update_branch_profile(
+    school_id: str,
+    payload: school_profiles.BranchUpdatePayload,
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = verify_and_decode_token(authorization)
+    user_record = ensure_user_document(decoded_token)
+    uid = user_record.get("uid")
+    if not uid:
+        raise HTTPException(status_code=400, detail="User record is missing a user id")
+    parent_ref, record, is_branch = school_profiles.locate_school_record(db, school_id)
+    if not is_branch:
+        raise HTTPException(status_code=400, detail="Only branch profiles can be updated")
 
+    parent_id = record.get("branch_parent_id")
+    if not parent_id:
+        raise HTTPException(status_code=400, detail="Only branch profiles can be updated")
+
+    role = user_record.get("role", DEFAULT_USER_ROLE)
+    if role != "super-admin":
+        raise HTTPException(status_code=403, detail="You do not have permission to update this branch")
+    
+    requested_parent_id = (payload.parent_school_id or "").strip()
+    if requested_parent_id != parent_id:
+        raise HTTPException(status_code=400, detail="Branch parent school mismatch")
+
+    now = datetime.utcnow()
+
+    school_name = payload.branch_name.strip()
+    principal_name = payload.coordinator_name.strip()
+    principal_email = str(payload.coordinator_email).strip()
+    principal_phone = payload.coordinator_phone.strip()
+
+    branch_entry = dict(record)
+    branch_entry.setdefault("id", school_id)
+    branch_entry.setdefault("school_id", school_id)
+    branch_entry["branch_parent_id"] = parent_id
+    branch_entry.update(
+        {
+            "school_name": school_name,
+            "branch_name": school_name,  # backwards-compatible alias
+            "principal_name": principal_name,
+            "principal_email": principal_email,
+            "principal_phone": principal_phone,
+            "coordinator_name": principal_name,
+            "coordinator_email": principal_email,
+            "coordinator_phone": principal_phone,
+            "address": _clean(payload.address),
+            "city": _clean(payload.city),
+            "state": _clean(payload.state),
+            "pin": _clean(payload.pin),
+            "updated_at": now,
+            "timestamp": now,
+        }
+    )
+
+    parent_ref.update(
+        {
+            f"branches.{school_id}": branch_entry,
+            "updated_at": now,
+            "timestamp": now,
+        }
+    )
+
+    return school_profiles.build_school_from_record(branch_entry)
 @router.patch("/schools/{school_id}/status", response_model=school_profiles.School)
 def update_branch_status(
     school_id: str,
@@ -706,17 +1111,32 @@ def update_branch_status(
         raise HTTPException(status_code=400, detail="Invalid branch status")
 
     now = datetime.utcnow()
-    updates = {
-        "status": branch_status,
-        "updated_at": now,
-        "timestamp": now,
-    }
-    record.update(updates)
-    new_branch_summary = school_profiles.build_branch_summary_entry(record)
+    record["status"] = branch_status
+    record["updated_at"] = now
+    record["timestamp"] = now
+
+    branch_school_name = record.get("school_name") or record.get("branch_name")
+    if branch_school_name:
+        record["school_name"] = branch_school_name
+
+    branch_principal_name = record.get("principal_name") or record.get("coordinator_name")
+    if branch_principal_name:
+        record["principal_name"] = branch_principal_name
+
+    branch_principal_email = record.get("principal_email") or record.get("coordinator_email")
+    if branch_principal_email:
+        record["principal_email"] = branch_principal_email
+
+    branch_principal_phone = record.get("principal_phone") or record.get("coordinator_phone")
+    if branch_principal_phone:
+        record["principal_phone"] = branch_principal_phone
+
     parent_doc_ref = parent_ref
     parent_doc_ref.update(
         {
-            f"branches.{school_id}": new_branch_summary,
+            f"branches.{school_id}.status": branch_status,
+            f"branches.{school_id}.updated_at": now,
+            f"branches.{school_id}.timestamp": now,
             "updated_at": now,
             "timestamp": now,
         }
@@ -745,32 +1165,24 @@ def approve_school_selections(
 
     now = datetime.utcnow()
     approver = user_record.get("email") or user_record.get("uid") or "super-admin"
-    if approval:
-        
-        updates = {
-            "selection_status": "approved",
-            "selections_approved": True,
-            "selection_locked_at": now,
-            "selection_locked_by": approver,
-            "updated_at": now,
-            "timestamp": now,
-        }
-    else:
-     updates = {
-        "selection_status": "unapproved",
-        "selections_approved": False,
+    selection_status="approved" if approval else "unapproved"
+    updates = {
+        "selection_status": selection_status,
+        "selections_approved": approval,
         "selection_locked_at": now,
         "selection_locked_by": approver,
         "updated_at": now,
         "timestamp": now,
-        }
+    }
+    
     doc_ref.update(updates)
     record = snapshot.to_dict() or {}
     record.update(updates)
     record.setdefault("id", snapshot.id)
     record.setdefault("school_id", snapshot.id)
 
-    return school_profiles.build_school_from_record(record)
+    updated_data=school_profiles.build_school_from_record(record)
+    return updated_data
 
 
 @router.get("/schools/{school_id}/logo")
@@ -793,16 +1205,11 @@ def get_school_logo(school_id: str):
     if not isinstance(logo_blob, (bytes, bytearray)):
         raise HTTPException(status_code=404, detail="Logo not found")
 
-    try:
-        download_blob = _convert_raster_bytes_to_png(bytes(logo_blob), remove_background=True)
-    except HTTPException:
-        raise HTTPException(status_code=404, detail="Unable to process logo for download")
-
     headers = {
         "Cache-Control": "no-store",
         "Content-Disposition": f'inline; filename="{school_id}.png"',
     }
-    return Response(content=download_blob, media_type="image/png", headers=headers)
+    return Response(content=logo_blob, media_type="image/png", headers=headers)
 
 
 @router.get("/schools/{school_id}/images/{image_index}")
@@ -888,7 +1295,7 @@ def get_school_instagram_image(school_id: str):
 
     if not isinstance(blob_value, (bytes, bytearray)):
         raise HTTPException(status_code=404, detail="Instagram image not found")
-
+    
     media_type = record.get("instagram_image_mime") or "image/png"
     extension = _guess_image_extension(media_type)
     filename = f"{school_id}_instagram{extension}"
@@ -899,43 +1306,59 @@ def get_school_instagram_image(school_id: str):
     return Response(content=bytes(blob_value), media_type=media_type, headers=headers)
 
 
-@router.get("/admin/schools", response_model=PaginatedSchoolResponse)
-def get_all_schools_with_selections(
-    page: int = 1, limit: int = 10, authorization: Optional[str] = Header(None)
-):
+@router.get("/admin/school/{query}", response_model=PaginatedSchoolResponse)
+def get_school(
+    query: str,
+    page: int = 1,
+    limit: int = 10,
+    authorization: Optional[str] = Header(None),
+):  
+    """Search schools by school_name (case-insensitive substring match).
+
+    Note: Firestore doesn't support arbitrary case-insensitive "contains" queries on strings,
+    so we fetch and filter in memory.
+    """
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
     if user_record.get("role") != "super-admin":
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
-    count_aggregation = db.collection("schools").count()
-    count_snapshot = count_aggregation.get()
-    if not count_snapshot:
-        total_count = 0
-    else:
-        first_result = count_snapshot[0]
-        doc_data = {}
-        try:
-            doc_data = first_result.to_dict() or {}
-        except Exception:
-            pass
-        count_value = doc_data.get("count") or doc_data.get("value")
-        total_count = int(count_value or 0)
+    cleaned_query = (query or "").strip()
+    if not cleaned_query:
+        return PaginatedSchoolResponse(schools=[], total_count=0)
+
+    normalized_query = cleaned_query.casefold()
+    school_docs_query = db.collection("schools").order_by("timestamp", direction=firestore.Query.DESCENDING)
+    all_school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
+
+    matching_docs: List[Dict[str, Any]] = []
+    for doc in all_school_docs:
+        school_name = (doc.get("school_name") or "").strip()
+        school_id = (doc.get("school_id") or doc.get("id") or "").strip()
+        school_email = (doc.get("email") or "").strip()
+        sales_representative=(doc.get("sales_representative") or "").strip()
+        
+        if (
+            normalized_query in school_name.casefold() or normalized_query.upper() in school_name.casefold()
+            or normalized_query in school_id.casefold()
+            or normalized_query in school_email.casefold()
+            or normalized_query in sales_representative.casefold()
+        ):
+            if not doc.get("id") and doc.get("school_id"):
+                doc["id"] = doc["school_id"]
+            matching_docs.append(doc)
+
+    total_count = len(matching_docs)
+    if total_count == 0:
+        return PaginatedSchoolResponse(schools=[], total_count=0)
 
     offset = max((page - 1) * limit, 0)
-    school_docs_query = (
-        db.collection("schools")
-        .order_by("timestamp", direction=firestore.Query.DESCENDING)
-        .offset(offset)
-        .limit(limit)
-    )
-    school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
-
-    if not school_docs:
+    page_docs = matching_docs[offset : offset + limit]
+    if not page_docs:
         return PaginatedSchoolResponse(schools=[], total_count=total_count)
 
     expanded_docs: List[Dict[str, Any]] = []
-    for doc in school_docs:
+    for doc in page_docs:
         if not doc.get("id") and doc.get("school_id"):
             doc["id"] = doc["school_id"]
         expanded_docs.append(doc)
@@ -951,27 +1374,30 @@ def get_all_schools_with_selections(
             branch_record.setdefault("branch_parent_id", parent_id)
             expanded_docs.append(branch_record)
 
-    school_ids = [doc.get("school_id") for doc in expanded_docs if doc.get("school_id")]
-    selections_count: Dict[str, int] = {}
+    # school_ids = [doc.get("school_id") for doc in expanded_docs if doc.get("school_id")]
+    # selections_count: Dict[str, int] = {}
     latest_selection_timestamp: Dict[str, datetime] = {}
 
-    if school_ids:
-        selection_docs_query = (
-            db.collection("rhyme_selections")
-            .where("school_id", "in", school_ids)
-            .select(["school_id", "timestamp"])
-        )
-        for selection_doc in selection_docs_query.stream():
-            selection = selection_doc.to_dict() or {}
-            school_id = selection.get("school_id")
-            if not school_id:
-                continue
-            selections_count[school_id] = selections_count.get(school_id, 0) + 1
-            timestamp = selection.get("timestamp")
-            if timestamp:
-                existing_ts = latest_selection_timestamp.get(school_id)
-                if not existing_ts or timestamp > existing_ts:
-                    latest_selection_timestamp[school_id] = timestamp
+    # if school_ids:
+    #     chunk_size = 30
+    #     for i in range(0, len(school_ids), chunk_size):
+    #         chunk = school_ids[i : i + chunk_size]
+    #         selection_docs_query = (
+    #             db.collection("rhyme_selections")
+    #             .where("school_id", "in", chunk)
+    #             .select(["school_id", "timestamp"])
+    #         )
+    #         for selection_doc in selection_docs_query.stream():
+    #             selection = selection_doc.to_dict() or {}
+    #             school_id = selection.get("school_id")
+    #             if not school_id:
+    #                 continue
+    #             selections_count[school_id] = selections_count.get(school_id, 0) + 1
+    #             timestamp = selection.get("timestamp")
+    #             if timestamp:
+    #                 existing_ts = latest_selection_timestamp.get(school_id)
+    #                 if not existing_ts or timestamp > existing_ts:
+    #                     latest_selection_timestamp[school_id] = timestamp
 
     zoho_ids: Set[str] = set()
     for doc in expanded_docs:
@@ -997,18 +1423,161 @@ def get_all_schools_with_selections(
         doc["grade_unique_values"] = zoho_details.get("grade_unique_values")
 
         base_school = school_profiles.build_school_from_record(doc)
-        total_selections = selections_count.get(school_id, 0)
+        # total_selections = selections_count.get(school_id, 0)
         last_updated = latest_selection_timestamp.get(school_id) or doc.get("timestamp")
 
         schools_with_details.append(
             SchoolWithSelections(
                 **base_school.dict(),
-                total_selections=total_selections,
+                
                 last_updated=last_updated,
             )
         )
 
     return PaginatedSchoolResponse(schools=schools_with_details, total_count=total_count)
+
+
+
+import time
+@router.get("/admin/schools", response_model=PaginatedSchoolResponse)
+def get_all_schools_with_selections(
+    page: int = 1, limit: int = 10, authorization: Optional[str] = Header(None)
+):
+   
+    decoded_token = verify_and_decode_token(authorization)
+    user_record = ensure_user_document(decoded_token)
+    if user_record.get("role") != "super-admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+
+    count_snapshot = (db.collection("schools").count()).get()
+   
+    if not count_snapshot:
+        count_value = 0
+    else:
+        count_value = int(count_snapshot[0][0].value)
+    offset = max((page - 1) * limit, 0)
+
+    school_docs_query = (
+        db.collection("schools")
+        .order_by("timestamp", direction=firestore.Query.DESCENDING)
+        .offset(offset)
+        .limit(limit)
+    )
+#     school_docs_query = (
+#     db.collection("schools")
+#     .order_by("timestamp", direction=firestore.Query.DESCENDING)
+#     .select([
+#         "school_id",
+#         "school_name",
+#         "sales_representative",
+#         "branches"
+#         "branch_ids",  
+#         "service_status",
+#         "service_type",
+#         "website",
+#         "tagline",
+#         "grades",
+#         "grade_selections"
+#         "selection_status",
+#         "selections_approved",
+#         "selection_locked_at",
+#         "timestamp",
+#         "updated_at",
+#         "status",
+#     ])
+#     .offset(offset)
+#     .limit(limit)
+# )
+
+    
+    
+    
+    school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
+   
+    
+    if not school_docs:
+        return PaginatedSchoolResponse(schools=[], total_count=count_value)
+    
+    expanded_docs: List[Dict[str, Any]] = []
+  
+    for doc in school_docs:
+        if not doc.get("id") and doc.get("school_id"):
+            doc["id"] = doc["school_id"]
+        expanded_docs.append(doc)
+
+        branches = doc.get("branches") or {}
+        parent_id = doc.get("school_id") or doc.get("id")
+        for branch_id, branch_entry in branches.items():
+            if not isinstance(branch_entry, dict):
+                continue
+            branch_record = dict(branch_entry)
+            branch_record.setdefault("id", branch_id)
+            branch_record.setdefault("school_id", branch_id)
+            branch_record.setdefault("branch_parent_id", parent_id)
+            expanded_docs.append(branch_record)
+    
+    # school_ids = [doc.get("school_id") for doc in expanded_docs if doc.get("school_id")]
+    # selections_count: Dict[str, int] = {}
+    latest_selection_timestamp: Dict[str, datetime] = {}
+
+    # if school_ids:
+    #     selection_docs_query = (
+    #         db.collection("rhyme_selections")
+    #         .where("school_id", "in", school_ids)
+    #         .select(["school_id", "timestamp"])
+    #     )
+    #     for selection_doc in selection_docs_query.stream():
+    #         selection = selection_doc.to_dict() or {}
+    #         school_id = selection.get("school_id")
+    #         if not school_id:
+    #             continue
+    #         selections_count[school_id] = selections_count.get(school_id, 0) + 1
+    #         timestamp = selection.get("timestamp")
+    #         if timestamp:
+    #             existing_ts = latest_selection_timestamp.get(school_id)
+    #             if not existing_ts or timestamp > existing_ts:
+    #                 latest_selection_timestamp[school_id] = timestamp
+
+    zoho_ids: Set[str] = set()
+    
+    for doc in expanded_docs:
+        zoho_id = doc.get("branch_parent_id") or doc.get("school_id")
+        if zoho_id:
+            zoho_ids.add(zoho_id)
+    zoho_refs = [school_profiles._zoho_details_doc_ref(db, zoho_id) for zoho_id in zoho_ids]
+    zoho_snapshot_map: Dict[str, Dict[str, Any]] = {}
+    if zoho_refs:
+        for snapshot in db.get_all(zoho_refs):
+            zoho_snapshot_map[snapshot.id] = snapshot.to_dict() or {}
+
+    schools_with_details: List[SchoolWithSelections] = []
+
+    for doc in expanded_docs:
+        school_id = doc.get("school_id")
+        if not school_id:
+            continue
+        zoho_main_id = doc.get("branch_parent_id") or school_id
+        zoho_details = zoho_snapshot_map.get(zoho_main_id) or {}
+        doc["zoho_customer_id"] = zoho_details.get("customer_id")
+        doc["grade_default_labels"] = zoho_details.get("grade_labels")
+        doc["grade_unique_values"] = zoho_details.get("grade_unique_values")
+
+        base_school = school_profiles.build_school_from_record(doc)
+        # total_selections = selections_count.get(school_id, 0)
+        last_updated = latest_selection_timestamp.get(school_id) or doc.get("timestamp")
+
+        schools_with_details.append(
+            SchoolWithSelections(
+                **base_school.dict(),
+                # total_selections=total_selections,
+                last_updated=last_updated,
+            )
+        )
+    
+    
+    return PaginatedSchoolResponse(schools=schools_with_details, total_count=
+                                   
+                                count_value)
 
 
 @router.delete("/admin/schools/{school_id}")

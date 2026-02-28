@@ -1,6 +1,7 @@
 
 import { ClassData, BookOption, Subject, AssessmentVariant } from '../types/types';
 import { PUBLIC_URL_PREFIX, normalizeAssetUrl } from '../lib/utils';
+import { Component } from 'lucide-react';
 
 // Helper to generate IDs
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -34,13 +35,16 @@ const buildStaticPdfLink = (
   // - Assessment (component 'core' but subjectName normalized to 'Assessment' in caller): same as core/work
   // - Languages: treated as core/work (same rule)
   const isEnglish = (subjectName || '').toString().trim().toLowerCase() === 'english' &&className!=='PG';
+  
+  
   const baseFolder =
-    component === 'addon'
+  subjectName === 'Prewritten Books'
+    ? `${PROGRAM_FOLDER}/Pre-written`
+    : component === 'addon'
       ? `${PROGRAM_FOLDER}/Addon books`
-      : isEnglish&&className!=='PG'
+      : isEnglish && className !== 'PG'
         ? `${PROGRAM_FOLDER}/${encodePathSegment(className)}/${encodePathSegment(subjectName)}`
         : `${PROGRAM_FOLDER}/${encodePathSegment(className)}`;
-
   const path = `${PUBLIC_URL_PREFIX}/${SUBJECT_PDF_ROOT}/${baseFolder}/${encodeURIComponent(file)}`;
   return normalizeAssetUrl(path);
 };
@@ -59,6 +63,7 @@ const mapSubjectLinks = (data: ClassData[]): ClassData[] =>
         link1: buildStaticPdfLink(opt.link1, cls.name, sub.name, 'core'),
         link2: buildStaticPdfLink(opt.link2, cls.name, sub.name, 'work'),
         link3: buildStaticPdfLink(opt.link3, cls.name, sub.name, 'addon'),
+
       })),
     })),
   }));
@@ -196,6 +201,14 @@ const RAW_SCHOOL_DATA: ClassData[] = [
         options: [
           { typeId: generateId(), label: "Art & Craft", coreId: "100000217", coreCover: "0209", coreSpine: "N6", defaultCoreCoverTitle: "Art & Craft", isRecommended: true, link1: "Nur_Art and craft", info: "25 colouring activities & 15 craft activities" },
         ]
+      },
+      {
+        name: "Prewritten Books",
+        isMultiSelect: true,
+        options: [
+          { typeId: generateId(), label: "English Pre-Written", jsonSubject: "English Pre-Written", coreId: "100000240", coreCover: "0240", coreSpine: "N38", defaultCoreCoverTitle: "English Pre-written", isRecommended: false, link1: "Nursery_English", info: "English  prewritten book" },
+          { typeId: generateId(), label: "Maths Pre-Written ", jsonSubject: "Maths Pre-Written", coreId: "100000241", coreCover: "0241", coreSpine: "N39", defaultCoreCoverTitle: "Maths Pre-Written", isRecommended: false, link1: "Nursery_Maths", info: "maths prewritten book" },
+        ]
       }
     ]
   },
@@ -214,7 +227,7 @@ const RAW_SCHOOL_DATA: ClassData[] = [
         name: "Maths",
         options: [
           { typeId: generateId(), label: "1-50 and 1-10 number names", coreId: "100000308", coreCover: "0303", coreSpine: "L4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000309", workCover: "0304", workSpine: "L5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link1: "LKG_Maths skillbook",link2:"LKG_Maths_WB",info: "Premath, Introduction, activity and writing of number 1-50 and 1-10 numner names with 2 secondary shapes and 2 secondary colours, pictorial addition and subtraction" },
-          { typeId: generateId(), label: "51-100", coreId: "100000308", coreCover: "0303", coreSpine: "L4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000309", workCover: "0304", workSpine: "L5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000310", addOnCover: "0305", addOnSpine: "L16", defaultAddonCoverTitle: "Maths 51-100", isRecommended: false, link1: "LKG_Maths skillbook",link2:"LKG_Maths_WB",link3: "LKG_51-100", info: "Add on book - 51-100 number practice and post math concepts" },
+          { typeId: generateId(), label: "1-100 and 1-10 number names", coreId: "100000308", coreCover: "0303", coreSpine: "L4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000309", workCover: "0304", workSpine: "L5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000310", addOnCover: "0305", addOnSpine: "L16", defaultAddonCoverTitle: "Maths 51-100", isRecommended: false, link1: "LKG_Maths skillbook",link2:"LKG_Maths_WB",link3: "LKG_51-100", info: "Add on book - 51-100 number practice and post math concepts" },
         ]
       },
       {
@@ -236,6 +249,15 @@ const RAW_SCHOOL_DATA: ClassData[] = [
         ]
       },
       {
+        name: "Prewritten Books",
+        isMultiSelect: true,
+        options: [
+          { typeId: generateId(), label: "English Pre-Written", jsonSubject: "English Pre-Written", coreId: "100000340", coreCover: "0340", coreSpine: "L20", defaultCoreCoverTitle: "English Pre-written", isRecommended: false, link1: "LKG_English", info: "English prewritten " },
+          { typeId: generateId(), label: "Maths Pre-Written ", jsonSubject: "Maths Pre-Written", coreId: "100000341", coreCover: "0341", coreSpine: "L21", defaultCoreCoverTitle: "Maths Pre-Written", isRecommended: false, link1: "LKG_Maths", info:"Maths prewritten"},
+          { typeId: generateId(), label: "EVS Pre-Written", jsonSubject: "EVS Pre-Written", coreId: "100000342", coreCover: "0342", coreSpine: "L22", defaultCoreCoverTitle: "EVS Pre-Written", isRecommended: false, link1: "LKG_EVS", info: "EVS prewritten"},
+        ]
+      },
+      {
         name: "Languages",
         isMultiSelect: true,
         options: [
@@ -243,8 +265,11 @@ const RAW_SCHOOL_DATA: ClassData[] = [
           { typeId: generateId(), label: "Hindi Swara", jsonSubject: "Hindi", coreId: "100000315", coreCover: "0311", coreSpine: "L9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link1: "LKG_Hindi", info: "Hindi letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
           { typeId: generateId(), label: "Tamil Swara", jsonSubject: "Tamil", coreId: "100000316", coreCover: "0312", coreSpine: "L11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link1: "LKG_Tamil", info: "Telugu letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
           { typeId: generateId(), label: "Telugu Swara", jsonSubject: "Telugu", coreId: "100000317", coreCover: "0313", coreSpine: "L12", defaultCoreCoverTitle: "Telugu", isRecommended: false, link1: "LKG_Telugu", info: "Tamil letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
+          { typeId: generateId(), label: "Marathi Swara", jsonSubject: "Marathi", coreId: "100000320", coreCover: "0314", coreSpine: "L23", defaultCoreCoverTitle: "Marathi", isRecommended: false, link1: "LKG_MARATHI", info: "Marathi letter-writing practice for all swara, picture drills, tracing, and combined-letter exercises." },
         ]
+        
       }
+      
     ]
   },
   {
@@ -263,8 +288,8 @@ const RAW_SCHOOL_DATA: ClassData[] = [
         name: "Maths",
         options: [
           { typeId: generateId(), label: "1-100 and 1-100 number names", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", isRecommended: true, link1: "UKG_Maths skillbook",link2:"UKG_Maths_WB", info: "1-50 recap , 51-100 numbers and number names upto 100, Post math concepts , single digit addition and subtraction, introduction to time and division" },
-          { typeId: generateId(), label: "101-200", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000409", addOnCover: "0406", addOnSpine: "U14", defaultAddonCoverTitle: "Maths 101-200", isRecommended: false, link1:"UKG_Maths skillbook",link2:"UKG_Maths_WB",link3: "UKG_101-200", info: "Add on book - From 101-200" },
-          { typeId: generateId(), label: "101-500", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000410", addOnCover: "0415", addOnSpine: "U15", defaultAddonCoverTitle: "Maths 101-500", isRecommended: false,link1:"UKG_Maths skillbook",link2:"UKG_Maths_WB", link3: "UKG_101-500", info: "Add on book - From 101-500" },
+          { typeId: generateId(), label: "1-200 and 1-100 number names", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000409", addOnCover: "0406", addOnSpine: "U14", defaultAddonCoverTitle: "Maths 101-200", isRecommended: false, link1:"UKG_Maths skillbook",link2:"UKG_Maths_WB",link3: "UKG_101-200", info: "Add on book - From 101-200" },
+          { typeId: generateId(), label: "1-500 and 1-100 number names", coreId: "100000407", coreCover: "0404", coreSpine: "U4", defaultCoreCoverTitle: "Maths Skillbook", workId: "100000408", workCover: "0405", workSpine: "U5", defaultWorkCoverTitle: "Maths Workbook", addOnId: "100000410", addOnCover: "0415", addOnSpine: "U15", defaultAddonCoverTitle: "Maths 101-500", isRecommended: false,link1:"UKG_Maths skillbook",link2:"UKG_Maths_WB", link3: "UKG_101-500", info: "Add on book - From 101-500" },
         ]
       },
       {
@@ -273,7 +298,7 @@ const RAW_SCHOOL_DATA: ClassData[] = [
           { typeId: generateId(), label: "EVS", coreId: "100000401", coreCover: "0407", coreSpine: "U1", defaultCoreCoverTitle: "EVS", isRecommended: true, link1: "UKG_EVS", info: "All About Me, Sense Organs, Internal Body Parts, Daily Routine and Good Habits, My Family, Safety at Home, Types of Houses, My School, Healthy and Unhealthy Food, Types of Plants, Germination of Plants, Things We Get from Trees, Things the Plant Needs to Grow, Fruits, Vegetables, Flowers, Animals and Their Young Ones, Animal Homes, Animal Sounds, Types of Animals, Types of Birds, Lifecycle of a Butterfly, Emergency Vehicles, Traffic Rules, My Neighbourhood, Worship Places and Festivals, Community Helpers, Water Cycle, Reduce Reuse Recycle, Machines, Parts of a Computer, Living and Non-living Things, Monuments of India, Our National Leaders, Seasons, Games and Sports" },
         ]
       },
-      {
+      { 
         name: "Rhymes & stories",
         options: [
           { typeId: generateId(), label: "Rhymes & Stories (Customisable)", coreId: "100000402", coreCover: "0409", coreSpine: "U8", defaultCoreCoverTitle: "Rhymes & Stories", isRecommended: true, link1: "UKG_Rhymes and stories", info: "24 Rhymes & 5 stories" },
@@ -286,6 +311,15 @@ const RAW_SCHOOL_DATA: ClassData[] = [
         ]
       },
       {
+        name: "Prewritten Books",
+        isMultiSelect: true,
+        options: [
+          { typeId: generateId(), label: "English Pre-Written", jsonSubject: "English Pre-Written", coreId: "100000440", coreCover: "0440", coreSpine: "U22", defaultCoreCoverTitle: "English Pre-written", isRecommended: false, link1: "UKG_English", info: "english prewritten" },
+          { typeId: generateId(), label: "Maths Pre-Written ", jsonSubject: "Maths Pre-Written", coreId: "100000441", coreCover: "0441", coreSpine: "U23", defaultCoreCoverTitle: "Maths Pre-Written", isRecommended: false, link1: "UKG_Maths", info: "maths prewritten" },
+          { typeId: generateId(), label: "EVS Pre-Written", jsonSubject: "EVS Pre-Written", coreId: "100000442", coreCover: "0442", coreSpine: "U24", defaultCoreCoverTitle: "EVS Pre-Written", isRecommended: false, link1: "UKG_EVS", info: "EVS prewritten"},
+        ] 
+      },
+      {
         name: "Languages",
         isMultiSelect: true,
         options: [
@@ -293,7 +327,9 @@ const RAW_SCHOOL_DATA: ClassData[] = [
           { typeId: generateId(), label: "Hindi Swara & vyanjana", jsonSubject: "Hindi", coreId: "100000419", coreCover: "0412", coreSpine: "U9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link1: "UKG_Hindi", info: "The book covers Hindi letter practice (varnamala) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
           { typeId: generateId(), label: "Tamil Swara & vyanjana", jsonSubject: "Tamil", coreId: "100000420", coreCover: "0413", coreSpine: "U11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link1: "UKG_Tamil", info: "The book covers Tamil letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
           { typeId: generateId(), label: "Telugu Swara & vyanjana", jsonSubject: "Telugu", coreId: "100000421", coreCover: "0414", coreSpine: "U21", defaultCoreCoverTitle: "Telugu", isRecommended: false, link1: "UKG_Telugu", info: "The book covers Telugu letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
+            { typeId: generateId(), label: "Marathi Swara", jsonSubject: "Marathi", coreId: "100000422", coreCover: "0415", coreSpine: "U25", defaultCoreCoverTitle: "Marathi", isRecommended: false, link1: "UKG_Marathi", info: "The book covers Marathi letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set"},
         ]
+        
       }
     ]
   },
@@ -521,7 +557,7 @@ export const getAssessmentForClass = (
             defaultCoreCoverTitle,
             link: "UKG_Assessment" 
          };
-     }
+     }  
      if (mat.includes("101-500")) {
          return { 
             label: `1-500${isWithMarks ? '' : ' (NM)'}`, 

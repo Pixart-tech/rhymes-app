@@ -11,6 +11,7 @@ import { Toaster } from '../components/ui/sonner';
 import { useAuth } from '../hooks/useAuth';
 import { API_BASE_URL, normalizeAssetUrl } from '../lib/utils';
 import { loadPersistedAppState, savePersistedAppState } from '../lib/storage';
+import { Switch } from '../components/ui/switch';
 import { toast } from 'sonner';
 const SIGNATURE_FIELDS = [
   'class',
@@ -74,6 +75,8 @@ interface WizardAppProps {
   initialView?: ViewState;
 }
 
+type YesNoValue = 'yes' | 'no';
+
 const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const navigate = useNavigate();
   const { user, getIdToken } = useAuth();
@@ -95,6 +98,51 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     return merged;
   };
   const persistedState = loadPersistedAppState() || {};
+  const PERSONALISATION_BY_GRADE_KEY = 'bookSelectionPersonalisationByGrade';
+  const normalizePersonalisationGradeKey = useCallback((value: string): string => {
+    const normalized = (value || '').toString().trim().toLowerCase();
+    if (normalized === 'pg' || normalized === 'playgroup') return 'playgroup';
+    if (normalized.includes('playgroup')) return 'playgroup';
+    if (normalized.includes('nursery')) return 'nursery';
+    if (normalized === 'lkg') return 'lkg';
+    if (normalized === 'ukg') return 'ukg';
+    return normalized;
+  }, []);
+  const [personalisationByGrade, setPersonalisationByGrade] = useState<Record<string, YesNoValue>>(() => {
+    const base: Record<string, YesNoValue> = {
+      playgroup: 'yes',
+      nursery: 'yes',
+      lkg: 'yes',
+      ukg: 'yes',
+    };
+    if (typeof window === 'undefined') {
+      return base;
+    }
+    try {
+      const raw = window.localStorage.getItem(PERSONALISATION_BY_GRADE_KEY);
+      if (!raw) {
+        return base;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') {
+        return base;
+      }
+      const merged: Record<string, YesNoValue> = { ...base };
+      Object.entries(parsed as Record<string, any>).forEach(([key, value]) => {
+        const normalizedKey = normalizePersonalisationGradeKey(key);
+        const normalizedValue = (value || '').toString().trim().toLowerCase();
+        if (!normalizedKey) return;
+        if (normalizedValue === 'yes' || normalizedValue === 'no') {
+          merged[normalizedKey] = normalizedValue;
+        }
+      });
+      return merged;
+    } catch {
+      return base;
+    }
+  });
+
+  
   const resolveApprovalStatus = (school?: { selection_status?: string; selections_approved?: boolean } | null) => {
     if (!school) {
       return false;
@@ -115,7 +163,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       lkg: false,
       ukg: false,
       pg: false,
-    };
+    }; 
     const grades = persistedState?.school?.grades || {};
     Object.entries(grades).forEach(([key, value]) => {
       const normalized = key.toLowerCase();
@@ -217,6 +265,27 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     },
     [normalizeClassKey]
   );
+  const updatePersonalisationForGrade = useCallback(
+    (gradeKeyRaw: string, checked: boolean) => {
+      const gradeKey = normalizePersonalisationGradeKey(gradeKeyRaw);
+      if (!gradeKey) {
+        return;
+      }
+      const nextValue: YesNoValue = checked ? 'yes' : 'no';
+      setPersonalisationByGrade((prev) => {
+        const next = { ...prev, [gradeKey]: nextValue };
+        if (typeof window !== 'undefined') {
+          try {
+            window.localStorage.setItem(PERSONALISATION_BY_GRADE_KEY, JSON.stringify(next));
+          } catch {
+            // ignore storage errors
+          }
+        }
+        return next;
+      });
+    },
+    [normalizePersonalisationGradeKey]
+  );
   const isPlaygroupClass = useCallback(
     (value: string) => {
       const normalized = normalizeClassKey(value);
@@ -241,6 +310,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     () =>
       JSON.stringify({
         selections,
+        personalisationByGrade,
         excludedAssessments: explicitExcludedAssessments,
         assessmentVariants,
         customAssessmentTitles,
@@ -647,7 +717,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   };
 
   const handleOptionSelect = (option: BookOption | null) => {
-
+  
     if (!currentClassData || !currentSubject) return;
 
     // Any new change unlocks finalized state for editing
@@ -752,10 +822,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
   const handleUpdateSelection = (updatedSelections: SelectionRecord[]) => {
     // Merge updates for the affected class; preserve other classes to avoid accidental drops.
+    
     if (!currentClassData) {
       setSelections(updatedSelections);
       return;
     }
+
+    console.log(updatedSelections); 
 
     const targetKey = normalizeClassKey(currentClassData.name);
     
@@ -1265,9 +1338,10 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
 
     const payload = {
       school_id: resolvedSchoolId,
-      selections: filteredSelections,
+      personalisation_by_grade: personalisationByGrade,
       excluded_assessments: normalizedExcluded,
       assessment_variants: assessmentVariants,
+      selections: filteredSelections,
       grade_names: latestGradeNames,
       source: 'wizard',
       deleted_classes: normalizedDeletedClasses,
@@ -1286,7 +1360,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       toast.error('Unable to save book selections. Please try again.');
       return false;
     }
-  }, [API, assessmentVariants, bookSelectionSchoolId, buildPayloadClassSignatures, customAssessmentTitles, explicitExcludedAssessments, getIdToken, resolveLatestGradeNames, savedClassSignatures, selectionSignature, selections, user?.schoolId]);
+  }, [API, assessmentVariants, bookSelectionSchoolId, buildPayloadClassSignatures, customAssessmentTitles, explicitExcludedAssessments, getIdToken, personalisationByGrade, resolveLatestGradeNames, savedClassSignatures, selectionSignature, selections, user?.schoolId]);
   
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1381,6 +1455,12 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       const nextSignatures: Record<string, string> = {};
       const nextAssessmentVariants: Record<string, AssessmentVariant> = {};
       const seenSelections: Set<string> = new Set();
+      const nextPersonalisation: Record<string, YesNoValue> = {
+        playgroup: 'yes',
+        nursery: 'yes',
+        lkg: 'yes',
+        ukg: 'yes',
+      };
 
         classes.forEach((entry: any) => {
           const rawClass = entry.doc_id || entry.class_label || entry.class || entry.class_name || '';
@@ -1388,6 +1468,20 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             return;
           }
           const normalizedClass = resolveClassName(rawClass);
+          const personalisationRaw = entry?.personalisation;
+          if (typeof personalisationRaw === 'string' || typeof personalisationRaw === 'boolean') {
+            const key = normalizePersonalisationGradeKey(normalizedClass);
+            if (key) {
+              if (typeof personalisationRaw === 'boolean') {
+                nextPersonalisation[key] = personalisationRaw ? 'yes' : 'no';
+              } else {
+                const normalized = personalisationRaw.trim().toLowerCase();
+                if (normalized === 'yes' || normalized === 'no') {
+                  nextPersonalisation[key] = normalized;
+                }
+              }
+            }
+          }
           const isPlaygroup = isPlaygroupClass(normalizedClass);
           const serverVariant = serverAssessmentVariants[normalizedClass];
           if (serverVariant === 'WITH_MARKS' || serverVariant === 'WITHOUT_MARKS') {
@@ -1519,6 +1613,14 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       setSavedExcludedAssessments(Array.from(nextExcluded));
       setServerMissingAssessments(Array.from(nextMissingAssessments));
       setSavedClassSignatures(nextSignatures);
+      setPersonalisationByGrade(nextPersonalisation);
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(PERSONALISATION_BY_GRADE_KEY, JSON.stringify(nextPersonalisation));
+        } catch {
+          // ignore storage errors
+        }
+      }
       setCompletedClasses((prev) => {
         const merged = new Set(prev);
         nextCompleted.forEach((cls) => merged.add(cls));
@@ -1544,7 +1646,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       fetchInFlightRef.current = false;
     }
   },
-    [API, assessmentVariants, bookSelectionSchoolId, buildSelectionFromSavedItem, completedClasses, customAssessmentTitles, getIdToken, gradeNames, persistCompletedClasses, persistedState?.school, resolveApprovalStatus]
+    [API, assessmentVariants, bookSelectionSchoolId, buildSelectionFromSavedItem, completedClasses, customAssessmentTitles, getIdToken, gradeNames, normalizePersonalisationGradeKey, persistCompletedClasses, persistedState?.school, resolveApprovalStatus]
   );
 
   useEffect(() => {
@@ -1635,13 +1737,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     const summaryClassSelections = baseSelections.filter((s) => normalizeClassKey(s.className) === classKey);
     const summaryClassExcluded = baseExcluded.filter((cls) => normalizeClassKey(cls) === classKey);
     const latestGradeNames = resolveLatestGradeNames();
-    const cleanedSelections = summaryClassSelections.filter((s) => {
-      if (!s.selectedOption) return false;
-      const hasCore = !!s.selectedOption.coreId && !s.skipCore;
-      const hasWork = !!s.selectedOption.workId && !s.skipWork;
-      const hasAddon = !!s.selectedOption.addOnId && !s.skipAddon;
-      return hasCore || hasWork || hasAddon;
-    });
+    // const cleanedSelections = summaryClassSelections.filter((s) => {
+    //   if (!s.selectedOption) return false;
+    //   const hasCore = !!s.selectedOption.coreId && !s.skipCore;
+    //   const hasWork = !!s.selectedOption.workId && !s.skipWork;
+    //   const hasAddon = !!s.selectedOption.addOnId && !s.skipAddon;
+    //   return hasCore || hasWork || hasAddon;
+    // });
    
     // const currentFinal = buildFinalBookSelections(
     //   cleanedSelections,
@@ -1983,6 +2085,17 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
                         <h3 className={`${gradeTitleClass} font-extrabold ${theme.textMain} break-words`}>
                             {gradeLabel}
                         </h3>
+                        <div className="mt-3 flex items-center justify-center gap-2 text-xs text-slate-700">
+                          <span>Personalisation</span>
+                          <Switch
+                            checked={(personalisationByGrade[normalizePersonalisationGradeKey(cls.name)] ?? 'yes') === 'yes'}
+                            onCheckedChange={(checked: boolean) => updatePersonalisationForGrade(cls.name, checked)}
+                            disabled={isFinalized}
+                          />
+                          <span className="font-semibold">
+                            {(personalisationByGrade[normalizePersonalisationGradeKey(cls.name)] ?? 'yes') === 'yes' ? 'Yes' : 'No'}
+                          </span>
+                        </div>
                         
                         {classHasSelections && (
                             <div className="inline-flex items-center gap-1 px-2 py-1 bg-white/60 rounded-full border border-green-200 text-green-800 text-xs font-medium mt-2">

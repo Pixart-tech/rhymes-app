@@ -185,7 +185,7 @@ const ModeSelectionPage = ({
   onModeSelect,
   isSuperAdmin = false,
   isFrozen = false,
-  onBackToAdmin,
+  onBackToWorkspace,
   onBackToDashboard,
   onEditProfile,
   modePending,
@@ -230,28 +230,28 @@ const ModeSelectionPage = ({
       gradient: 'from-blue-400 to-indigo-500',
       icon: BookMarked
     },
-    // {
-    //   id: 'rhymes',
-    //   title: 'Rhymes',
-    //   description: 'Select and organise rhymes to build your customised binders.',
-    //   gradient: 'from-orange-400 to-red-400',
-    //   icon: Music
-    // }
+    {
+      id: 'rhymes',
+      title: 'Rhymes',
+      description: 'Select and organise rhymes to build your customised binders.',
+      gradient: 'from-orange-400 to-red-400',
+      icon: Music
+    }
   ].filter((option) => isSuperAdmin || option.id !== 'books');
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="mx-auto flex max-w-5xl flex-col gap-8">
         <div className="flex justify-end">
-          {(isSuperAdmin ? onBackToAdmin : onBackToDashboard) && (
+          {(isSuperAdmin ? onBackToWorkspace : onBackToDashboard) && (
             <Button
               variant="outline"
               className="bg-white/80 hover:bg-white border-gray-200 whitespace-normal text-xs sm:text-sm px-3 sm:px-4 py-2 sm:py-2.5"
-              onClick={isSuperAdmin ? onBackToAdmin : onBackToDashboard}
+              onClick={isSuperAdmin ? onBackToWorkspace : onBackToDashboard}
             >
               <ChevronLeft className="mr-2 h-4 w-4 shrink-0" />
               <span className="min-w-0 text-left">
-                {isSuperAdmin ? 'Back to admin dashboard' : 'Back to dashboard'}
+                {isSuperAdmin ? 'Back to workspace' : 'Back to dashboard'}
               </span>
             </Button>
           )}
@@ -3214,6 +3214,7 @@ export function RhymesWorkflowApp() {
     }
     // Sync status code from persisted school metadata (no network)
     const statusVal = (school.cover_status || '1').toString();
+    console.log(statusVal)
     setCoverStatusCode(statusVal === 'finished' ? '4' : statusVal);
     if (selectedMode !== null) {
       return;
@@ -3382,25 +3383,15 @@ export function RhymesWorkflowApp() {
     });
   };
 
-  const handleReturnToAdminDashboard = useCallback(() => {
+  const handleReturnToAdminWorkspace = useCallback(() => {
     if (!isSuperAdminUser) {
       return;
     }
-    const currentSchoolId = school?.school_id;
-    if (currentSchoolId) {
-      clearCoverWorkflowForSchool(currentSchoolId);
-    }
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem('bookSelectionSchoolId');
-      window.localStorage.removeItem('bookSelectionSchoolName');
-    }
-    clearPersistedAppState();
     setSelectedGrade(null);
     setSelectedMode(null);
-    setCoverDefaults(mergeCoverDefaults());
     setSchool(null);
     setIsEditingSchoolProfile(false);
-  }, [isSuperAdminUser, school, clearCoverWorkflowForSchool]);
+  }, [isSuperAdminUser]);
 
   const handleReturnToBranchList = useCallback(() => {
     const currentSchoolId = school?.school_id;
@@ -3454,7 +3445,7 @@ export function RhymesWorkflowApp() {
           isSuperAdmin={isSuperAdminUser}
           isFrozen={selectionsFrozen}
           hasBookSelections={hasBookSelections}
-          onBackToAdmin={handleReturnToAdminDashboard}
+          onBackToWorkspace={handleReturnToAdminWorkspace}
           onBackToDashboard={!isSuperAdminUser ? handleReturnToBranchList : undefined}
           onEditProfile={() => setIsEditingSchoolProfile(true)}
           modePending={modePending}

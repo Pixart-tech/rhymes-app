@@ -1,5 +1,6 @@
 const APP_STATE_KEY = 'rhymes-app::state';
 const WORKSPACE_CACHE_KEY = 'rhymes-app::workspace-cache';
+const ADMIN_WORKSPACE_RETURN_KEY = 'rhymes-app::admin-workspace-return';
 const COVER_WORKFLOW_KEY_PREFIX = 'rhymes-app::cover::';
 const BOOK_WORKFLOW_KEY_PREFIX = 'rhymes-app::books::';
 
@@ -80,6 +81,35 @@ export const clearWorkspaceCache = () => {
     return;
   }
   window.localStorage.removeItem(WORKSPACE_CACHE_KEY);
+};
+
+export const loadAdminWorkspaceReturn = () => {
+  if (!isBrowser()) {
+    return null;
+  }
+  return safeParseJson(window.localStorage.getItem(ADMIN_WORKSPACE_RETURN_KEY));
+};
+
+export const saveAdminWorkspaceReturn = (payload) => {
+  if (!isBrowser()) {
+    return;
+  }
+  if (!payload) {
+    window.localStorage.removeItem(ADMIN_WORKSPACE_RETURN_KEY);
+    return;
+  }
+  try {
+    window.localStorage.setItem(ADMIN_WORKSPACE_RETURN_KEY, JSON.stringify(payload));
+  } catch (error) {
+    console.warn('Unable to persist admin workspace return payload:', error);
+  }
+};
+
+export const clearAdminWorkspaceReturn = () => {
+  if (!isBrowser()) {
+    return;
+  }
+  window.localStorage.removeItem(ADMIN_WORKSPACE_RETURN_KEY);
 };
 
 const createWorkflowStorage = (keyPrefix) => {

@@ -30,6 +30,7 @@ export interface SchoolProfile {
   school_id: string;
   school_name: string;
   logo_url?: string | null;
+  sales_representative:string
   email?: string | null;
   phone?: string | null;
   city?: string | null;
@@ -64,6 +65,7 @@ export interface SchoolFormValues {
   school_name: string;
   logo_url?: string | null;
   logo_file?: File | null;
+  sales_representative:string;
   email: string;
   phone: string;
   address: string;

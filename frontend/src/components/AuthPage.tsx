@@ -59,6 +59,62 @@ import { loadWorkspaceCache, saveWorkspaceCache, clearWorkspaceCache } from '../
 const API = API_BASE_URL || '/api';
 type AuthViewState = 'list' | 'create' | 'edit' | 'branch' | 'branch-edit' | 'branch-view';
 
+const ADMIN_WORKSPACE_STORAGE_KEY = 'rhymes-app::admin-workspace-open';
+
+type PersistedAdminWorkspace = {
+  school: SchoolProfile;
+  schools: SchoolProfile[];
+  updatedAt: number;
+};
+
+const loadPersistedAdminWorkspace = (): PersistedAdminWorkspace | null => {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(ADMIN_WORKSPACE_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<PersistedAdminWorkspace> | null;
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    if (!parsed.school || !Array.isArray(parsed.schools)) {
+      return null;
+    }
+    return {
+      school: parsed.school as SchoolProfile,
+      schools: parsed.schools as SchoolProfile[],
+      updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now()
+    };
+  } catch {
+    return null;
+  }
+};
+
+const savePersistedAdminWorkspace = (payload: PersistedAdminWorkspace) => {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(ADMIN_WORKSPACE_STORAGE_KEY, JSON.stringify(payload));
+  } catch (error) {
+    console.warn('Failed to persist admin workspace payload', error);
+  }
+};
+
+const clearPersistedAdminWorkspace = () => {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(ADMIN_WORKSPACE_STORAGE_KEY);
+  } catch (error) {
+    console.warn('Failed to clear admin workspace payload', error);
+  }
+};
+
 const normalizeSchoolId = (value?: string | null) => {
   if (!value) {
     return '';
@@ -257,8 +313,15 @@ interface PaginatedAdminSchoolsResponse {
 
 const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const { user, signInWithGoogle, loading: authLoading, getIdToken } = useAuth();
+  const initialAdminWorkspace = loadPersistedAdminWorkspace();
   const [workspaceUser, setWorkspaceUser] = useState<WorkspaceUserProfile | null>(null);
-  const [schools, setSchools] = useState<SchoolProfile[]>([]);
+  const [schools, setSchools] = useState<SchoolProfile[]>(() => initialAdminWorkspace?.schools ?? []);
+  const [adminWorkspaceSchool, setAdminWorkspaceSchool] = useState<SchoolProfile | null>(
+    () => initialAdminWorkspace?.school ?? null
+  );
+  const adminWorkspaceSchoolRef = useRef<SchoolProfile | null>(initialAdminWorkspace?.school ?? null);
+  const adminWorkspacePrevSchools = useRef<SchoolProfile[] | null>(null);
+  const isSuperAdmin = workspaceUser?.role === 'super-admin';
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [view, setView] = useState<AuthViewState>('list');
@@ -280,6 +343,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [deletingSchoolId, setDeletingSchoolId] = useState<string | null>(null);
   const [logoMap, setLogoMap] = useState<Record<string, string>>({});
   const [adminSearch, setAdminSearch] = useState('');
+  const [adminSearchDebounced, setAdminSearchDebounced] = useState('');
   const [serviceFilter, setServiceFilter] = useState<AdminServiceFilter>('all');
   const [coverStatusFilter, setCoverStatusFilter] = useState<'all' | '1' | '2' | '3' | '4' | 'unknown'>('all');
   const [bookStatusFilter, setBookStatusFilter] = useState<'all' | 'done' | 'not done' | 'unknown'>('all');
@@ -333,6 +397,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const lastFetchedWorkspaceUserId = useRef<string | null>(null);
   const workspaceCacheRef = useRef<{ userId: string; session: WorkspaceSession; updatedAt: number } | null>(null);
   const coverStatusLoadedKey = useRef<string | null>(null);
+  const adminFetchSequence = useRef(0);
+  const activeAdminFetch = useRef<{ id: number; mode: 'all' | 'search'; query?: string }>({
+    id: 0,
+    mode: 'all'
+  });
   const allSchoolsForLogos = useMemo(() => {
     const deduped: Record<string, SchoolProfile> = {};
     [...schools, ...adminSchools].forEach((school) => {
@@ -401,9 +470,13 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     (session: WorkspaceSession) => {
       const nextUser = session.user;
       setWorkspaceUser(nextUser);
+
+      if (adminWorkspaceSchoolRef.current) {
+        return;
+      }
+
       setSchools(session.schools);
-      const shouldStartInCreate =
-        nextUser.role !== 'super-admin' && session.schools.length === 0;
+      const shouldStartInCreate = nextUser.role !== 'super-admin' && session.schools.length === 0;
       setView(shouldStartInCreate ? 'create' : 'list');
     },
     []
@@ -484,9 +557,21 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   );
 
   useEffect(() => {
+    adminWorkspaceSchoolRef.current = adminWorkspaceSchool;
+  }, [adminWorkspaceSchool]);
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
     if (!user) {
       setWorkspaceUser(null);
       setSchools([]);
+      setAdminWorkspaceSchool(null);
+      adminWorkspacePrevSchools.current = null;
+      adminWorkspaceSchoolRef.current = null;
+      clearPersistedAdminWorkspace();
       setView('list');
       setEditingSchool(null);
       lastFetchedWorkspaceUserId.current = null;
@@ -509,7 +594,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       hydrateWorkspace(cached.session);
     }
     void fetchWorkspace();
-  }, [user, fetchWorkspace, hydrateWorkspace]);
+  }, [user, authLoading, fetchWorkspace, hydrateWorkspace]);
 
   useEffect(() => {
     if (workspaceUser) {
@@ -534,11 +619,13 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     async (
       pageArg?: number,
       limitArg?: number,
-      { showLoading = true }: FetchOptions = {}
+      showLoading = true 
     ) => {
       if (!workspaceUser || workspaceUser.role !== 'super-admin') {
         return;
       }
+      const requestId = ++adminFetchSequence.current;
+      activeAdminFetch.current = { id: requestId, mode: 'all' };
       if (showLoading) {
         setAdminLoading(true);
         setAdminError(null);
@@ -556,6 +643,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
             headers: { Authorization: `Bearer ${token}` }
           }
         );
+        if (activeAdminFetch.current.id !== requestId) {
+          return;
+        }
         setAdminSchools(response.data.schools);
         setTotalAdminSchoolsCount(
           response.data.totalCount ??
@@ -565,12 +655,67 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         setAdminError(null);
       } catch (error) {
         console.error('Failed to load admin schools', error);
+        if (activeAdminFetch.current.id !== requestId) {
+          return;
+        }
         if (showLoading) {
           setAdminError('Unable to load the admin school list. Please try again.');
           toast.error('Unable to load the admin school list. Please try again.');
         }
       } finally {
+        if (showLoading && activeAdminFetch.current.id === requestId) {
+          setAdminLoading(false);
+        }
+      }
+    },
+    [workspaceUser, getIdToken, currentPage, schoolsPerPage]
+  );
+
+  const fetchAdminSchoolsBySearch = useCallback(
+    async (query: string, pageArg?: number, limitArg?: number, showLoading = true) => {
+      if (!workspaceUser || workspaceUser.role !== 'super-admin') {
+        return;
+      }
+      const cleanedQuery = query.trim();
+      if (!cleanedQuery) {
+        return;
+      }
+      const requestId = ++adminFetchSequence.current;
+      activeAdminFetch.current = { id: requestId, mode: 'search', query: cleanedQuery };
+      if (showLoading) {
+        setAdminLoading(true);
+        setAdminError(null);
+      }
+      const page = pageArg ?? currentPage;
+      const limit = limitArg ?? schoolsPerPage;
+      try {
+        const token = await getIdToken();
+        if (!token) {
+          throw new Error('Unable to fetch Firebase token');
+        }
+        const response = await axios.get<PaginatedAdminSchoolsResponse>(
+          `${API}/admin/school/${encodeURIComponent(cleanedQuery)}?page=${page}&limit=${limit}`,
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        if (activeAdminFetch.current.id !== requestId) {
+          return;
+        }
+        setAdminSchools(response.data.schools);
+       
+        setAdminError(null);
+      } catch (error) {
+        console.error('Failed to search admin schools', error);
+        if (activeAdminFetch.current.id !== requestId) {
+          return;
+        }
         if (showLoading) {
+          setAdminError('Unable to search schools right now. Please try again.');
+          toast.error('Unable to search schools right now. Please try again.');
+        }
+      } finally {
+        if (showLoading && activeAdminFetch.current.id === requestId) {
           setAdminLoading(false);
         }
       }
@@ -579,15 +724,52 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   );
 
   useEffect(() => {
+    if (!adminSearch.trim()) {
+      setAdminSearchDebounced('');
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      setAdminSearchDebounced(adminSearch);
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [adminSearch]);
+
+  useEffect(() => {
     if (workspaceUser?.role === 'super-admin') {
-      void fetchAdminSchools(currentPage, schoolsPerPage);
+      // When a super-admin is "inside" a school's workspace (adminWorkspaceSchool set),
+      // skip admin dashboard pagination/search fetches. These should only run on the
+      // admin dashboard (i.e. after "Return to admin dashboard").
+      if (adminWorkspaceSchoolRef.current) {
+        return;
+      }
+      const rawCleaned = adminSearch.trim();
+      if (!rawCleaned) {
+        void fetchAdminSchools(currentPage, schoolsPerPage);
+        return;
+      }
+
+      const cleaned = adminSearchDebounced.trim();
+      if (!cleaned || cleaned !== rawCleaned) {
+        return;
+      }
+
+      void fetchAdminSchoolsBySearch(cleaned, currentPage, schoolsPerPage);
     } else {
       setAdminSchools([]);
       setAdminError(null);
       setAdminLoading(false);
       setDeletingSchoolId(null);
     }
-  }, [workspaceUser, fetchAdminSchools, currentPage, schoolsPerPage]);
+  }, [
+    workspaceUser,
+    fetchAdminSchools,
+    fetchAdminSchoolsBySearch,
+    currentPage,
+    schoolsPerPage,
+    adminSearch,
+    adminSearchDebounced,
+    adminWorkspaceSchool
+  ]);
 
   const availablePageSizeOptions = useMemo(() => {
     const total = Math.max(totalAdminSchoolsCount, schoolsPerPage, 5);
@@ -703,25 +885,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     if (adminSchools.length === 0) {
       return [];
     }
-    const normalizedSearch = adminSearch.trim().toLowerCase();
-    return adminSchools.filter((school) => {
-      const matchesSearch = normalizedSearch
-        ? Boolean(
-            school.school_name?.toLowerCase().includes(normalizedSearch) ||
-              school.school_id?.toLowerCase().includes(normalizedSearch) ||
-              school.email?.toLowerCase().includes(normalizedSearch)
-          )
-        : true;
-      const matchesService =
-        serviceFilter === 'all' ||
-        Boolean(school.service_type && school.service_type.includes(serviceFilter));
-      const coverValue = coverStatusMap[school.school_id] ?? 'unknown';
-      const bookValue = bookStatusMap[school.school_id] ?? 'unknown';
-      const matchesCover =
-        coverStatusFilter === 'all' || coverValue === coverStatusFilter;
-      const matchesBook = bookStatusFilter === 'all' || bookValue === bookStatusFilter;
-      return matchesSearch && matchesService;
-    }).filter((school) => {
+    return adminSchools
+      .filter((school) => {
+        const matchesService =
+          serviceFilter === 'all' ||
+          Boolean(school.service_type && school.service_type.includes(serviceFilter));
+        return matchesService;
+      })
+      .filter((school) => {
       const coverValue = coverStatusMap[school.school_id] ?? 'unknown';
       const bookValue = bookStatusMap[school.school_id] ?? 'unknown';
       const matchesCover =
@@ -729,7 +900,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       const matchesBook = bookStatusFilter === 'all' || bookValue === bookStatusFilter;
       return matchesCover && matchesBook;
     });
-  }, [adminSchools, adminSearch, serviceFilter, coverStatusFilter, bookStatusFilter, coverStatusMap, bookStatusMap]);
+  }, [adminSchools, serviceFilter, coverStatusFilter, bookStatusFilter, coverStatusMap, bookStatusMap]);
   const adminStats = useMemo(() => {
     const totalSelections = adminSchools.reduce((sum, school) => sum + (school.total_selections || 0), 0);
     const lastUpdated = adminSchools.reduce<Date | null>((latest, school) => {
@@ -829,24 +1000,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                 headers,
                 validateStatus: () => true
               });
-              const classes = Array.isArray(resp.data?.classes) ? resp.data.classes : [];
-              const enabledGrades = Object.entries(school.grades || {})
-                .filter(([, grade]) => Boolean((grade as GradeSetting | undefined)?.enabled))
-                .map(([key]) => normalizeGradeKey(key))
-                .filter(Boolean);
-              const presentGrades = new Set(
-                classes
-                  .map(
-                    (entry: any) =>
-                      normalizeGradeKey(entry?.doc_id) ||
-                      normalizeGradeKey(entry?.class) ||
-                      normalizeGradeKey(entry?.class_label)
-                  )
-                  .filter(Boolean)
-              );
-              const allPresent =
-                enabledGrades.length === 0 ||
-                enabledGrades.every((gradeKey) => presentGrades.has(gradeKey));
+              
+              const allPresent=resp.data.all_present
+             
               const bookStatus = allPresent ? 'done' : 'not done';
               if (!cancelled) {
                 setBookStatusMap((prev) =>
@@ -882,7 +1038,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         }).length,
       [adminSchools]
     );
-    const inactiveAdminSchoolsCount = Math.max(0, totalAdminSchoolsCount - activeAdminSchoolsCount);
+    // const inactiveAdminSchoolsCount = Math.max(0, totalAdminSchoolsCount - activeAdminSchoolsCount);
+  const inactiveAdminSchoolsCount=0
   const adminBranchChildren = useMemo(() => {
     const counts = new Map<string, number>();
     adminSchools.forEach((school) => {
@@ -958,7 +1115,70 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       return;
     }
     onAuth({ school, user: workspaceUser });
+    
   };
+
+  const fetchschool=useCallback(
+    async(school:SchoolProfile)=>{
+      try {
+        console.log(school.school_id)
+        const token = await getIdToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+        const response = await axios.get(`${API}/schools/${school.school_id}`, {
+          headers,
+          responseType: 'json'
+        });
+        return response.data
+      } catch (error) {
+        console.warn("unable to fetch school")
+      }
+
+    },
+    [getIdToken]
+  )
+
+  const handleAdminOpenWorkspace = useCallback(
+    async (school: SchoolProfile) => {
+      if (!isSuperAdmin) {
+        handleSchoolSelect(school);
+        return;
+      }
+      
+      if (!adminWorkspacePrevSchools.current) {
+        adminWorkspacePrevSchools.current = schools;
+      }
+      const branches = adminSchools.filter((entry) => matchesParentId(entry.branch_parent_id, school));
+      const workspaceSchools = [school, ...branches];
+      savePersistedAdminWorkspace({ school, schools: workspaceSchools, updatedAt: Date.now() });
+      setSchools(workspaceSchools);
+      setBranchParent(null);
+      setBranchTarget(null);
+      // const rendered_school=await fetchschool(school)
+      // console.log(rendered_school.school_id)
+      setAdminWorkspaceSchool(school);
+      setView('list');
+      
+      
+    },
+    [adminSchools, handleSchoolSelect, isSuperAdmin, matchesParentId, schools]
+  );
+
+  const handleAdminCloseWorkspace = useCallback(() => {
+    if (!isSuperAdmin) {
+      return;
+    }
+    
+    const previous = adminWorkspacePrevSchools.current;
+    if (previous) {
+      setSchools(previous);
+    }
+    adminWorkspacePrevSchools.current = null;
+    setAdminWorkspaceSchool(null);
+    clearPersistedAdminWorkspace();
+    setBranchParent(null);
+    setBranchTarget(null);
+    setView('list');
+  }, [isSuperAdmin]);
 
   const buildDialogServiceStatus = useCallback(
     (school?: AdminSchoolProfile | null): ServiceStatusMap =>
@@ -994,6 +1214,39 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     },
     [getIdToken]
   );
+  const handleDownloadOriginalLogo=useCallback(
+    async (school: SchoolProfile) => {
+      try {
+        const token = await getIdToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+       const response = await axios.get(`${API}/admin/school-logo/${school.school_id}`, {
+          headers,
+          responseType: 'blob'
+        });
+        const disposition = response.headers?.['content-disposition'] as string | undefined;
+        const filenameMatch = disposition?.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
+        const filenameFromHeader = filenameMatch?.[1] ? decodeURIComponent(filenameMatch[1].replace(/\"/g, '').trim()) : null;
+        const fallbackExt = (response.data?.type && typeof response.data.type === 'string')
+          ? `.${response.data.type.split('/')[1] || 'png'}`
+          : '.png';
+        const downloadName = filenameFromHeader || `${school.school_id}${fallbackExt}`;
+        const downloadUrl = URL.createObjectURL(response.data);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = downloadName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(downloadUrl);
+        toast.success('Logo download started');
+      } catch (error) {
+        console.error('Failed to download logo', error);
+        toast.error('Unable to download logo. Please try again.');
+      }
+    },
+    [getIdToken]
+  )
+ 
 
   const handleOpenAddonsDialog = useCallback((school: AdminSchoolProfile) => {
     setAddonsDialogSchool(school);
@@ -1267,6 +1520,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       setBranchSubmitting(true);
       try {
         const token = await getIdToken();
+        
         if (!token) {
           throw new Error('Unable to fetch Firebase token');
         }
@@ -1282,6 +1536,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
           state: cleanString(values.state),
           pin: cleanString(values.pin)
         };
+        console.log(payload)
         const response = await axios.post<SchoolProfile>(`${API}/branches`, payload, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -1315,15 +1570,21 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       setBranchSubmitting(true);
       try {
         const token = await getIdToken();
+        console.log(token)
         if (!token) {
           throw new Error('Unable to fetch Firebase token');
         }
         const cleanString = (value: string) => value.trim() || undefined;
+        const parentSchoolId = branchTarget.branch_parent_id ?? branchParent?.school_id;
+        if (!parentSchoolId) {
+          throw new Error('Unable to determine the branch parent school');
+        }
         const payload = {
-          school_name: values.branch_name.trim(),
-          principal_name: values.coordinator_name.trim(),
-          principal_email: values.coordinator_email.trim(),
-          principal_phone: values.coordinator_phone.trim(),
+          parent_school_id: parentSchoolId,
+          branch_name: values.branch_name.trim(),
+          coordinator_name: values.coordinator_name.trim(),
+          coordinator_email: values.coordinator_email.trim(),
+          coordinator_phone: values.coordinator_phone.trim(),
           address: cleanString(values.address),
           city: cleanString(values.city),
           state: cleanString(values.state),
@@ -1363,7 +1624,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         setBranchSubmitting(false);
       }
     },
-    [branchTarget, getIdToken, setAdminSchools, setSchools, setBranchParent, setBranchTarget, setView, workspaceUser]
+    [branchParent, branchTarget, getIdToken, setAdminSchools, setSchools, setBranchParent, setBranchTarget, setView, workspaceUser]
   );
 
   const handleBranchCancel = useCallback(() => {
@@ -1374,6 +1635,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
 
   const handleEditSchool = useCallback(
     (school: SchoolProfile) => {
+      
       setSchoolFormValues(buildFormValues(school));
       setEditingSchool(school);
       setView('edit');
@@ -1433,7 +1695,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         toast.success(
           targetStatus === 'active' ? 'Branch activated' : 'Branch discontinued'
         );
-      } catch (error) {
+      } catch (error) { v
         console.error('Failed to update branch status', error);
         toast.error(
           `Unable to ${targetStatus === 'active' ? 'activate' : 'discontinue'} branch. Please try again.`
@@ -1602,8 +1864,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       toast.error('Google sign-in was cancelled or failed. Please try again.');
     }
   };
+  
 
-  const isSuperAdmin = workspaceUser?.role === 'super-admin';
   const isCreateView = view === 'create' || (!isSuperAdmin && schools.length === 0);
   const isEditView = view === 'edit' && Boolean(editingSchool);
   const isBranchCreateView = view === 'branch' && Boolean(branchParent);
@@ -1880,12 +2142,19 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     ];
     const coverFilterOptions = [
       { value: 'all', label: 'All cover statuses' },
-      { value: '1', label: '1 - Explore' },
-      { value: '2', label: '2 - Preparing' },
-      { value: '3', label: '3 - Review' },
-      { value: '4', label: '4 - Frozen' },
+      { value: '1', label: ' Explore' },
+      { value: '2', label: ' Preparing' },
+      { value: '3', label: 'Review' },
+      { value: '4', label: ' Frozen' },
       
     ];
+    const cover_label_map={
+      1:"Explore",
+      2:"Preparing",
+      3:"Review",
+      4:"Frozen"
+       
+    }
     const bookFilterOptions = [
       { value: 'all', label: 'All book statuses' },
       { value: 'done', label: 'Done' },
@@ -1895,6 +2164,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     const schoolsToRender = filteredAdminSchools;
     const emptyStateMessage =
       adminSchools.length === 0 ? 'No schools available yet.' : 'No schools match the current filters.';
+   
     const totalPages = Math.max(1, Math.ceil(totalAdminSchoolsCount / schoolsPerPage));
 
     return (
@@ -1976,13 +2246,20 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         <Card className="border border-slate-200 bg-white shadow-sm">
           <CardHeader className="space-y-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="relative flex-1">
+              <div className="relative flex-3">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
-                  placeholder="Search by school name, email, or ID"
+                  placeholder="Search by school name, email, or ID,sales person"
                   className="pl-10 border border-slate-200 bg-slate-50 focus:border-slate-300"
                   value={adminSearch}
-                  onChange={(event) => setAdminSearch(event.target.value)}
+                  onChange={(event) => {
+                    setCurrentPage(1);
+                    const nextValue = event.target.value;
+                    setAdminSearch(nextValue);
+                    if (!nextValue.trim()) {
+                      setAdminSearchDebounced('');
+                    }
+                  }}
                 />
               </div>
               <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-slate-100 px-4 py-3 shadow-sm">
@@ -2077,15 +2354,18 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                           School
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          Services
+                        <th className='px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 '>
+                          Sales representative
                         </th>
+                        {/* <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Services
+                        </th> */}
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                           Branches
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {/* <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                           Status
-                        </th>
+                        </th> */}
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                           BOOK Selections 
                         </th>
@@ -2119,168 +2399,187 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                         const services = school.service_type ?? [];
                         const coverSelectionStatus = coverStatusMap[school.school_id] ?? '—';
                         const bookSelectionStatus = bookStatusMap[school.school_id] ?? '—';
-
-                        return (
-                          <tr key={school.school_id} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-4 py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-50 text-slate-500">
-                                  {logoSrc ? (
-                                    <img
-                                      src={logoSrc}
-                                      alt={school.school_name}
-                                      className="h-11 w-11 rounded-full object-cover"
-                                    />
-                                  ) : (
-                                    <School className="h-5 w-5" />
-                                  )}
+                        if (!school.branch_parent_id){
+                          return (
+                          
+                            <tr key={school.school_id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-4 py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-50 text-slate-500">
+                                    {logoSrc ? (
+                                      <img
+                                        src={logoSrc}
+                                        alt={school.school_name}
+                                        className="h-11 w-11 rounded-full object-cover"
+                                      />
+                                    ) : (
+                                      <School className="h-5 w-5" />
+                                    )}
+                                  </div>
+                                  <div>
+                                    <div className="font-semibold text-slate-900">{school.school_name}</div>
+                                    <p className="text-xs text-slate-500">ID: {school.school_id}</p>
+                                  </div>
                                 </div>
-                                <div>
-                                  <div className="font-semibold text-slate-900">{school.school_name}</div>
-                                  <p className="text-xs text-slate-500">ID: {school.school_id}</p>
+                              </td>
+                              <td className="px-4 py-4 text-slate-700">
+                                
+                                {school.sales_representative}
+                              </td>
+                              {/* <td className="px-4 py-4">
+                                <div className="flex flex-wrap gap-1">
+                                  {services.length === 0
+                                    ? '—'
+                                    : services.map((service) => (
+                                        <span
+                                          key={service}
+                                          className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600"
+                                        >
+                                          {SERVICE_LABELS[service]}
+                                        </span>
+                                      ))}
                                 </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-4">
-                              <div className="flex flex-wrap gap-1">
-                                {services.length === 0
-                                  ? '—'
-                                  : services.map((service) => (
-                                      <span
-                                        key={service}
-                                        className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600"
-                                      >
-                                        {SERVICE_LABELS[service]}
-                                      </span>
-                                    ))}
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 text-slate-700">
-                              {school.branch_parent_id ? (
-                                <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                                  Sub Branch of {school.branch_parent_id}
-                                </span>
-                              ) : (
-                                <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800">
-                                  {adminBranchChildren.get(school.school_id) ?? 0} branch
-                                  {(adminBranchChildren.get(school.school_id) ?? 0) === 1 ? '' : 'es'}
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-4 py-4">
-                              <span
-                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-                                  branchStatus === 'active'
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : 'bg-rose-50 text-rose-700'
-                                }`}
-                              >
-                                {branchStatus === 'active' ? 'Active' : 'Inactive'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-4 text-slate-700">
-                              <div className="flex items-center gap-2">
-                                {/* <span>{school.total_selections ?? 0}</span> */}
-                                {isApproved ==true&& (
-                                  <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                                    Frozen
+                              </td> */}
+                              <td className="px-4 py-4 text-slate-700">
+                                {school.branch_parent_id ? (
+                                  <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                                    Sub Branch of {school.branch_parent_id}
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800">
+                                    {adminBranchChildren.get(school.school_id) ?? 0} branch
+                                    {(adminBranchChildren.get(school.school_id) ?? 0) === 1 ? '' : 'es'}
                                   </span>
                                 )}
-                                  {isApproved ==false&& ( 
+                              </td>
+                              {/* <td className="px-4 py-4">
+                                <span
+                                  className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                                    branchStatus === 'active'
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-rose-50 text-rose-700'
+                                  }`}
+                                >
+                                  {branchStatus === 'active' ? 'Active' : 'Inactive'}
+                                </span>
+                              </td> */}
+                              <td className="px-4 py-4 text-slate-700">
+                                <div className="flex items-center gap-2">
+                                  {/* <span>{school.total_selections ?? 0}</span> */}
+                                  {isApproved ==true&& (
                                     <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                                    Unfrozen
-                                  </span>
-
+                                      Frozen
+                                    </span>
                                   )}
+                                    {isApproved ==false&& ( 
+                                      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                                      Unfrozen
+                                    </span>
+
+                                    )}
+                                  
+                                </div>
+                              </td>
+                              <td className="px-4 py-4 text-slate-700">
                                 
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 text-slate-700">
-                              {coverSelectionStatus}
-                            </td>
-                            <td className="px-4 py-4 text-slate-700">
-                              {bookSelectionStatus}
-                            </td> 
-                            <td className="px-4 py-4 text-slate-700">{gradeCount}</td>
-                            <td className="px-4 py-4 text-slate-700">
-                              {formatDate(school.last_updated ?? school.timestamp ?? null)}
-                            </td>
-                            <td className="px-4 py-4">
-                              <DropdownMenu>
-                                <DropdownMenuTrigger
-                                  className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-white shadow hover:bg-slate-800"
-                                  aria-label="More actions"
-                                >
-                                  <MoreVertical className="h-4 w-4" />
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent
-                                  align="end"
-                                  className="w-48 rounded-2xl border border-slate-100 bg-white shadow-lg"
-                                >
-                                  <DropdownMenuItem onClick={() => handleSchoolSelect(school)}>
-                                    View
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleEditSchool(school)}>
-                                    Edit
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      void handleApproveSelections(school);
-                                    }}
-                                    disabled={isApproved || isApproving}
+                                {cover_label_map[coverSelectionStatus]}
+                              </td>
+                              <td className="px-4 py-4 text-slate-700">
+                                {bookSelectionStatus}
+                              </td> 
+                              <td className="px-4 py-4 text-slate-700">{gradeCount}</td>
+                              <td className="px-4 py-4 text-slate-700">
+                                {formatDate(school.last_updated ?? school.timestamp ?? null)}
+                              </td>
+                              <td className="px-4 py-4">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger
+                                    className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-white shadow hover:bg-slate-800"
+                                    aria-label="More actions"
                                   >
-                                    {isApproved ? 'Selections approved' : isApproving ? 'Approving...' : 'Approve selections'}
-                                  </DropdownMenuItem>
-                                  {isApproved && (
+                                    <MoreVertical className="h-4 w-4" />
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent
+                                    align="end"
+                                    className="w-48 rounded-2xl border border-slate-100 bg-white shadow-lg"
+                                  >
+                                    <DropdownMenuItem onClick={() => handleAdminOpenWorkspace(school)}>
+                                      View
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleEditSchool(school)}>
+                                      Edit
+                                    </DropdownMenuItem>
+                                    {/* <DropdownMenuItem onClick={() => handleDownloadLogo(school)}>
+                                      Download Logo
+                                    </DropdownMenuItem> */}
                                     <DropdownMenuItem
                                       onClick={() => {
-                                        void handleUnapproveSelections(school);
+                                        void handleApproveSelections(school);
                                       }}
-                                      disabled={isApproving}
-                                      className="text-rose-600"
+                                      disabled={isApproved || isApproving}
                                     >
-                                      {isApproving ? 'Updating...' : 'Unapprove selections'}
+                                      {isApproved ? 'Selections approved' : isApproving ? 'Approving...' : 'Approve selections'}
                                     </DropdownMenuItem>
-                                  )}
-                                  {school.branch_parent_id ? (
-                                    branchStatus === 'inactive' ? (
+                                    {isApproved && (
                                       <DropdownMenuItem
-                                        onClick={() => handleBranchStatusChange(school, 'active')}
-                                        disabled={isBranchUpdating}
-                                      >
-                                        Activate
-                                      </DropdownMenuItem>
-                                    ) : (
-                                      <DropdownMenuItem
-                                        onClick={() => handleBranchStatusChange(school, 'inactive')}
-                                        disabled={isBranchUpdating}
+                                        onClick={() => {
+                                          void handleUnapproveSelections(school);
+                                        }}
+                                        disabled={isApproving}
                                         className="text-rose-600"
                                       >
-                                        Discontinue
+                                        {isApproving ? 'Updating...' : 'Unapprove selections'}
                                       </DropdownMenuItem>
-                                    )
-                                  ) : (
-                                    <DropdownMenuItem
-                                      onClick={() => {
-                                        void handleAdminDelete(school.school_id);
-                                      }}
-                                      disabled={deletingSchoolId === school.school_id}
-                                      className="text-red-600"
-                                    >
-                                      Delete
+                                    )}
+                                    {school.branch_parent_id ? (
+                                      branchStatus === 'inactive' ? (
+                                        <DropdownMenuItem
+                                          onClick={() => handleBranchStatusChange(school, 'active')}
+                                          disabled={isBranchUpdating}
+                                        >
+                                          Activate
+                                        </DropdownMenuItem>
+                                      ) : (
+                                        <DropdownMenuItem
+                                          onClick={() => handleBranchStatusChange(school, 'inactive')}
+                                          disabled={isBranchUpdating}
+                                          className="text-rose-600"
+                                        >
+                                          Discontinue
+                                        </DropdownMenuItem>
+                                      )
+                                    ) : (
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          void handleAdminDelete(school.school_id);
+                                        }}
+                                        disabled={deletingSchoolId === school.school_id}
+                                        className="text-red-600"
+                                      >
+                                        Delete
+                                      </DropdownMenuItem>
+                                    )}
+                                    <DropdownMenuItem onClick={() => handleOpenAddonsDialog(school)}>
+                                      Addons
                                     </DropdownMenuItem>
-                                  )}
-                                  <DropdownMenuItem onClick={() => handleOpenAddonsDialog(school)}>
-                                    Addons
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleDownloadBinder(school)}>
-                                    Binder JSON
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </td>
-                          </tr>
+                                    <DropdownMenuItem onClick={() => handleDownloadBinder(school)}>
+                                      Binder JSON
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleDownloadOriginalLogo(school)}>
+                                      Download Original Logo
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuItem onClick={()=>handleAddBranch(school)}>Add branch</DropdownMenuItem>
+                                    
+                                    
+                                    
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </td>
+                            </tr>
                         );
+                        }
+                        
                       })}
                     </tbody>
                   </table>
@@ -2337,7 +2636,22 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       </div>
     );
   };
-
+  const { rootSchools, orphanBranches } = branchStructure;
+    const hasSchools = schools.length > 0;
+    const hasRootSchools = rootSchools.length > 0;
+    const preferredSchoolId = normalizeSchoolId(workspaceUser?.school_ids?.[0]);
+    let primarySchool: SchoolProfile | null = null;
+    if (preferredSchoolId) {
+      primarySchool = rootSchools.find(
+        (school) => normalizeSchoolId(school.school_id) === preferredSchoolId
+      ) ?? null;
+    }
+    if (!primarySchool && hasRootSchools) {
+      primarySchool = rootSchools[0];
+    }
+    const primaryBranches = primarySchool
+      ? schools.filter((school) => matchesParentId(school.branch_parent_id, primarySchool))
+      : [];
   if (authLoading) {
     return <div className="flex min-h-screen items-center justify-center text-lg">Loading session...</div>;
   }
@@ -2417,11 +2731,20 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     return null;
   }
 
-  const dashboardContent = isSuperAdmin ? renderAdminDashboard() : renderUserDashboard();
+  const dashboardContent =
+    isSuperAdmin && !adminWorkspaceSchool ? renderAdminDashboard() : renderUserDashboard();
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-start justify-center px-4 py-10">
       <div className="w-full max-w-6xl space-y-6">
+        {isSuperAdmin && adminWorkspaceSchool && view === 'list' && (
+          <div className="flex items-center justify-end">
+           
+            <Button variant="outline" onClick={handleAdminCloseWorkspace}>
+              Return to admin dashboard
+            </Button>
+          </div>
+        )}
         {isSuperAdmin && view !== 'list' && (
           <div className="flex justify-end">
             <Button
@@ -2506,7 +2829,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
             setProfileDialogOpen(open);
           }
         }}
-        className="z-50"
+        
       >
         <DialogContent>
           <form
@@ -2553,13 +2876,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         </DialogContent>
       </Dialog>
       <Dialog
+        className="z-50"
         open={Boolean(addonsDialogSchool)}
         onOpenChange={(open) => {
           if (!open) {
             handleCloseAddonsDialog();
           }
         }}
-        className="z-50"
+        
       >
         <DialogContent className="max-w-xl">
           <DialogHeader>
@@ -2709,7 +3033,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
             <Button
               onClick={() => {
                 if (!addonsDialogSchool) return;
-                handleSchoolSelect(addonsDialogSchool);
+                handleAdminOpenWorkspace(addonsDialogSchool);
                 handleCloseAddonsDialog();
               }}
               disabled={!addonsDialogSchool}

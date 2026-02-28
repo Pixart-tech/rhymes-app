@@ -37,7 +37,7 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple
 from urllib.parse import quote
 from shutil import copy2
-from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse,RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse
 from firebase_admin import firestore
 from motor.motor_asyncio import AsyncIOMotorClient
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -317,42 +317,6 @@ def _public_url_for(
         base = str(request.base_url).rstrip("/")
         return f"{base}{public_path}"
     return public_path
-
-
-def _resolve_public_fs_path(public_path: str) -> Path:
-    """
-    Resolve a public path (e.g. "/public/...", "/media/...", or "schools/...") to
-    a filesystem path under ``PUBLIC_DIR``.
-
-    Raises ValueError if the resolved path escapes ``PUBLIC_DIR``.
-    """
-    raw = (public_path or "").strip()
-    if not raw:
-        raise ValueError("Empty public path")
-
-    if raw.startswith("/public/"):
-        rel = raw.removeprefix("/public/")
-    elif raw.startswith(f"{PUBLIC_URL_PREFIX}/"):
-        rel = raw.removeprefix(f"{PUBLIC_URL_PREFIX}/")
-    else:
-        rel = raw.lstrip("/")
-
-    candidate = (PUBLIC_DIR / rel).resolve()
-    try:
-        candidate.relative_to(PUBLIC_DIR)
-    except ValueError as exc:
-        raise ValueError("Invalid public path") from exc
-    return candidate
-
-
-def _read_public_bytes(public_path: str) -> bytes:
-    fs_path = _resolve_public_fs_path(public_path)
-    if not fs_path.exists() or not fs_path.is_file():
-        raise FileNotFoundError(str(fs_path))
-    return fs_path.read_bytes()
-
-
-
 
 
 def _find_existing_image(base_dir: Path, stem: str) -> Optional[Path]:
@@ -1123,25 +1087,7 @@ def _load_pdf_dependencies() -> _PdfResources:
 
     return _PdfResources(pdf_canvas.Canvas, letter, svg_backend)
 
-
-
-def _load_phonics(path: Path) -> Dict[str,str]:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError: 
-        logger.error("Phonics catalogue %s could not be found.", path)
-        raise
-    
-
-PHONICS:Dict[str,str]=_load_phonics(ROOT_DIR / "phonics.json")
-        
-@app.get("/phonics/{number}")
-async def redirect_phonics(number: str):
-    catalogue=PHONICS
-    for key in catalogue:
-        if key==number:
-            
-            return RedirectResponse(url=catalogue[key], status_code=302 )
+   
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -1724,8 +1670,8 @@ async def cover_upload_status(
     )
     return {"ok": True, "school_id": safe_school, "status": status_value, "updated_at": now.isoformat()}
 
-
-
+    
+    
 
 # @api_router.post("/cover-uploads/{school_id}/finalize")
 # async def finalize_cover_uploads(
@@ -1844,18 +1790,8 @@ def _guess_file_extension(mime_type: Optional[str], default: str = ".bin") -> st
 
 
 def _detect_blob_mime_type(blob: bytes) -> str:
-    if not isinstance(blob, (bytes, bytearray, memoryview)):
-        return "application/octet-stream"
-
-    raw = blob.tobytes() if isinstance(blob, memoryview) else bytes(blob)
-    
-    # checking blob has pdf signature or not 
-    if raw[:5] == b"%PDF-" or b"%PDF-" in raw[:1024]:
-        return "application/pdf"
-
-    kind = imghdr.what(None, raw)
+    kind = imghdr.what(None, blob)
     if not kind:
-        # Maintain backward-compatible default for legacy blobs that omit mime metadata.
         return "image/jpeg"
     normalized = kind.lower()
     if normalized == "jpg":
@@ -1904,19 +1840,6 @@ def make_qr_with_logo(link: str, logo_path: str, box_size=12, border=4):
 
     return qr_img
 
-PHONICS:Dict[str,str]=_load_phonics(ROOT_DIR / "phonics.json")
-@api_router.get("/phonics/{number}")
-async def get_phonic_link(number:str)->str:
-    catalogue=PHONICS
-    for key in catalogue:
-        if key==number:
-            
-            return RedirectResponse(url=catalogue[key], status_code=302 )
-        
-    
-    
-    
-    
 @api_router.get("/rhymes")
 async def get_all_rhymes():
     """Get all rhymes organized by pages"""
@@ -2011,53 +1934,7 @@ def get_selected_rhymes(school_id: str):
 
     return result
 
-@api_router.get("/admin/school-logo/{school_id}")
-async def get_school_logo(school_id:str,authorization:Optional[str] = Header(None)):
-    try:
-        _verify_and_decode_token(authorization)
-    except HTTPException:
-        pass
-    doc_ref = db.collection("schools").document(school_id)
-    snapshot = doc_ref.get()
-    if not snapshot.exists:
-        raise HTTPException(status_code=404, detail="School not found")
 
-    record = snapshot.to_dict() or {}
-    logo_path = record.get("logo_original_path")
-    if not isinstance(logo_path, str) or not logo_path.strip():
-        raise HTTPException(status_code=404, detail="Logo not found")
-
-    resolved_path = logo_path.strip()
-    # If DB stores only a filename, assume it lives under public/schools/<school_id>/.
-    if "/" not in resolved_path.strip("/"):
-        resolved_path = f"/public/schools/{school_id}/{resolved_path.lstrip('/')}"
-
-    try:
-        logo_blob = _read_public_bytes(resolved_path)
-       
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Logo not found")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid logo path")
-    print(logo_blob[:16])
-    media_type = _detect_blob_mime_type(logo_blob)
-    
-    ext_from_path = ""
-    try:
-        ext_from_path = Path(str(resolved_path)).suffix.lower()
-    except Exception:
-        ext_from_path = ""
-    extension = ext_from_path if ext_from_path in _IMAGE_EXTENSIONS else _guess_file_extension(media_type)
-    filename = f"{school_id}{extension}"
-    headers = {
-        "Cache-Control": "no-store",
-        "Content-Disposition": f'attachment; filename="{filename}"',
-    }
-    return Response(content=logo_blob, media_type=media_type, headers=headers)
-
-
-    
-    
 @api_router.get("/admin/binder-json/{school_id}")
 async def get_binder_json(school_id: str, authorization: Optional[str] = Header(None)):
     """Return a combined JSON payload with school profile, book selections, and rhyme selections."""
@@ -2248,29 +2125,6 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
             instagram_qr_image.save(buf2, format="PNG")
             png2 = buf2.getvalue()
             zf.writestr(f"{school_id}_instagram_qr.png", png2)
-
-        logo_original_path = raw_school_record.get("logo_original_path")
-        print(logo_original_path)
-        if isinstance(logo_original_path, str) and logo_original_path.strip():
-            resolved_path = logo_original_path.strip()
-            if "/" not in resolved_path.strip("/"):
-                resolved_path = f"/public/schools/{school_id}/{resolved_path.lstrip('/')}"
-            try:
-                logo_original_blob = _read_public_bytes(resolved_path)
-                
-                
-                media_type = _detect_blob_mime_type(logo_original_blob)
-                
-                ext_from_path = ""
-                try:
-                    ext_from_path = Path(str(resolved_path)).suffix.lower()
-                except Exception:
-                    ext_from_path = ""
-                extension = ext_from_path if ext_from_path in _IMAGE_EXTENSIONS else _guess_file_extension(media_type)
-                zf.writestr(f"{school_id}_logo_original{extension}", logo_original_blob)
-            except Exception as error:
-                print("Failed to include logo_original_path in binder zip:", error)
-            
         # # for social in ("facebook", "instagram"):
         #     qr_ = f"{social}_image_blob"
         #     mime_key = f"{social}_image_mime"
@@ -2397,6 +2251,23 @@ async def save_book_selections(
     return {"ok": True, "updated_at": now.isoformat()}
 
 
+# @api_router.get("/book-selections/{school_id}/classes/{class_name}")
+# def get_book_selection_for_class(
+#     school_id: str, class_name: str, authorization: Optional[str] = Header(None)
+# ):
+#     """Return saved book selection for a single class without streaming the entire collection."""
+#     _verify_and_decode_token(authorization)
+#     doc_id = _normalize_class_doc_id(class_name)
+#     if not doc_id:
+#         raise HTTPException(status_code=400, detail="class_name is required")
+#     doc_ref = _book_collection_for_school(school_id).document(doc_id)
+#     snapshot = doc_ref.get()
+#     if not snapshot.exists:
+#         raise HTTPException(status_code=404, detail="Class selection not found")
+
+#     data = snapshot.to_dict() or {}
+#     data.setdefault("class", data.get("class") or snapshot.id)
+#     return data
 
 
 @api_router.get("/book-selections/{school_id}")
@@ -2424,29 +2295,29 @@ def get_book_selections(school_id: str, authorization: Optional[str] = Header(No
         .stream()
     )
     # Append legacy docs not present in the new path
-    try:
-        legacy_docs = list(
-            _book_collection_for_school_legacy_classes(school_id)
-            .select(
-                [
-                    "class",
-                    "class_label",
-                    "items",
-                    "excluded_assessments",
-                    "updated_at",
-                    "source",
-                    "updated_by",
-                    "updated_by_email",
-                ]
-            )
-            .stream()
-        )
-        existing_ids = {doc.id for doc in class_docs}
-        for doc in legacy_docs:
-            if doc.id not in existing_ids:
-                class_docs.append(doc)
-    except Exception:
-        pass
+    # try:
+    #     legacy_docs = list(
+    #         _book_collection_for_school_legacy_classes(school_id)
+    #         .select(
+    #             [
+    #                 "class",
+    #                 "class_label",
+    #                 "items",
+    #                 "excluded_assessments",
+    #                 "updated_at",
+    #                 "source",
+    #                 "updated_by",
+    #                 "updated_by_email",
+    #             ]
+    #         )
+    #         .stream()
+    #     )
+    #     existing_ids = {doc.id for doc in class_docs}
+    #     for doc in legacy_docs:
+    #         if doc.id not in existing_ids:
+    #             class_docs.append(doc)
+    # except Exception:
+    #     pass
     classes: List[Dict[str, Any]] = []
     for doc in class_docs:
         data = doc.to_dict() or {}
@@ -2457,7 +2328,7 @@ def get_book_selections(school_id: str, authorization: Optional[str] = Header(No
 
     return {"classes": classes}
 
-#checking presence of all enabled grades in book selections and return status
+#checking presbce of all enabled grades in book selections and return status
 @api_router.get("/book-selections/{school_id}/grades")
 def get_book_selections_grades(school_id: str, authorization: Optional[str] = Header(None)):
     """
@@ -2468,7 +2339,6 @@ def get_book_selections_grades(school_id: str, authorization: Optional[str] = He
     existing AuthPage check but avoids loading full doc payloads.
     """
     _verify_and_decode_token(authorization)
-    
 
     # Determine enabled grades from the school profile.
     enabled_grades: List[str] = []
@@ -2476,7 +2346,6 @@ def get_book_selections_grades(school_id: str, authorization: Optional[str] = He
     if school_doc.exists:
         record = school_doc.to_dict() or {}
         grades_map = school_profiles.normalize_grades(record.get("grades"))
-       
         enabled_grades = [
             key for key, entry in grades_map.items() if isinstance(entry, dict) and entry.get("enabled")
         ]
@@ -2484,7 +2353,15 @@ def get_book_selections_grades(school_id: str, authorization: Optional[str] = He
     # Fetch only doc ids (no payload) from the book selections collection.
     class_docs = list(_book_collection_for_school(school_id).select([]).stream())
 
-
+ 
+    try:
+        legacy_docs = list(_book_collection_for_school_legacy_classes(school_id).select([]).stream())
+        existing_ids = {doc.id for doc in class_docs}
+        for doc in legacy_docs:
+            if doc.id not in existing_ids:
+                class_docs.append(doc)
+    except Exception:
+        pass
 
     def _norm(key: str) -> str:
         try:
@@ -2493,14 +2370,14 @@ def get_book_selections_grades(school_id: str, authorization: Optional[str] = He
             return ""
 
     present_grades: Set[str] = set()
-
+    classes: List[Dict[str, Any]] = []
     for doc in class_docs:
         
         doc_id = doc.id
         norm_id = _norm(doc_id)
         if norm_id:
             present_grades.add(norm_id)
-        
+        classes.append({"doc_id": doc_id, "class": doc_id, "class_label": doc_id})
 
     enabled_norm = [_norm(g) for g in enabled_grades if _norm(g)]
     missing = [g for g in enabled_norm if g not in present_grades]
@@ -2508,7 +2385,7 @@ def get_book_selections_grades(school_id: str, authorization: Optional[str] = He
 
     return {
         "all_present": all_present
-         
+          # legacy/compat with AuthPage set-building
     }
 
 

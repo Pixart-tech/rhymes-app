@@ -1,4 +1,5 @@
 from datetime import datetime
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -26,6 +27,7 @@ class School(BaseModel):
     principal_phone: Optional[str] = None
     facebook_image_url: Optional[str] = None
     instagram_image_url: Optional[str] = None
+    sales_representative: Optional[str] = None
     service_type: Optional[List[str]] = None
     service_status: Optional[Dict[str, str]] = None
     grades: Optional[Dict[str, Dict[str, Any]]] = None

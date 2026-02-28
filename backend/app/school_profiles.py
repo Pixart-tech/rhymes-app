@@ -300,12 +300,15 @@ class SchoolCreatePayload(BaseModel):
     facebook_link: Optional[str] = None
     instagram_link: Optional[str] = None
     principal_name: str = Field(..., min_length=2)
+    
+    
     principal_email: EmailStr
     principal_phone: str = Field(..., min_length=5)
     service_type: List[SchoolServiceType] = Field(default_factory=list)
     service_status: Optional[Dict[SchoolServiceType, ServiceStatus]] = None
     grades: Optional[Dict[GradeKey, Dict[str, Any]]] = None
     id_card_fields: Optional[List[str]] = None
+    sales_representative:Optional[str]=None
 
     @field_validator("service_type", mode="before")
     @classmethod
@@ -394,6 +397,7 @@ class SchoolCreatePayload(BaseModel):
         request: Request,
         school_name: str = Form(...),
         email: EmailStr = Form(...),
+        
         phone: str = Form(...),
         address: Optional[str] = Form(default=None),
         tagline: Optional[str] = Form(default=None),
@@ -410,6 +414,8 @@ class SchoolCreatePayload(BaseModel):
         service_status: Optional[Any] = Form(default=None),
         grades: Optional[Any] = Form(default=None),
         id_card_fields: Optional[Any] = Form(default=None),
+        sales_representative:Optional[str]=Form(default=None)
+        
     ) -> "SchoolCreatePayload":
         if _is_json_content_type(request):
             return cls(**(await _json_payload(request)))
@@ -433,6 +439,7 @@ class SchoolCreatePayload(BaseModel):
             service_status=service_status,
             grades=grades,
             id_card_fields=id_card_fields,
+            sales_representative=sales_representative
         )
 
 
@@ -448,17 +455,38 @@ class BranchCreatePayload(BaseModel):
     state: Optional[str] = None
     pin: Optional[str] = None
 
+class BranchUpdatePayload(BaseModel):
+    parent_school_id: str = Field(..., min_length=1)
+    branch_name: str = Field(..., min_length=2)
+    coordinator_name: str = Field(..., min_length=2)
+    coordinator_email: EmailStr
+    coordinator_phone: str = Field(..., min_length=5)
 
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pin: Optional[str] = None
+
+    
+    
 def build_branch_summary_entry(branch_payload: Dict[str, Any]) -> Dict[str, Any]:
+    school_id = branch_payload.get("school_id") or branch_payload.get("id")
+    school_name = branch_payload.get("school_name") or branch_payload.get("branch_name")
+    principal_name = branch_payload.get("principal_name") or branch_payload.get("coordinator_name")
+    principal_email = branch_payload.get("principal_email") or branch_payload.get("coordinator_email")
+    principal_phone = branch_payload.get("principal_phone") or branch_payload.get("coordinator_phone")
     return {
-        "id": branch_payload.get("school_id"),
-        "branch_name": branch_payload.get("school_name"),
-        "coordinator_name": branch_payload.get("principal_name"),
-        "coordinator_email": branch_payload.get("principal_email"),
-        "coordinator_phone": branch_payload.get("principal_phone"),
-        "principal_name": branch_payload.get("principal_name"),
-        "principal_email": branch_payload.get("principal_email"),
-        "principal_phone": branch_payload.get("principal_phone"),
+        "id": school_id,
+        "school_id": school_id,
+        "school_name": school_name,
+        # Backwards-compatible alias for older branch records.
+        "branch_name": school_name,
+        "coordinator_name": principal_name,
+        "coordinator_email": principal_email,
+        "coordinator_phone": principal_phone,
+        "principal_name": principal_name,
+        "principal_email": principal_email,
+        "principal_phone": principal_phone,
         "address": branch_payload.get("address"),
         "city": branch_payload.get("city"),
         "state": branch_payload.get("state"),
@@ -472,7 +500,7 @@ class SchoolUpdatePayload(BaseModel):
     school_name: Optional[str] = Field(default=None, min_length=2)
     email: Optional[EmailStr] = None
     phone: Optional[str] = Field(default=None, min_length=5)
-
+    sales_representative:Optional[str]=None
     tagline: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
@@ -491,8 +519,9 @@ class SchoolUpdatePayload(BaseModel):
     grade_unique_values: Optional[Dict[str, str]] = None
     id_card_fields: Optional[List[str]] = None
     zoho_customer_id: Optional[str] = None
+    
 
-    @field_validator("school_name", "tagline", "address", "city", "state", "pin", "website", "facebook_link", "instagram_link", mode="before")
+    @field_validator("school_name", "tagline", "address", "city", "state", "pin", "website", "facebook_link", "instagram_link","sales_representative" ,mode="before")
     @classmethod
     def _normalize_optional_str_fields(cls, value: Any, info: FieldValidationInfo) -> Optional[str]:
         return _coerce_optional_string(value, (info.field_name, "value"))
@@ -665,6 +694,7 @@ class SchoolUpdatePayload(BaseModel):
         service_status: Optional[Any] = Form(default=FORM_UNSET),
         grades: Optional[Any] = Form(default=FORM_UNSET),
         id_card_fields: Optional[Any] = Form(default=FORM_UNSET),
+        sales_representative:Optional[str]=Form(default=FORM_UNSET),
         grade_default_labels: Optional[Any] = Form(default=FORM_UNSET),
         grade_unique_values: Optional[Any] = Form(default=FORM_UNSET),
     ) -> "SchoolUpdatePayload":
@@ -690,6 +720,7 @@ class SchoolUpdatePayload(BaseModel):
             "service_status": service_status,
             "grades": grades,
             "id_card_fields": id_card_fields,
+            "sales_representative":sales_representative,
             "grade_default_labels": grade_default_labels,
             "grade_unique_values": grade_unique_values,
         }
@@ -837,13 +868,14 @@ def grant_school_access_to_user_by_email(
 
     return user_id
 
-
+    
 def build_school_from_record(record: Dict[str, Any]) -> School:
     now = datetime.utcnow()
     school_id = record.get("school_id") or record.get("id")
     if not school_id:
         raise HTTPException(status_code=500, detail="School record is missing an id")
     logo_url: Optional[str] = None
+ 
     if record.get("logo_blob"):
         logo_url = f"/api/schools/{school_id}/logo"
 
@@ -861,6 +893,7 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         instagram_image_url = f"/api/schools/{school_id}/social/instagram"
 
     grades_from_record = record.get("grades")
+   
     logging.debug(f"build_school_from_record: grades from record type: {type(grades_from_record)}, value: {grades_from_record}")
 
     return School(
@@ -897,6 +930,7 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         selection_locked_by=record.get("selection_locked_by"),
         id_card_fields=record.get("id_card_fields"),
         zoho_customer_id=record.get("zoho_customer_id"),
+        sales_representative=record.get("sales_representative"),
         created_at=record.get("created_at") or record.get("timestamp") or now,
         updated_at=record.get("updated_at") or record.get("timestamp") or now,
         timestamp=record.get("timestamp") or record.get("updated_at") or now,
@@ -1006,11 +1040,11 @@ def create_school_profile(
         db.collection("schools").where("phone", "==", payload.phone).limit(1).get()
     )
 
-    if phone_query:
-        raise HTTPException(
-            status_code=409,
-            detail="A school with this phone number already exists. Please use a different phone number.",
-        )
+    # if phone_query:
+    #     raise HTTPException(
+    #         status_code=409,
+    #         detail="A school with this phone number already exists. Please use a different phone number.",
+    #     )
 
     school_id = allocate_school_id(db)
     now = datetime.utcnow()
@@ -1172,6 +1206,7 @@ __all__ = [
     "SERVICE_TYPE_VALUES",
     "SchoolCreatePayload",
     "BranchCreatePayload",
+    "BranchUpdatePayload",
     "SchoolUpdatePayload",
     "build_school_from_record",
     "create_school_profile",

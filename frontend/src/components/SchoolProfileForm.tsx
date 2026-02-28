@@ -19,7 +19,6 @@ import {
   ServiceStatus,
   ServiceStatusMap,
 } from '../types/types';
-import ImageCropperDialog from './ImageCropper';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { ID_CARD_FIELD_OPTIONS, MAX_ID_CARD_FIELDS } from '@/constants/idCardFields';
 import { useAuth } from '../hooks/useAuth';
@@ -125,10 +124,19 @@ const buildGradeMapFromProfile = (profile?: SchoolProfile | null): GradeMap => {
 export const buildSchoolFormValuesFromProfile = (
   profile?: SchoolProfile | null
 ): SchoolFormValues => {
+  let salesRepresentative = profile?.sales_representative ?? '';
+  if (!salesRepresentative && typeof window !== 'undefined') {
+    try {
+      salesRepresentative = window.localStorage.getItem('sales_rep') ?? '';
+    } catch {
+      // ignore storage errors
+    }
+  }
   return {
     school_name: profile?.school_name ?? '',
     logo_url: profile?.logo_url ?? null,
     logo_file: null,
+    sales_representative: salesRepresentative,
     email: profile?.email ?? '',
     phone: profile?.phone ?? '',
     address: profile?.address ?? '',
@@ -147,6 +155,7 @@ export const buildSchoolFormValuesFromProfile = (
     facebook_image_file: null,
     instagram_image_file: null,
     service_status: buildServiceStatusFromProfile(profile),
+    
     grades: buildGradeMapFromProfile(profile),
     id_card_fields: profile?.id_card_fields ?? []
   };
@@ -155,6 +164,7 @@ export const buildSchoolFormValuesFromProfile = (
 export const buildSchoolFormData = (values: SchoolFormValues): FormData => {
   const formData = new FormData();
   formData.append('school_name', values.school_name);
+  formData.append('sales_representative', values.sales_representative ?? '');
   formData.append('email', values.email);
   formData.append('phone', values.phone);
   formData.append('address', values.address);
@@ -172,6 +182,7 @@ export const buildSchoolFormData = (values: SchoolFormValues): FormData => {
     Object.entries(values.service_status).map(([key, value]) => [key, value || 'no'])
   );
   formData.append('service_status', JSON.stringify(normalizedServiceStatus));
+ 
   formData.append('grades', JSON.stringify(values.grades));
   formData.append('id_card_fields', JSON.stringify(values.id_card_fields));
   if (values.logo_file) {
@@ -257,6 +268,24 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
   checkEmailAvailability,
 }) => {
   const [values, setValues] = useState<SchoolFormValues>(initialValues);
+  const [salesRepresentativeLocked, setSalesRepresentativeLocked] = useState(() => {
+    const savedValue = (initialValues.sales_representative || '').trim();
+    if (!savedValue) {
+      return false;
+    }
+    if (mode === 'edit') {
+      return true;
+    }
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    try {
+      const fromQuery = (window.localStorage.getItem('sales_rep') || '').trim();
+      return Boolean(fromQuery) && fromQuery === savedValue;
+    } catch {
+      return false;
+    }
+  });
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string>(getLogoPreview(initialValues));
   const logoPreviewUrlRef = useRef<string | null>(null);
   const [facebookImagePreviewUrl, setFacebookImagePreviewUrl] = useState<string | null>(
@@ -294,7 +323,6 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
     [getIdToken]
   );
   const [isCompressingLogo, setIsCompressingLogo] = useState(false);
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [currentSection, setCurrentSection] = useState(1);
   const totalSections = isSuperAdmin ? 3 : 2;
   const [linkPrincipalEmail, setLinkPrincipalEmail] = useState(
@@ -357,6 +385,9 @@ export const SchoolForm: React.FC<SchoolFormProps> = ({
 
   useEffect(() => {
     if (values.logo_file) {
+      if (isPdfFile(values.logo_file)) {
+        return;
+      }
       const previewUrl = URL.createObjectURL(values.logo_file);
       if (logoPreviewUrlRef.current) {
         URL.revokeObjectURL(logoPreviewUrlRef.current);
@@ -478,39 +509,39 @@ const handleAddressFieldChange =
     });
   };
 
-  const handleCropperClose = useCallback(() => {
-    setImageSrc(null);
-  }, [setImageSrc]);
-
   const handleLogoChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const input = event.target;
       const file = input?.files?.[0] ?? null;
-      
+     
       if (!file) {
-        handleCropperClose();
+        setValues((prev) => ({ ...prev, logo_file: null }));
         return;
       }
 
       const maxSizeInBytes = 20 * 1024 * 1024; // 20MB
       if (file.size > maxSizeInBytes) {
         toast.error('File is too large. Please select an image smaller than 20MB.');
-        handleCropperClose();
         setValues((prev) => ({ ...prev, logo_file: null }));
         input.value = '';
         return;
       }
 
       if (isPdfFile(file)) {
+        console.log("Iam running")
         try {
           const previewSrc = await requestPdfPreview(file);
-          
-          setImageSrc(previewSrc);
+          if (logoPreviewUrlRef.current) {
+            URL.revokeObjectURL(logoPreviewUrlRef.current);
+            logoPreviewUrlRef.current = null;
+          }
+          setValues((prev) => ({ ...prev, logo_file: file, logo_url: null }));
+          setLogoPreviewUrl(previewSrc);
         } catch (error) {
           console.error(error);
           toast.error('Unable to render the PDF. Please try another file.');
-          handleCropperClose();
           setValues((prev) => ({ ...prev, logo_file: null }));
+          setLogoPreviewUrl('');
         } finally {
           input.value = '';
         }
@@ -518,28 +549,17 @@ const handleAddressFieldChange =
       }
 
       if (!isImageFile(file)) {
-        toast.error('Please select an image file.');
-        handleCropperClose();
+        toast.error('Please select an image or PDF file.');
         setValues((prev) => ({ ...prev, logo_file: null }));
+        setLogoPreviewUrl('');
         input.value = '';
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result;
-        if (typeof result === 'string') {
-          setImageSrc(result);
-        }
-      };
-      reader.onerror = () => {
-        toast.error('Unable to preview this image. Please try a different file.');
-        setImageSrc(null);
-      };
-      reader.readAsDataURL(file);
+      setValues((prev) => ({ ...prev, logo_file: file, logo_url: null }));
       input.value = '';
     },
-    [handleCropperClose, requestPdfPreview]
+    [requestPdfPreview]
   );
 
   const handleFacebookImageChange = useCallback(
@@ -599,14 +619,6 @@ const handleAddressFieldChange =
   const clearInstagramImageSelection = useCallback(() => {
     setValues((prev) => ({ ...prev, instagram_image_file: null }));
   }, []);
-
-  const onCropComplete = useCallback(
-    async (croppedImage: Blob) => {
-      const file = new File([croppedImage], 'logo.png', { type: 'image/png' });
-      setValues((prev) => ({ ...prev, logo_file: file, logo_url: null }));
-    },
-    []
-  );
 
   const handleDialogDone = useCallback(() => {
     setIdFieldDialogOpen(false);
@@ -849,11 +861,6 @@ const handleAddressFieldChange =
 
   return (
     <Card className="w-full max-w-3xl border-0 bg-white/80 backdrop-blur">
-      <ImageCropperDialog
-        imageSrc={imageSrc}
-        onCropComplete={onCropComplete}
-        onClose={handleCropperClose}
-      />
       <CardHeader className="space-y-6">
         <div className="flex justify-between items-center">
           {onBackToHome && !isSuperAdmin && (
@@ -941,6 +948,9 @@ const handleAddressFieldChange =
                     </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
+                   
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="logo">School logo</Label>
                       <Input
@@ -1004,13 +1014,19 @@ const handleAddressFieldChange =
                     </div>
                   </div>
                   <div className="space-y-4">
+                    <p className='text-sm font-semibold'>If you want to display facebook details and instagram details on your books cover page please provide the correct facebook and instagram links,each link will be displayed as QR code on your cover pages.</p>
                     <div className="grid gap-4 md:grid-cols-2">
+                      
                       <div className="space-y-3">
+                        
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-semibold text-slate-700">Facebook</span>
+                          
+                          <span className="block text-sm font-semibold text-slate-700">Facebook</span>
+                          
+
                           <div className="flex items-center gap-2 text-sm text-slate-600">
                             <label className="flex items-center gap-1">
-                              <input
+                              {/* <input
                                 type="radio"
                                 name="facebook-mode"
                                 value="link"
@@ -1018,9 +1034,9 @@ const handleAddressFieldChange =
                                 onChange={handleFacebookModeChange}
                                 className="scale-110"
                               />
-                              Link
+                              Link */}
                             </label>
-                            <label className="flex items-center gap-1">
+                            {/* <label className="flex items-center gap-1">
                               <input
                                 type="radio"
                                 name="facebook-mode"
@@ -1030,10 +1046,22 @@ const handleAddressFieldChange =
                                 className="scale-110"
                               />
                               Image
-                            </label>
+                            </label> */}
                           </div>
                         </div>
-                        {facebookInputMode === 'link' ? (
+                         <div className="space-y-2">
+                            <Label htmlFor="facebook-link">Facebook link</Label>
+                            
+                           
+                            <Input
+                              id="facebook-link"
+                              value={values.facebook_link}
+                              onChange={handleInputChange('facebook_link')}
+                              placeholder="https://www.facebook.com/your-school"
+                            />
+                          </div>
+
+                        {/* {facebookInputMode === 'link' ? (
                           <div className="space-y-2">
                             <Label htmlFor="facebook-link">Facebook link</Label>
                             <Input
@@ -1073,12 +1101,14 @@ const handleAddressFieldChange =
                               </div>
                             )}
                           </div>
-                        )}
+                        )} */}
                       </div>
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-semibold text-slate-700">Instagram</span>
-                          <div className="flex items-center gap-2 text-sm text-slate-600">
+                         <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-slate-700">Instagram</span><br />
+                          
+                           
+                          {/* <div className="flex items-center gap-2 text-sm text-slate-600">
                             <label className="flex items-center gap-1">
                               <input
                                 type="radio"
@@ -1101,9 +1131,21 @@ const handleAddressFieldChange =
                               />
                               Image
                             </label>
-                          </div>
+                          </div> */}
+                        </div> 
+                        <div className="space-y-2">
+                            <Label htmlFor="instagram-link">Instagram link</Label>
+                            <p className="text-sm font-semibold text-slate-700">
+                            
+                            </p>
+                            <Input
+                              id="instagram-link"
+                              value={values.instagram_link}
+                              onChange={handleInputChange('instagram_link')}
+                              placeholder="https://www.instagram.com/your-school"
+                            />
                         </div>
-                        {instagramInputMode === 'link' ? (
+                        {/* {instagramInputMode === 'link' ? (
                           <div className="space-y-2">
                             <Label htmlFor="instagram-link">Instagram link</Label>
                             <Input
@@ -1143,7 +1185,7 @@ const handleAddressFieldChange =
                               </div>
                             )}
                           </div>
-                        )}
+                        )} */}
                       </div>
                     </div>
                   </div>
@@ -1265,6 +1307,18 @@ const handleAddressFieldChange =
                       </label>
                     </div>
                   </div>
+                   <div className="space-y-2">
+                      <Label htmlFor="sales_representative">Sales representative</Label>
+                      <Input
+                        id="sales_representative"
+                        value={values.sales_representative || ''}
+                        onChange={handleInputChange('sales_representative')}
+                        placeholder="Eg: John Doe"
+                        disabled={salesRepresentativeLocked}
+                        className={cn(invalidFields.has('sales_representative') && 'border-red-500')}
+                      />
+                      
+                    </div>
                 </section>
               </div>
             )}

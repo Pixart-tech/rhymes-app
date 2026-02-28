@@ -52,7 +52,8 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
     user_email = user_record.get("email")
-    if user_email:
+    
+    if user_email :
         school_ids_for_email = school_profiles.find_school_ids_by_email(db, user_email)
         if school_ids_for_email:
             existing_ids_list = list(user_record.get("school_ids", []))
@@ -70,14 +71,17 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
                 )
                 user_record["school_ids"] = updated_ids
     workspace_user = _build_workspace_user(user_record)
+    if workspace_user.role == "super-admin":
+        return UserSessionResponse(user=workspace_user, schools=[])
     zoho_cache: Dict[str, Optional[str]] = {}
     schools: List[School] = []
     seen_branch_ids = set()
     branch_parent_ids: List[str] = []
-
+    
     for school_id in workspace_user.school_ids:
         if not school_id:
             continue
+        
         doc_ref = db.collection("schools").document(school_id)
         snapshot = doc_ref.get()
         if not snapshot.exists:
@@ -91,6 +95,7 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
             record["zoho_customer_id"] = _lookup_zoho_customer_id(zoho_school_id, zoho_cache)
 
         schools.append(school_profiles.build_school_from_record(record))
+       
         branch_parent_id = record.get("school_id") or record.get("id")
         branch_parent_ids.append(branch_parent_id)
         seen_branch_ids.add(branch_parent_id)
@@ -123,6 +128,7 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
             branch = school_profiles.build_school_from_record(branch_data)
             schools.append(branch)
             seen_branch_ids.add(branch_id)
+             
 
     return UserSessionResponse(user=workspace_user, schools=schools)
 
