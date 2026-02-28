@@ -876,9 +876,9 @@ def build_school_from_record(record: Dict[str, Any]) -> School:
         raise HTTPException(status_code=500, detail="School record is missing an id")
     logo_url: Optional[str] = None
  
-    if record.get("logo_blob"):
-        logo_url = f"/api/schools/{school_id}/logo"
-
+    # if record.get("logo_blob"):
+    #     logo_url = f"/api/schools/{school_id}/logo"
+    logo_url = f"/api/schools/{school_id}/logo"
     school_image_urls: List[str] = []
     for idx in range(1, 5):
         key = f"school_image_{idx}"

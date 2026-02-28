@@ -1868,7 +1868,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
                             key={option.typeId} 
                             className={`relative rounded-lg border ${isSelected ? theme.selectedBorder + " " + theme.selectedBg : "border-slate-200"}`}
                         >
-                            {isPopularVariant && (
+                            {isPopularVariant &&!currentSubject.isMultiSelect&& (
                                 <div className="absolute -top-2 left-3 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 shadow-sm">
                                     <Star size={12} className="text-blue-600 fill-blue-500" />
                                     Popular selection

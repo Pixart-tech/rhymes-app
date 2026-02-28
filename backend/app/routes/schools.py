@@ -1036,8 +1036,7 @@ def update_branch_profile(
         raise HTTPException(status_code=400, detail="Only branch profiles can be updated")
 
     role = user_record.get("role", DEFAULT_USER_ROLE)
-    if role != "super-admin":
-        raise HTTPException(status_code=403, detail="You do not have permission to update this branch")
+    
     
     requested_parent_id = (payload.parent_school_id or "").strip()
     if requested_parent_id != parent_id:
@@ -1103,8 +1102,7 @@ def update_branch_status(
         raise HTTPException(status_code=400, detail="Only branch profiles can have their status updated")
 
     role = user_record.get("role", DEFAULT_USER_ROLE)
-    if role != "super-admin":
-        raise HTTPException(status_code=403, detail="You do not have permission to update this branch")
+ 
 
     branch_status: school_profiles.BranchStatus = payload.status
     if branch_status not in (school_profiles.BRANCH_STATUS_ACTIVE, school_profiles.BRANCH_STATUS_INACTIVE):
@@ -1457,37 +1455,51 @@ def get_all_schools_with_selections(
         count_value = int(count_snapshot[0][0].value)
     offset = max((page - 1) * limit, 0)
 
+    # school_docs_query = (
+    #     db.collection("schools")
+    #     .order_by("timestamp", direction=firestore.Query.DESCENDING)
+    #     .offset(offset)
+    #     .limit(limit)
+    # )
+    
     school_docs_query = (
-        db.collection("schools")
-        .order_by("timestamp", direction=firestore.Query.DESCENDING)
-        .offset(offset)
-        .limit(limit)
-    )
-#     school_docs_query = (
-#     db.collection("schools")
-#     .order_by("timestamp", direction=firestore.Query.DESCENDING)
-#     .select([
-#         "school_id",
-#         "school_name",
-#         "sales_representative",
-#         "branches"
-#         "branch_ids",  
-#         "service_status",
-#         "service_type",
-#         "website",
-#         "tagline",
-#         "grades",
-#         "grade_selections"
-#         "selection_status",
-#         "selections_approved",
-#         "selection_locked_at",
-#         "timestamp",
-#         "updated_at",
-#         "status",
-#     ])
-#     .offset(offset)
-#     .limit(limit)
-# )
+    db.collection("schools")
+    .order_by("timestamp", direction=firestore.Query.DESCENDING)
+    .select([
+        "school_id",
+        "school_name",
+        "email",
+        "phone",
+        "website",
+        "address",
+        "facebook_link",
+        "instagram_link",
+        "city",
+        "state",
+        "pin",
+        "principal_name",
+        "principal_email",
+        "principal_phone",
+        "sales_representative",
+        "branches",
+        "branch_ids",  
+        "service_status",
+        "service_type",
+        "website",
+        "tagline",
+        "grades",
+        "zoho_customer_id",
+        "grade_selections",     
+        "selection_status",
+        "selections_approved",
+        "selection_locked_at",
+        "timestamp",
+        "updated_at",
+        "status",
+    ])
+    .offset(offset)
+    .limit(limit)
+)
 
     
     
