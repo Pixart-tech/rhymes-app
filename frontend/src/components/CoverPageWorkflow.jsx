@@ -2016,7 +2016,7 @@ const CoverPageWorkflow = ({
             </div>
            
           </div>
-
+          {isAdmin &&
           <Card className="border-none bg-white/80 shadow-md shadow-orange-100/50">
             <CardHeader className="pb-4">
               <CardTitle className="text-xl font-semibold text-slate-900">
@@ -2031,7 +2031,8 @@ const CoverPageWorkflow = ({
               </p>
             </CardHeader>
             <CardContent>{renderApprovalGallery(true)}</CardContent>
-          </Card>
+          </Card>}
+          
 
           {workflowStatus === "3" && (
             <div className="flex justify-end">
@@ -2045,7 +2046,7 @@ const CoverPageWorkflow = ({
               </Button>
             </div>
           )}
-
+          {isAdmin&&
           <Card className="border-none bg-white/80 shadow-lg">
             <CardContent className="px-4 py-3 space-y-3">
               <p className="text-lg font-semibold text-slate-900">
@@ -2059,7 +2060,8 @@ const CoverPageWorkflow = ({
                     : "Selections are frozen. Contact admin for changes."}
               </p>
             </CardContent>
-          </Card>
+          </Card>}
+          
           {showBookSelectionCta && (
             <div className="flex justify-end">
               <Button

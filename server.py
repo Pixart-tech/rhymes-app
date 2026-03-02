@@ -1918,21 +1918,19 @@ def get_selected_rhymes(school_id: str):
         if grade not in result:
             result[grade] = []
 
-        result[grade].append(
-            {
-                "page_index": selection["page_index"],
-                "code": selection["rhyme_code"],
-                "name": selection["rhyme_name"],
-                "pages": selection["pages"],
-                "position": selection.get("position"),
-            }
+        result[grade].extend(
+            [
+                
+            selection["rhyme_code"]
+               
+               
+            ]
         )
 
     # Sort by page_index
-    for grade in result:
-        result[grade].sort(key=lambda x: x["page_index"])
+    print(result)
 
-    return result
+    # return result
 
 
 @api_router.get("/admin/binder-json/{school_id}")
@@ -3373,151 +3371,151 @@ async def delete_cover_theme_colour(theme_id: str, colour_id: str, request: Requ
     return {"status": "ok", "theme": _build_theme_payload_from_disk(theme_id, request)}
 
 
-@api_router.get("/cover-assets/network/{selection_key}")
-async def get_cover_assets_network_paths(selection_key: str):
-    """Return raw SVG markup for every file within the requested theme/colour folder."""
+# @api_router.get("/cover-assets/network/{selection_key}")
+# async def get_cover_assets_network_paths(selection_key: str):
+#     """Return raw SVG markup for every file within the requested theme/colour folder."""
 
-    base_path = _ensure_cover_assets_base_path()
-    unc_base_path = _get_cover_assets_unc_base_path()
+#     base_path = _ensure_cover_assets_base_path()
+#     unc_base_path = _get_cover_assets_unc_base_path()
    
 
-    try:
-        theme_number, colour_number = config.parse_cover_selection_key(selection_key)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+#     try:
+#         theme_number, colour_number = config.parse_cover_selection_key(selection_key)
+#     except ValueError as exc:
+#         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    selection_unc_path, selection_fs_path = unc_path_utils.build_cover_selection_paths(
-        unc_base_path, base_path, theme_number, colour_number
-    )
+#     selection_unc_path, selection_fs_path = unc_path_utils.build_cover_selection_paths(
+#         unc_base_path, base_path, theme_number, colour_number
+#     )
     
 
-    try:
+#     try:
         
-        exists = Path(selection_fs_path).exists()
+#         exists = Path(selection_fs_path).exists()
        
-        is_directory = selection_fs_path.is_dir()
+#         is_directory = selection_fs_path.is_dir()
         
-    except OSError as exc:
-        logger.error("Unable to access cover SVG directory %s: %s", selection_fs_path, exc)
-        raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
+#     except OSError as exc:
+#         logger.error("Unable to access cover SVG directory %s: %s", selection_fs_path, exc)
+#         raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
 
-    if not exists or not is_directory:
-        raise HTTPException(status_code=404, detail="Requested cover selection does not exist.")
+#     if not exists or not is_directory:
+#         raise HTTPException(status_code=404, detail="Requested cover selection does not exist.")
 
-    try:
-        svg_files = [
-            candidate
-            for candidate in sorted(selection_fs_path.iterdir())
-            if candidate.is_file() and candidate.suffix.lower() == ".svg"
-        ]
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Requested cover selection does not exist.")
-    except OSError as exc:
-        logger.error("Unable to read cover SVG directory %s: %s", selection_fs_path, exc)
-        raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
+#     try:
+#         svg_files = [
+#             candidate
+#             for candidate in sorted(selection_fs_path.iterdir())
+#             if candidate.is_file() and candidate.suffix.lower() == ".svg"
+#         ]
+#     except FileNotFoundError:
+#         raise HTTPException(status_code=404, detail="Requested cover selection does not exist.")
+#     except OSError as exc:
+#         logger.error("Unable to read cover SVG directory %s: %s", selection_fs_path, exc)
+#         raise HTTPException(status_code=500, detail="Unable to access cover assets.") from exc
 
-    assets = []
+#     assets = []
 
-    for svg_file in svg_files:
-        # Build a raw UNC string (for example r"\\pixartnas\share\folder") so the
-        # network lookup uses the exact Windows path supplied by administrators.
-        network_file = unc_path_utils.format_unc_path(selection_unc_path / svg_file.name)
+#     for svg_file in svg_files:
+#         # Build a raw UNC string (for example r"\\pixartnas\share\folder") so the
+#         # network lookup uses the exact Windows path supplied by administrators.
+#         network_file = unc_path_utils.format_unc_path(selection_unc_path / svg_file.name)
        
-        svg_markup: Optional[str] = None
+#         svg_markup: Optional[str] = None
 
-        svg_source_path: Optional[Path] = None
+#         svg_source_path: Optional[Path] = None
 
-        try:
-            with open(network_file, "r", encoding="utf-8") as handle:
-                svg_markup = handle.read()
-            svg_source_path = Path(network_file)
-        except OSError as exc:
-            logger.warning(
-                "Unable to read cover SVG '%s' via network path %s: %s. Falling back to local mirror.",
-                svg_file.name,
-                network_file,
-                exc,
-            )
+#         try:
+#             with open(network_file, "r", encoding="utf-8") as handle:
+#                 svg_markup = handle.read()
+#             svg_source_path = Path(network_file)
+#         except OSError as exc:
+#             logger.warning(
+#                 "Unable to read cover SVG '%s' via network path %s: %s. Falling back to local mirror.",
+#                 svg_file.name,
+#                 network_file,
+#                 exc,
+#             )
 
-        if svg_markup is None:
-            try:
-                svg_markup = _read_cover_svg_text(svg_file)
-            except OSError as exc:
-                logger.error(
-                    "Unable to read cover SVG '%s' from local path %s: %s",
-                    svg_file.name,
-                    svg_file,
-                    exc,
-                )
-                raise HTTPException(status_code=500, detail="Unable to load cover SVG files.") from exc
-            else:
-                svg_source_path = svg_file
+#         if svg_markup is None:
+#             try:
+#                 svg_markup = _read_cover_svg_text(svg_file)
+#             except OSError as exc:
+#                 logger.error(
+#                     "Unable to read cover SVG '%s' from local path %s: %s",
+#                     svg_file.name,
+#                     svg_file,
+#                     exc,
+#                 )
+#                 raise HTTPException(status_code=500, detail="Unable to load cover SVG files.") from exc
+#             else:
+#                 svg_source_path = svg_file
 
-        if svg_source_path is None:
-            svg_source_path = svg_file
+#         if svg_source_path is None:
+#             svg_source_path = svg_file
 
-        svg_markup = _localize_cover_svg_markup(svg_markup, svg_source_path)
+#         svg_markup = _localize_cover_svg_markup(svg_markup, svg_source_path)
 
-        assets.append(
-            {
-                "fileName": svg_file.name,
-                "relativePath": _as_windows_relative_path(base_path, svg_file),
-                "svgMarkup": svg_markup,
-                "personalisedMarkup": "",
-            }
-        )
+#         assets.append(
+#             {
+#                 "fileName": svg_file.name,
+#                 "relativePath": _as_windows_relative_path(base_path, svg_file),
+#                 "svgMarkup": svg_markup,
+#                 "personalisedMarkup": "",
+#             }
+#         )
 
-    return {"assets": assets}
-
-
-@api_router.get("/cover-assets/images/{file_name}")
-async def get_cover_asset_image(file_name: str):
-    """Serve cached cover asset images as standard files instead of base64 data URIs."""
-
-    cache_dir = _ensure_image_cache_dir()
-    candidate_path = (cache_dir / file_name).resolve()
-
-    try:
-        candidate_path.relative_to(cache_dir)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid image requested.")
-
-    if not candidate_path.exists() or not candidate_path.is_file():
-        raise HTTPException(status_code=404, detail="Cover asset image not found.")
-
-    media_type, _ = mimetypes.guess_type(candidate_path.name)
-    content = candidate_path.read_bytes()
-    return Response(content=content, media_type=media_type or "application/octet-stream")
+#     return {"assets": assets}
 
 
-@api_router.get("/cover-assets/svg/{relative_path:path}")
-async def get_cover_asset(relative_path: str):
-    """Return the raw SVG bytes for the cover asset ``relative_path``."""
+# @api_router.get("/cover-assets/images/{file_name}")
+# async def get_cover_asset_image(file_name: str):
+#     """Serve cached cover asset images as standard files instead of base64 data URIs."""
+
+#     cache_dir = _ensure_image_cache_dir()
+#     candidate_path = (cache_dir / file_name).resolve()
+
+#     try:
+#         candidate_path.relative_to(cache_dir)
+#     except ValueError:
+#         raise HTTPException(status_code=400, detail="Invalid image requested.")
+
+#     if not candidate_path.exists() or not candidate_path.is_file():
+#         raise HTTPException(status_code=404, detail="Cover asset image not found.")
+
+#     media_type, _ = mimetypes.guess_type(candidate_path.name)
+#     content = candidate_path.read_bytes()
+#     return Response(content=content, media_type=media_type or "application/octet-stream")
+
+
+# @api_router.get("/cover-assets/svg/{relative_path:path}")
+# async def get_cover_asset(relative_path: str):
+#     """Return the raw SVG bytes for the cover asset ``relative_path``."""
    
-    base_path = _ensure_cover_assets_base_path()
+#     base_path = _ensure_cover_assets_base_path()
    
 
-    candidate_path = (base_path / Path(relative_path)).resolve()
+#     candidate_path = (base_path / Path(relative_path)).resolve()
     
 
-    try:
-        candidate_path.relative_to(base_path)
+#     try:
+#         candidate_path.relative_to(base_path)
         
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid cover asset path requested.")
+#     except ValueError:
+#         raise HTTPException(status_code=400, detail="Invalid cover asset path requested.")
 
-    if not candidate_path.exists() or not candidate_path.is_file():
-        raise HTTPException(status_code=404, detail="Cover asset not found.")
+#     if not candidate_path.exists() or not candidate_path.is_file():
+#         raise HTTPException(status_code=404, detail="Cover asset not found.")
 
-    try:
-        svg_text = _read_cover_svg_text(candidate_path)
-    except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
-        logger.error("Unable to read cover SVG '%s': %s", candidate_path, exc)
-        raise HTTPException(status_code=500, detail="Unable to read cover asset.") from exc
+#     try:
+#         svg_text = _read_cover_svg_text(candidate_path)
+#     except OSError as exc:  # pragma: no cover - filesystem errors are unexpected
+#         logger.error("Unable to read cover SVG '%s': %s", candidate_path, exc)
+#         raise HTTPException(status_code=500, detail="Unable to read cover asset.") from exc
 
-    localized_svg = _localize_cover_svg_markup(svg_text, candidate_path)
+#     localized_svg = _localize_cover_svg_markup(svg_text, candidate_path)
 
-    return Response(content=localized_svg.encode("utf-8"), media_type="image/svg+xml")
+#     return Response(content=localized_svg.encode("utf-8"), media_type="image/svg+xml")
 
 
 def _draw_text_only_rhyme(

@@ -1995,20 +1995,16 @@ def get_selected_rhymes(school_id: str):
         if grade not in result:
             result[grade] = []
 
-        result[grade].append(
-            {
-                "page_index": selection["page_index"],
-                "code": selection["rhyme_code"],
-                "name": selection["rhyme_name"],
-                "pages": selection["pages"],
-                "position": selection.get("position"),
-            }
+        result[grade].extend(
+            [
+                
+            selection["rhyme_code"]
+               
+               
+            ]
         )
 
     # Sort by page_index
-    for grade in result:
-        result[grade].sort(key=lambda x: x["page_index"])
-
     return result
 
 @api_router.get("/admin/school-logo/{school_id}")
