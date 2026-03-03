@@ -1,0 +1,74 @@
+ree menu flow in your code is:
+
+Data loads first
+On page load, fetchAvailableRhymes(), fetchReusableRhymes(), and fetchSelectedRhymes() run together and fill state (availableRhymes, reusableRhymes, selectedRhymes) in [Rhymepicker.tsx](d:\personalised circulum\rhymes-app\frontend\src\pages\Rhymepicker.tsx:1915).
+
+Menu opens from + button
+Clicking add (handleAddRhyme(position)) sets:
+
+currentPosition = 'top' or 'bottom'
+showTreeMenu = true
+showReusable = false
+in [Rhymepicker.tsx](d:\personalised circulum\rhymes-app\frontend\src\pages\Rhymepicker.tsx:2010).
+TreeMenu receives filtered inputs
+Parent renders <TreeMenu ... /> with:
+
+available/reusable groups
+hideFullPageRhymes={currentPosition === 'bottom'}
+selectedRhymeCodes (already-selected rhyme codes)
+in [Rhymepicker.tsx](d:\personalised circulum\rhymes-app\frontend\src\pages\Rhymepicker.tsx:2777).
+Inside TreeMenu: what is shown
+TreeMenu:
+
+toggles between available/reusable (showReusable)
+removes already-selected rhymes using normalized selectedRhymeCodes
+if hideFullPageRhymes is true, removes 1.0 page rhymes (only half-page choices shown)
+groups UI by page count with expandable Collapsible sections
+in [Rhymepicker.tsx](d:\personalised circulum\rhymes-app\frontend\src\pages\Rhymepicker.tsx:1324).
+Selecting a rhyme
+Clicking + in tree calls onRhymeSelect -> handleRhymeSelect(rhyme):
+
+checks read-only
+resolves slot (top/bottom)
+computes replacements on current page
+posts selection to backend (/rhymes/select)
+updates selectedRhymes
+refreshes available/reusable lists
+closes tree menu
+in [Rhymepicker.tsx](d:\personalised circulum\rhymes-app\frontend\src\pages\Rhymepicker.tsx:2050).
+Reusable toggle
+Tree header button calls handleToggleReusable, which just flips showReusable in [Rhymepicker.tsx](d:\personalised circulum\rhymes-app\frontend\src\pages\Rhymepicker.tsx:2312).
+
+
+codex  
+imlemntation flow 
+
+Load current grade context in Rhymepicker.tsx as today (school_id, grade) and keep add/select menu flow unchanged.
+
+Fetch rhymes (available/reusable) and build tree menu as:
+
+Page -> Subject (English/Hindi/Tamil/Kannada) -> Rhymes
+no personalization bucket in UI.
+Fetch personalization metadata from book selections for the same school + grade:
+
+grade-level status (personalized or non-personalized)
+personalized rhyme-code set for that grade (subject-wise if needed).
+When a rhyme is selected and SVG is loaded (fetchSvgForRhyme pipeline), apply decision logic:
+
+if grade status = non-personalized AND rhyme code is in personalized set for that grade -> manipulate head to cartoon.
+otherwise -> keep SVG unchanged.
+Save and render selected rhyme normally after SVG decision; keep all existing constraints untouched:
+
+top/bottom slot behavior
+full/half-page restrictions
+max pages logic
+selected-code filtering
+reusable toggle.
+Keep rhyme SVG source/network location exactly as-is (no base URL/source changes).
+
+Validate with matrix testing:
+
+same rhyme code across different grades/statuses gives correct head behavior
+non-personalized category rhymes remain unchanged
+tree grouping works page+subject for all grades.
+

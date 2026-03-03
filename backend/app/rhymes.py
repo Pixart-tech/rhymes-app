@@ -5,14 +5,17 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from .config import ROOT_DIR
 
 logger = logging.getLogger(__name__)
 
 
-def _load_rhymes(path: Path) -> Dict[str, List[str | float]]:
+RhymeField = Union[str, float, int]
+
+
+def _load_rhymes(path: Path) -> Dict[str, List[RhymeField]]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:  # pragma: no cover - configuration error
@@ -20,12 +23,12 @@ def _load_rhymes(path: Path) -> Dict[str, List[str | float]]:
         raise
 
 
-RHYMES_DATA: Dict[str, List[str | float]] = _load_rhymes(ROOT_DIR / "rhymes.json")
+RHYMES_DATA: Dict[str, List[RhymeField]] = _load_rhymes(ROOT_DIR / "rhymes.json")
 
 
 def generate_rhyme_svg(
     rhyme_code: str,
-    rhymes_data: Optional[Dict[str, List[str | float]]] = None,
+    rhymes_data: Optional[Dict[str, List[RhymeField]]] = None,
 ) -> str:
     """Create SVG markup for a rhyme card."""
 
@@ -34,7 +37,9 @@ def generate_rhyme_svg(
     if rhyme_code not in catalogue:
         raise KeyError("Rhyme not found")
 
-    rhyme_name, pages,p = catalogue[rhyme_code]
+    record = catalogue[rhyme_code]
+    rhyme_name = record[0] if len(record) > 0 else rhyme_code
+    pages = record[1] if len(record) > 1 else 1
 
     return f"""
     <svg width="400" height="300" xmlns="http://www.w3.org/2000/svg">
@@ -59,4 +64,3 @@ def generate_rhyme_svg(
 
 
 __all__ = ["RHYMES_DATA", "generate_rhyme_svg"]
-

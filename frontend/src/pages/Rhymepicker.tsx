@@ -1304,7 +1304,9 @@ type TreeMenuRhyme = {
   code: string;
   name: string;
   pages: number;
+  subject?: string;
   personalized?: string | boolean;
+  requires_cartoon_head?: boolean;
   used_in_grades?: string[];
 };
 
@@ -1331,12 +1333,44 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
     selectedRhymeCodes
   }) => {
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+    const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
+    const [expandedBuckets, setExpandedBuckets] = useState<Record<string, boolean>>({});
+    const subjectOrder = ['english', 'hindi', 'tamil', 'kannada', 'other'];
+    const subjectLabels: Record<string, string> = {
+      english: 'English',
+      hindi: 'Hindi',
+      tamil: 'Tamil',
+      kannada: 'Kannada',
+      other: 'Other'
+    };
   
     const toggleGroup = (pageKey: string) => {
       setExpandedGroups((prev) => ({
         ...prev,
         [pageKey]: !prev[pageKey]
       }));
+    };
+    const toggleSubject = (pageKey: string, subjectKey: string) => {
+      const key = `${pageKey}::${subjectKey}`;
+      setExpandedSubjects((prev) => ({
+        ...prev,
+        [key]: !prev[key]
+      }));
+    };
+    const toggleBucket = (pageKey: string, subjectKey: string, bucketKey: 'personalized' | 'nonPersonalized') => {
+      const key = `${pageKey}::${subjectKey}::${bucketKey}`;
+      setExpandedBuckets((prev) => ({
+        ...prev,
+        [key]: !prev[key]
+      }));
+    };
+    const normalizeSubject = (value: unknown) => {
+      const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+      if (raw === 'eng' || raw === 'english') return 'english';
+      if (raw === 'hin' || raw === 'hindi') return 'hindi';
+      if (raw === 'tam' || raw === 'tamil') return 'tamil';
+      if (raw === 'kan' || raw === 'kannada') return 'kannada';
+      return 'other';
     };
 
     const normalizedSelectedCodes = useMemo(() => {
@@ -1411,7 +1445,8 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
   }
 
   const entries = Object.entries(filteredRhymes) as [string, TreeMenuRhyme[]][];
-
+  const sortedEntries = [...entries].sort((first, second) => Number(first[0]) - Number(second[0]));
+  console.log(sortedEntries)
   return (
     <div className="flex h-full max-h-[calc(100vh-220px)] flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm">
       <div className="border-b bg-white/80 p-4">
@@ -1428,8 +1463,17 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
-        {entries.map(([pageKey, rhymes]) => {
+        {sortedEntries.map(([pageKey, rhymes]) => {
           if (!rhymes || rhymes.length === 0) return null;
+          const groupedBySubject = rhymes.reduce((acc, rhyme) => {
+            const subjectKey = normalizeSubject(rhyme?.subject);
+            if (!acc[subjectKey]) {
+              acc[subjectKey] = [];
+            }
+            acc[subjectKey].push(rhyme);
+            return acc;
+          }, {} as Record<string, TreeMenuRhyme[]>);
+          const orderedSubjects = subjectOrder.filter((subjectKey) => (groupedBySubject[subjectKey] || []).length > 0);
 
           return (
             <Collapsible key={pageKey} open={Boolean(expandedGroups[pageKey])} onOpenChange={() => toggleGroup(pageKey)}>
@@ -1445,35 +1489,108 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
                 ) : (
                   <ChevronRight className="h-4 w-4 text-gray-500" />
                 )}
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pl-4">
-                <div className="mt-2 space-y-1">
-                  {rhymes.map((rhyme) => (
-                    <div
-                      key={rhyme.code}
-                      className="group flex items-center justify-between gap-3 rounded-lg border border-transparent bg-white/50 p-3 transition-all duration-200 hover:border-orange-200 hover:bg-white/80"
-                    >
-                      <div className="flex-1">
-                        <p className="font-medium text-gray-800 transition-colors duration-200 group-hover:text-orange-600">{rhyme.name}</p>
-                        <p className="mt-1 text-xs text-gray-500">
-                          Code: {rhyme.code} • {rhyme.personalized === 'Yes' || rhyme.personalized === true ? 'Personalized' : 'Standard'}
-                          {rhyme.used_in_grades && rhyme.used_in_grades.length > 0 && (
-                            <span className="ml-2 text-blue-600">(Used in: {rhyme.used_in_grades.join(', ')})</span>
-                          )}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="outline"
-                        onClick={() => onRhymeSelect(rhyme)}
-                        className="shrink-0 rounded-full border-orange-200 text-orange-500 transition-colors duration-200 hover:border-orange-300 hover:text-orange-600"
-                        aria-label={`Add ${rhyme.name}`}
+              </CollapsibleTrigger>              <CollapsibleContent className="pl-4">
+                <div className="mt-2 space-y-2">
+                  {orderedSubjects.map((subjectKey) => {
+                    const subjectRhymes = groupedBySubject[subjectKey] || [];
+                    const subjectStateKey = `${pageKey}::${subjectKey}`;
+                    const personalizedRhymes = subjectRhymes.filter((rhyme) => {
+                      return (
+                        rhyme?.requires_cartoon_head === true ||
+                        rhyme?.personalized === true ||
+                        rhyme?.personalized === 'Yes'
+                      );
+                    });
+                    const nonPersonalizedRhymes = subjectRhymes.filter(
+                      (rhyme) => !personalizedRhymes.includes(rhyme)
+                    );
+                    const renderRhymeRow = (rhyme: TreeMenuRhyme) => (
+                      <div
+                        key={rhyme.code}
+                        className="group flex items-center justify-between gap-3 rounded-lg border border-transparent bg-white/50 p-3 transition-all duration-200 hover:border-orange-200 hover:bg-white/80"
                       >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
+                        <div className="flex-1">
+                          <p className="font-medium text-gray-800 transition-colors duration-200 group-hover:text-orange-600">{rhyme.name}</p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            Code: {rhyme.code}
+                            {rhyme.used_in_grades && rhyme.used_in_grades.length > 0 && (
+                              <span className="ml-2 text-blue-600">(Used in: {rhyme.used_in_grades.join(', ')})</span>
+                            )}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="outline"
+                          onClick={() => onRhymeSelect(rhyme)}
+                          className="shrink-0 rounded-full border-orange-200 text-orange-500 transition-colors duration-200 hover:border-orange-300 hover:text-orange-600"
+                          aria-label={`Add ${rhyme.name}`}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    );
+                    return (
+                      <Collapsible
+                        key={subjectStateKey}
+                        open={expandedSubjects[subjectStateKey] !== false}
+                        onOpenChange={() => toggleSubject(pageKey, subjectKey)}
+                      >
+                        <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-left transition-colors duration-200 hover:bg-slate-100">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-slate-700">
+                            {subjectLabels[subjectKey] || 'Other'} ({subjectRhymes.length})
+                          </span>
+                          {expandedSubjects[subjectStateKey] !== false ? (
+                            <ChevronDown className="h-4 w-4 text-gray-500" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 text-gray-500" />
+                          )}
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-1 space-y-2">
+                          {personalizedRhymes.length > 0 && (
+                            <Collapsible
+                              open={expandedBuckets[`${pageKey}::${subjectKey}::personalized`] !== false}
+                              onOpenChange={() => toggleBucket(pageKey, subjectKey, 'personalized')}
+                            >
+                              <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md bg-emerald-50 px-2 py-1.5 text-left transition-colors duration-200 hover:bg-emerald-100">
+                                <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                                  Personalized ({personalizedRhymes.length})
+                                </span>
+                                {expandedBuckets[`${pageKey}::${subjectKey}::personalized`] !== false ? (
+                                  <ChevronDown className="h-3.5 w-3.5 text-emerald-700" />
+                                ) : (
+                                  <ChevronRight className="h-3.5 w-3.5 text-emerald-700" />
+                                )}
+                              </CollapsibleTrigger>
+                              <CollapsibleContent className="mt-1 space-y-1">
+                                {personalizedRhymes.map((rhyme) => renderRhymeRow(rhyme))}
+                              </CollapsibleContent>
+                            </Collapsible>
+                          )}
+                          {nonPersonalizedRhymes.length > 0 && (
+                            <Collapsible
+                              open={expandedBuckets[`${pageKey}::${subjectKey}::nonPersonalized`] !== false}
+                              onOpenChange={() => toggleBucket(pageKey, subjectKey, 'nonPersonalized')}
+                            >
+                              <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md bg-slate-100 px-2 py-1.5 text-left transition-colors duration-200 hover:bg-slate-200">
+                                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                                  Non-Personalized ({nonPersonalizedRhymes.length})
+                                </span>
+                                {expandedBuckets[`${pageKey}::${subjectKey}::nonPersonalized`] !== false ? (
+                                  <ChevronDown className="h-3.5 w-3.5 text-slate-600" />
+                                ) : (
+                                  <ChevronRight className="h-3.5 w-3.5 text-slate-600" />
+                                )}
+                              </CollapsibleTrigger>
+                              <CollapsibleContent className="mt-1 space-y-1">
+                                {nonPersonalizedRhymes.map((rhyme) => renderRhymeRow(rhyme))}
+                              </CollapsibleContent>
+                            </Collapsible>
+                          )}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    );
+                  })}
                 </div>
               </CollapsibleContent>
             </Collapsible>
@@ -1508,6 +1625,50 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
   }, [selectedRhymes]);
 
+  const cartoonHeadCodeSet = useMemo(() => {
+    const codes = new Set<string>();
+    const appendFromGroups = (groups) => {
+      if (!groups || typeof groups !== 'object') {
+        return;
+      }
+      Object.values(groups).forEach((group: any) => {
+        if (!Array.isArray(group)) {
+          return;
+        }
+        group.forEach((item: any) => {
+          if (!item?.requires_cartoon_head) {
+            return;
+          }
+          const normalized = typeof item.code === 'string' ? item.code.trim().toLowerCase() : '';
+          if (normalized) {
+            codes.add(normalized);
+          }
+        });
+      });
+    };
+
+    appendFromGroups(availableRhymes);
+    appendFromGroups(reusableRhymes);
+
+    if (Array.isArray(selectedRhymes)) {
+      selectedRhymes.forEach((item: any) => {
+        if (!item?.requires_cartoon_head) {
+          return;
+        }
+        const normalized = typeof item.code === 'string' ? item.code.trim().toLowerCase() : '';
+        if (normalized) {
+          codes.add(normalized);
+        }
+      });
+    }
+
+    return codes;
+  }, [availableRhymes, reusableRhymes, selectedRhymes]);
+
+  useEffect(() => {
+    svgCacheRef.current.clear();
+  }, [cartoonHeadCodeSet]);
+
   const ensureEditable = useCallback(() => {
     if (isReadOnly) {
       toast.info(isFrozen ? 'Selections are frozen. Viewing only.' : 'Viewing only.');
@@ -1526,6 +1687,97 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     }
 
     return [];
+  }, []);
+
+  const shouldUseCartoonHead = useCallback(
+    (rhymeCode, explicitFlag?: boolean) => {
+      if (explicitFlag === true) {
+        return true;
+      }
+      const normalized = typeof rhymeCode === 'string' ? rhymeCode.trim().toLowerCase() : '';
+      if (!normalized) {
+        return false;
+      }
+      return cartoonHeadCodeSet.has(normalized);
+    },
+    [cartoonHeadCodeSet]
+  );
+
+  const applyCartoonHeadToSvg = useCallback((svgMarkup) => {
+    if (typeof svgMarkup !== 'string' || svgMarkup.trim().length === 0) {
+      return svgMarkup;
+    }
+
+    if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
+      return svgMarkup;
+    }
+
+    try {
+      const parser = new window.DOMParser();
+      const documentNode = parser.parseFromString(svgMarkup, 'image/svg+xml');
+      const svgElement = documentNode.documentElement;
+      if (!svgElement) {
+        return svgMarkup;
+      }
+
+      const cartoonDataUri =
+        'data:image/svg+xml;utf8,' +
+        encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">' +
+          '<circle cx="40" cy="40" r="34" fill="#FFD166" stroke="#EF476F" stroke-width="4"/>' +
+          '<circle cx="28" cy="33" r="4" fill="#073B4C"/>' +
+          '<circle cx="52" cy="33" r="4" fill="#073B4C"/>' +
+          '<path d="M24 50 Q40 64 56 50" stroke="#073B4C" stroke-width="5" fill="none" stroke-linecap="round"/>' +
+          '</svg>'
+        );
+
+      let replaced = false;
+      const selectors = [
+        'image[id*="head" i]',
+        'image[class*="head" i]',
+        'image[id*="face" i]',
+        'image[class*="face" i]',
+        'image[href*="head" i]',
+        'image[href*="face" i]',
+        'image[xlink\\:href*="head" i]',
+        'image[xlink\\:href*="face" i]'
+      ];
+      const imageNodes = documentNode.querySelectorAll(selectors.join(','));
+      imageNodes.forEach((node) => {
+        node.setAttribute('href', cartoonDataUri);
+        node.setAttribute('xlink:href', cartoonDataUri);
+        replaced = true;
+      });
+
+      if (!replaced) {
+        const badge = documentNode.createElementNS('http://www.w3.org/2000/svg', 'g');
+        badge.setAttribute('data-cartoon-head', 'true');
+        badge.innerHTML =
+          '<circle cx="44" cy="44" r="28" fill="#FFD166" stroke="#EF476F" stroke-width="4"/>' +
+          '<circle cx="34" cy="38" r="3.5" fill="#073B4C"/>' +
+          '<circle cx="54" cy="38" r="3.5" fill="#073B4C"/>' +
+          '<path d="M31 51 Q44 61 57 51" stroke="#073B4C" stroke-width="4" fill="none" stroke-linecap="round"/>';
+
+        const viewBox = svgElement.getAttribute('viewBox');
+        let x = 12;
+        let y = 12;
+        if (viewBox) {
+          const values = viewBox.split(/[\s,]+/).map((entry) => Number(entry));
+          if (values.length >= 4 && values.every((entry) => Number.isFinite(entry))) {
+            x = values[0] + 10;
+            y = values[1] + 10;
+          }
+        }
+        badge.setAttribute('transform', `translate(${x}, ${y}) scale(0.7)`);
+        svgElement.appendChild(badge);
+      }
+
+      const serialized = new window.XMLSerializer().serializeToString(svgElement);
+      return serialized || svgMarkup;
+    } catch (error) {
+      console.error('Failed to apply cartoon-head transformation:', error);
+      return svgMarkup;
+    }
   }, []);
 
   const extractImageUrlsFromSvg = useCallback((svgContent) => {
@@ -1660,10 +1912,14 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
 
       const requestPromise = axios
         .get(`${API}/rhymes/svg/${code}`, { responseType: 'arraybuffer' })
-        .then((response) => {
+        .then(async (response) => {
           const decoded = decodeSvgPayload(response.data, response.headers);
           const pages = Array.isArray(decoded?.pages) ? decoded.pages : decoded;
-          return prepareRhymeSvgPages(pages, code, API);
+          const prepared = await prepareRhymeSvgPages(pages, code, API);
+          if (!shouldUseCartoonHead(code)) {
+            return prepared;
+          }
+          return prepared.map((page) => applyCartoonHeadToSvg(page));
         })
         .catch((error) => {
           console.error('Error fetching rhyme SVG:', error);
@@ -1685,7 +1941,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
 
       return normalizedPages;
     },
-    [prefetchImageAssets, normalizeSvgPages]
+    [applyCartoonHeadToSvg, normalizeSvgPages, prefetchImageAssets, shouldUseCartoonHead]
   );
 
   const ensurePageAssets = useCallback(
@@ -1937,10 +2193,12 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
 
       const rhymesWithPlaceholders = gradeSelections.map((rhyme) => {
         const normalizedPages = normalizeSvgPages(rhyme?.svgContent);
-        const sanitizedPages = normalizedPages.map((page, index) =>
-          sanitizeRhymeSvgContent(page, index ? `${rhyme.code}-${index}` : rhyme.code)
-        );
-        const existingContent = sanitizedPages.length > 0 ? sanitizedPages : null;
+        const sanitizedPages = normalizedPages
+          .map((page, index) => sanitizeRhymeSvgContent(page, index ? `${rhyme.code}-${index}` : rhyme.code))
+          .filter((page) => typeof page === 'string' && page.trim().length > 0);
+        const shouldCartoonize = shouldUseCartoonHead(rhyme?.code, rhyme?.requires_cartoon_head === true);
+        const finalPages = shouldCartoonize ? sanitizedPages.map((page) => applyCartoonHeadToSvg(page)) : sanitizedPages;
+        const existingContent = finalPages.length > 0 ? finalPages : null;
 
         return {
           ...rhyme,
@@ -2074,6 +2332,8 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
         code: rhyme.code,
         name: rhyme.name,
         pages: rhyme.pages,
+        subject: rhyme.subject || null,
+        requires_cartoon_head: rhyme.requires_cartoon_head === true,
         svgContent: null,
         svgFetchFailed: false,
         position: normalizedPosition
@@ -3496,8 +3756,6 @@ export function RhymesWorkflowApp() {
 }
 
 export default RhymeSelectionPage;
-
-
 
 
 

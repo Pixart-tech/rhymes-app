@@ -87,6 +87,7 @@ STICKER_CODES = {
     "lkg": "100000338s",
     "ukg": "100000438s",        
 }
+RHYME_CODE_PATTERN = re.compile(r"^RE\d{5,}$", re.IGNORECASE)
 
 _sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
 _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
@@ -1159,6 +1160,7 @@ class RhymeSelection(BaseModel):
     rhyme_code: str
     rhyme_name: str
     pages: float
+    subject: Optional[str] = None
     position: str = "top"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
@@ -1323,6 +1325,137 @@ def _stream_book_class_docs(school_id: str):
 def _normalize_class_doc_id(class_name: str) -> str:
     """Return a stable document id for a class key (lowercase, spaces->underscores)."""
     return (class_name or "").strip().lower().replace(" ", "_")
+
+def _normalize_tree_subject(value: Any) -> str:
+    raw = (value or "").strip().lower() if isinstance(value, str) else str(value or "").strip().lower()
+    if raw in {"eng", "english"}:
+        return "english"
+    if raw in {"hin", "hindi"}:
+        return "hindi"
+    if raw in {"tam", "tamil"}:
+        return "tamil"
+    if raw in {"kan", "kannada"}:
+        return "kannada"
+    return "other"
+
+
+def _parse_rhyme_catalogue_entry(data: Any, code: str) -> Tuple[str, float, Any, str]:
+    if isinstance(data, (list, tuple)):
+        name = data[0] if len(data) > 0 else code
+        pages_value = data[1] if len(data) > 1 else 1
+        personalized = data[2] if len(data) > 2 else "No"
+        subject_value = data[3] if len(data) > 3 else "english"
+    else:
+        name = code
+        pages_value = 1
+        personalized = "No"
+        subject_value = "english"
+
+    try:
+        pages = float(pages_value)
+    except (TypeError, ValueError):
+        pages = 1.0
+
+    return str(name), pages, personalized, _normalize_tree_subject(subject_value)
+
+
+def _candidate_grade_doc_ids(grade: str) -> List[str]:
+    normalized = _normalize_class_doc_id(grade)
+    aliases = {
+        "playgroup": ["playgroup", "pg", "p", "toddler"],
+        "nursery": ["nursery", "n"],
+        "lkg": ["lkg", "lower_kg", "lowerkg", "l"],
+        "ukg": ["ukg", "upper_kg", "upperkg", "u"],
+    }
+    candidates = aliases.get(normalized, [normalized])
+    if normalized not in candidates:
+        candidates.append(normalized)
+    deduped: List[str] = []
+    seen: Set[str] = set()
+    for candidate in candidates:
+        key = _normalize_class_doc_id(candidate)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(key)
+    return deduped
+
+
+def _extract_personalised_rhyme_codes(value: Any) -> Set[str]:
+    codes: Set[str] = set()
+
+    if value is None:
+        return codes
+
+    if isinstance(value, str):
+        normalized = value.strip().upper()
+        if RHYME_CODE_PATTERN.match(normalized):
+            codes.add(normalized)
+        return codes
+
+    if isinstance(value, (list, tuple, set)):
+        for entry in value:
+            codes.update(_extract_personalised_rhyme_codes(entry))
+        return codes
+
+    if isinstance(value, dict):
+        candidate_values: List[Any] = []
+        for key in ("rhyme_code", "code", "rhymeCode", "rhyme_code_id"):
+            if key in value:
+                candidate_values.append(value.get(key))
+        candidate_values.extend(value.values())
+        for entry in candidate_values:
+            codes.update(_extract_personalised_rhyme_codes(entry))
+    return codes
+
+
+def _build_grade_rhyme_personalisation_context(school_id: str, grade: str) -> Dict[str, Any]:
+    docs = _stream_book_class_docs(school_id)
+    if not docs:
+        return {"grade_status": "yes", "cartoon_head_codes": set()}
+
+    candidate_ids = set(_candidate_grade_doc_ids(grade))
+    selected_data: Dict[str, Any] = {}
+
+    for doc in docs:
+        data = doc.to_dict() or {}
+        class_candidates = {
+            _normalize_class_doc_id(doc.id),
+            _normalize_class_doc_id(data.get("class")),
+            _normalize_class_doc_id(data.get("class_name")),
+            _normalize_class_doc_id(data.get("class_label")),
+        }
+        if class_candidates.intersection(candidate_ids):
+            selected_data = data
+            break
+
+    if not selected_data:
+        return {"grade_status": "yes", "cartoon_head_codes": set()}
+
+    grade_status = "yes"
+    raw_status = selected_data.get("personalisation")
+    if isinstance(raw_status, str):
+        normalized_status = raw_status.strip().lower()
+        if normalized_status in {"yes", "no"}:
+            grade_status = normalized_status
+    elif isinstance(raw_status, bool):
+        grade_status = "yes" if raw_status else "no"
+
+    codes: Set[str] = set()
+    fields_to_scan = [
+        selected_data.get("personalised_rhyme_codes"),
+        selected_data.get("personalized_rhyme_codes"),
+        selected_data.get("rhyme_personalisation"),
+        selected_data.get("rhyme_personalization"),
+        selected_data.get("rhymes"),
+        selected_data.get("rhyme_codes"),
+        selected_data.get("items"),
+    ]
+    for entry in fields_to_scan:
+        codes.update(_extract_personalised_rhyme_codes(entry))
+
+    cartoon_head_codes = codes if grade_status == "no" else set()
+    return {"grade_status": grade_status, "cartoon_head_codes": cartoon_head_codes}
 
 
 def _rhyme_collection_for_school(school_id: str):
@@ -1923,14 +2056,20 @@ async def get_all_rhymes():
     rhymes_by_pages = {}
 
     for code, data in RHYMES_DATA.items():
-        name, pages, personalized = data
+        name, pages, personalized, subject = _parse_rhyme_catalogue_entry(data, code)
         page_key = str(pages)
 
         if page_key not in rhymes_by_pages:
             rhymes_by_pages[page_key] = []
 
         rhymes_by_pages[page_key].append(
-            {"code": code, "name": name, "pages": pages, "personalized": personalized}
+            {
+                "code": code,
+                "name": name,
+                "pages": pages,
+                "personalized": personalized,
+                "subject": subject,
+            }
         )
 
     return rhymes_by_pages
@@ -1941,6 +2080,9 @@ def get_available_rhymes(
     school_id: str, grade: str, include_selected: bool = False
 ):
     """Get available rhymes for a specific grade"""
+    grade_context = _build_grade_rhyme_personalisation_context(school_id, grade)
+    cartoon_head_codes = grade_context.get("cartoon_head_codes") or set()
+
     if not include_selected:
         # Get already selected rhymes for ALL grades in this school
         selections_ref = _rhyme_collection_for_school(school_id)
@@ -1960,7 +2102,7 @@ def get_available_rhymes(
 
     for code, data in RHYMES_DATA.items():
         if code not in selected_codes:  # Only include unselected rhymes
-            name, pages, personalized = data
+            name, pages, personalized, subject = _parse_rhyme_catalogue_entry(data, code)
             page_key = str(pages)
 
             if page_key not in rhymes_by_pages:
@@ -1972,6 +2114,8 @@ def get_available_rhymes(
                     "name": name, 
                     "pages": pages,
                     "personalized": personalized,
+                    "subject": subject,
+                    "requires_cartoon_head": code.upper() in cartoon_head_codes,
                 }
             )
 
@@ -1990,20 +2134,39 @@ def get_selected_rhymes(school_id: str):
             selections.extend(items)
 
     result = {}
+    grade_context_cache: Dict[str, Dict[str, Any]] = {}
     for selection in selections:
         grade = selection["grade"]
         if grade not in result:
             result[grade] = []
+        if grade not in grade_context_cache:
+            grade_context_cache[grade] = _build_grade_rhyme_personalisation_context(
+                school_id, grade
+            )
 
-        result[grade].extend(
-            [
-                
-            selection["rhyme_code"]
-               
-               
-            ]
+        code = (selection.get("rhyme_code") or "").strip()
+        _, _, _, default_subject = _parse_rhyme_catalogue_entry(
+            RHYMES_DATA.get(code, []), code
         )
+        cartoon_head_codes = grade_context_cache[grade].get("cartoon_head_codes") or set()
 
+        result[grade].append(
+            {
+                "page_index": selection["page_index"],
+                "code": code,
+                "name": selection["rhyme_name"],
+                "pages": selection["pages"],
+                "position": selection.get("position"),
+                "subject": _normalize_tree_subject(selection.get("subject") or default_subject),
+                "requires_cartoon_head": code.upper() in cartoon_head_codes,
+            }
+        )
+        
+    for grade in result:  
+         result[grade].sort(key=lambda x: x["page_index"])
+
+                                         
+                                           
     # Sort by page_index
     return result
 
@@ -2719,6 +2882,9 @@ def cover_selection_exists(
 @api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
 def get_selected_rhymes_other_grades(school_id: str, grade: str):
     """Get rhymes selected in other grades that can be reused"""
+    grade_context = _build_grade_rhyme_personalisation_context(school_id, grade)
+    cartoon_head_codes = grade_context.get("cartoon_head_codes") or set()
+
     all_items = _get_all_rhyme_items(school_id)
     selections = [
         item for item in all_items if item and item.get("grade") and item.get("grade") != grade
@@ -2728,11 +2894,14 @@ def get_selected_rhymes_other_grades(school_id: str, grade: str):
     selected_rhymes = {}
     for selection in selections:
         code = selection["rhyme_code"]
+        _, _, _, default_subject = _parse_rhyme_catalogue_entry(RHYMES_DATA.get(code, []), code)
         if code not in selected_rhymes:
             selected_rhymes[code] = {
                 "code": code,
                 "name": selection["rhyme_name"],
                 "pages": selection["pages"],
+                "subject": _normalize_tree_subject(selection.get("subject") or default_subject),
+                "requires_cartoon_head": code.upper() in cartoon_head_codes,
                 "used_in_grades": [],
             }
         selected_rhymes[code]["used_in_grades"].append(selection["grade"])
@@ -2757,8 +2926,7 @@ async def select_rhyme(input: RhymeSelectionCreate):
         raise HTTPException(status_code=404, detail="Rhyme not found")
 
     rhyme_data = RHYMES_DATA[input.rhyme_code]
-
-    pages = float(rhyme_data[1])
+    name, pages, _, subject = _parse_rhyme_catalogue_entry(rhyme_data, input.rhyme_code)
 
     # Normalize position (half-page rhymes can occupy top or bottom)
     requested_position = (input.position or "").strip().lower()
@@ -2811,8 +2979,9 @@ async def select_rhyme(input: RhymeSelectionCreate):
     selection_dict.update(
         {
             "id": selection_id,
-            "rhyme_name": rhyme_data[0],
+            "rhyme_name": name,
             "pages": pages,
+            "subject": subject,
             "position": normalized_position,
         }
     )
