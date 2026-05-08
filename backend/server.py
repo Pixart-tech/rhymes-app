@@ -1,6 +1,6 @@
 
 from __future__ import annotations
-
+from xml.dom.minidom import parse as p
 import os, sys,io
 
 # Force working directory to the folder where EXE is running
@@ -20,16 +20,20 @@ import os
 import re
 import sys
 import tempfile
+import time
 import uuid
 import json
 import zipfile
 import imghdr
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path, PureWindowsPath
 import qrcode
+from collections import OrderedDict
 
 from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile, Form, Request, Query
 from fastapi.staticfiles import StaticFiles
@@ -39,8 +43,9 @@ from urllib.parse import quote
 from shutil import copy2
 from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse,RedirectResponse
 from firebase_admin import firestore
-from motor.motor_asyncio import AsyncIOMotorClient
-from motor.motor_asyncio import AsyncIOMotorClient
+import asyncio
+
+
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
 from PIL import Image, ImageFilter
@@ -59,6 +64,7 @@ if __package__ in {None, ""}:
     from backend.app.firebase_service import (  # type: ignore
         db,
         verify_and_decode_token,
+        ensure_user_document,
     )
     from backend.app.svg_processing import SvgDocument as _SvgDocument  # type: ignore
 else:  # pragma: no cover - exercised only during normal package imports
@@ -67,6 +73,7 @@ else:  # pragma: no cover - exercised only during normal package imports
     from .app.firebase_service import (
         db,
         verify_and_decode_token,
+        ensure_user_document,
     )
     from .app.svg_processing import SvgDocument as _SvgDocument
 
@@ -77,9 +84,30 @@ RHYME_SVG_BASE_PATH = config.RHYME_SVG_BASE_PATH
 COVER_SVG_BASE_PATH = config.resolve_cover_svg_base_path()
 
 RHYMES_DATA = rhymes.RHYMES_DATA
+RHYMES_SETTINGS = getattr(rhymes, "RHYMES_SETTINGS", {})
 generate_rhyme_svg = rhymes.generate_rhyme_svg
 
 MAX_RHYME_PAGES = 44
+
+_RHYMES_STATUS_CACHE_TTL_SECONDS = 10.0
+_RHYMES_STATUS_CACHE_MAX_ENTRIES = 1000
+_RHYMES_STATUS_CACHE: "OrderedDict[str, Tuple[float, List[Dict[str, Any]]]]" = OrderedDict()
+_RHYMES_STATUS_CACHE_LOCK = asyncio.Lock()
+
+
+def _rhymes_status_cache_prune(now: float) -> None:
+    """Drop expired entries and enforce a hard max size."""
+
+    # OrderedDict preserves insertion/refresh order; expired entries are not guaranteed
+    # to be oldest, but pruning from the front is a cheap best-effort.
+    while _RHYMES_STATUS_CACHE:
+        (school_id, (expires_at, _)) = next(iter(_RHYMES_STATUS_CACHE.items()))
+        if expires_at > now:
+            break
+        _RHYMES_STATUS_CACHE.pop(school_id, None)
+
+    while len(_RHYMES_STATUS_CACHE) > _RHYMES_STATUS_CACHE_MAX_ENTRIES:
+        _RHYMES_STATUS_CACHE.popitem(last=False)
 
 COVER_GRADE_LABELS = ["Playgroup", "Nursery", "LKG", "UKG"]
 STICKER_CODES = {
@@ -87,12 +115,10 @@ STICKER_CODES = {
     "lkg": "100000338s",
     "ukg": "100000438s",        
 }
-RHYME_CODE_PATTERN = re.compile(r"^RE\d{5,}$", re.IGNORECASE)
-
-_sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
-_svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
-_build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
-_localize_svg_image_assets = svg_processing.localize_svg_image_assets
+# _sanitize_svg_for_svglib = svg_processing.sanitize_svg_for_svglib
+# _svg_requires_raster_backend = svg_processing.svg_requires_raster_backend
+# _build_cover_asset_manifest = svg_processing.build_cover_asset_manifest
+# _localize_svg_image_assets = svg_processing.localize_svg_image_assets
 
 
 PUBLIC_URL_PREFIX = "/media"
@@ -123,6 +149,11 @@ class CachedStaticFiles(StaticFiles):
 
     def set_headers(self, response: Response, path: str, stat_result):  # type: ignore[override]
         super().set_headers(response, path, stat_result)
+        normalized_path = (path or "").lower()
+        # HTML should not be cached as immutable, otherwise UI changes won't show up during development.
+        if normalized_path.endswith(".html"):
+            response.headers["Cache-Control"] = "no-cache"
+            return
         if self.cache_control:
             response.headers.setdefault("Cache-Control", self.cache_control)
 
@@ -939,20 +970,42 @@ app.add_middleware(
 @app.middleware("http")
 async def add_csp_header(request, call_next):
     response = await call_next(request)
-    csp = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "script-src-elem 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "style-src-elem 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
-        "img-src 'self' data: blob: https:; "
-        "font-src 'self' data: https://cdn.jsdelivr.net; "
-        "connect-src 'self' https:; "
-        "frame-src 'self'; "
-        "object-src 'none'; "
-        "base-uri 'self'; "
-        "form-action 'self';"
+    is_testing_ui = (
+        os.environ.get("ENABLE_TESTING_INTERFACE", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+        and str(request.url.path).endswith("/media/testing-school.html")
     )
+
+    if is_testing_ui:
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://apis.google.com https://www.gstatic.com; "
+            "script-src-elem 'self' https://cdn.jsdelivr.net https://apis.google.com https://www.gstatic.com 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "style-src-elem 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+            "img-src 'self' data: blob: https:; "
+            "font-src 'self' data: https://cdn.jsdelivr.net; "
+            "connect-src 'self' https:; "
+            "frame-src 'self' https://accounts.google.com https://*.google.com; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self';"
+        )
+    else:
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "script-src-elem 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "style-src-elem 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+            "img-src 'self' data: blob: https:; "
+            "font-src 'self' data: https://cdn.jsdelivr.net; "
+            "connect-src 'self' https:; "
+            "frame-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self';"
+        )
     response.headers["Content-Security-Policy"] = csp
     return response
 
@@ -1146,10 +1199,216 @@ async def redirect_phonics(number: str):
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
-app.include_router(api_router)
+
 api_router.include_router(auth.create_auth_router(db))
 api_router.include_router(workspace.router)
 api_router.include_router(schools.router)
+
+
+
+
+class BookSelectionSummaryPdfItem(BaseModel):
+    class_value: Optional[str] = Field(default=None, alias="class")
+    class_label: Optional[str] = None
+    subject: Optional[str] = None
+    type: Optional[str] = None
+    component: Optional[str] = None
+    grade_subject: Optional[str] = None
+
+    core: Optional[str] = None
+    core_cover_title: Optional[str] = None
+
+    work: Optional[str] = None
+    work_cover_title: Optional[str] = None
+
+    addOn: Optional[str] = None
+    addon_cover_title: Optional[str] = None
+
+
+class BookSelectionSummaryPdfRequest(BaseModel):
+    items: List[BookSelectionSummaryPdfItem]
+    title: Optional[str] = None
+    school_id: Optional[str] = None
+    school_name: Optional[str] = None
+
+
+def _extract_component_title(item: BookSelectionSummaryPdfItem) -> str:
+    if item.component == "core" and item.core_cover_title:
+        return str(item.core_cover_title)
+    if item.component == "work" and item.work_cover_title:
+        return str(item.work_cover_title)
+    if item.component == "addon" and item.addon_cover_title:
+        return str(item.addon_cover_title)
+    raw = (item.grade_subject or "").strip()
+    if ":" in raw:
+        return raw.split(":", 1)[1].strip()
+    return raw
+
+
+def _is_custom_subject_entry(item: BookSelectionSummaryPdfItem) -> bool:
+    label = (item.type or "").strip()
+    return label.casefold() == "custom"
+
+
+def _subject_display_name(subject_name: str, items: List[BookSelectionSummaryPdfItem]) -> str:
+    """
+    Render subject name for the PDF.
+    - Default: just the subject name
+    - Custom subject: `Subject (Custom)` (uses the item.type label)
+    """
+    for item in items:
+        if _is_custom_subject_entry(item):
+            label = (item.type or "").strip() or "Custom"
+            return f"{subject_name} ({label})"
+    return subject_name
+
+
+@api_router.post("/book-selection-summary-pdf")
+def download_book_selection_summary_pdf(
+    payload: BookSelectionSummaryPdfRequest,
+    authorization: Optional[str] = Header(None),
+):
+    decoded_token = verify_and_decode_token(authorization)
+    user_record = ensure_user_document(decoded_token)
+
+    try:
+        from reportlab.lib.pagesizes import A4  # type: ignore
+        from reportlab.pdfgen import canvas as pdf_canvas  # type: ignore
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="PDF generation is unavailable") from exc
+
+    school_name: Optional[str] = (payload.school_name or "").strip() or None
+    school_id: Optional[str] = (payload.school_id or "").strip() or None
+    if not school_id:
+        school_ids_value = user_record.get("school_ids")
+        if isinstance(school_ids_value, list):
+            candidates = [str(entry).strip() for entry in school_ids_value if str(entry).strip()]
+            unique_candidates = list(dict.fromkeys(candidates))
+            if len(unique_candidates) == 1:
+                school_id = unique_candidates[0]
+
+    if not school_name and school_id:
+        try:
+            _, raw_school_record, _ = school_profiles.locate_school_record(db, school_id)
+            school_name = (raw_school_record.get("school_name") or "").strip() or None
+        except Exception:
+            school_name = None
+
+    # Group selections by grade/class and subject.
+    grouped: Dict[str, Dict[str, Dict[str, List[BookSelectionSummaryPdfItem]]]] = {}
+    labels: Dict[str, str] = {}
+
+    for item in payload.items or []:
+        grade_key = (item.class_value or item.class_label or "unknown").strip().lower()
+        grade_label = (item.class_label or item.class_value or grade_key).strip()
+        subject = (item.subject or "Unknown subject").strip()
+        comp = (item.component or "item").strip().lower()
+
+        labels[grade_key] = grade_label
+        grouped.setdefault(grade_key, {}).setdefault(subject, {}).setdefault(comp, []).append(item)
+
+    grade_order = ["playgroup", "nursery", "lkg", "ukg"]
+    ordered_grades = [g for g in grade_order if g in grouped] + [
+        g for g in grouped.keys() if g not in grade_order
+    ]
+
+    buffer = BytesIO()
+    page_width, page_height = A4
+    c = pdf_canvas.Canvas(buffer, pagesize=A4)
+
+    title = (payload.title or "Book Selection Summary").strip()
+    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+    margin_x = 40
+    margin_top = 52
+    margin_bottom = 48
+    y = page_height - margin_top
+
+    def new_page():
+        nonlocal y
+        c.showPage()
+        y = page_height - margin_top
+
+    def ensure_space(lines: int):
+        nonlocal y
+        needed = lines * 14
+        if y - needed < margin_bottom:
+            new_page()
+
+    if school_name:
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(margin_x, y, school_name[:100])
+        y -= 20
+
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(margin_x, y, title[:100])
+    y -= 20
+    c.setFont("Helvetica", 10)
+    c.drawString(margin_x, y, f"Generated: {now_str}")
+    y -= 18
+
+    for grade_key in ordered_grades:
+        grade_label = labels.get(grade_key, grade_key)
+        subjects = grouped.get(grade_key, {})
+        if not subjects:
+            continue
+
+        # "Books" here means number of selected book items (core/work/addon rows).
+        book_count = sum(
+            len(entries)
+            for subject_comps in subjects.values()
+            for entries in subject_comps.values()
+        )
+
+        ensure_space(3)
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(margin_x, y, grade_label)
+        c.setFont("Helvetica", 10)
+        c.drawRightString(page_width - margin_x, y, f"Books: {book_count}")
+        y -= 16
+
+        for subject_name in sorted(subjects.keys(), key=lambda s: s.lower()):
+            comps = subjects[subject_name]
+            entries_for_subject: List[BookSelectionSummaryPdfItem] = []
+            for entry_list in comps.values():
+                entries_for_subject.extend(entry_list)
+            display_subject = _subject_display_name(subject_name, entries_for_subject)
+
+            if grade_key == "playgroup":
+                line = f"• {display_subject}"
+            else:
+                subject_norm = (subject_name or "").strip().casefold()
+                is_skill_subject = subject_norm in {"english", "maths", "math"} or (
+                    "english" in subject_norm or "math" in subject_norm
+                )
+                component_label_map = {
+                    "core": "Skill" if is_skill_subject else "Core",
+                    "work": "Work Book",
+                    "addon": "Addon",
+                    "item": "Item",
+                }
+                present: List[str] = []
+                for comp_key in ["core", "work", "addon", "item"]:
+                    if comps.get(comp_key):
+                        present.append(component_label_map.get(comp_key, comp_key.title()))
+                suffix = f" ({', '.join(present)})" if present else ""
+                line = f"• {display_subject}{suffix}"
+
+            ensure_space(1)
+            c.setFont("Helvetica", 11)
+            c.drawString(margin_x + 6, y, line[:140])
+            y -= 14
+
+        y -= 6
+
+    c.save()
+    pdf_bytes = buffer.getvalue()
+    headers = {
+        "Cache-Control": "no-store",
+        "Content-Disposition": 'attachment; filename="book_selection_summary_a4.pdf"',
+    }
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+app.include_router(api_router)
 
 # Models
 class RhymeSelection(BaseModel):
@@ -1162,6 +1421,7 @@ class RhymeSelection(BaseModel):
     pages: float
     subject: Optional[str] = None
     position: str = "top"
+    bucket: Optional[Literal["personalised", "non_personalised"]] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -1171,6 +1431,7 @@ class RhymeSelectionCreate(BaseModel):
     page_index: int
     rhyme_code: str
     position: Optional[str] = None
+    bucket: Optional[Literal["personalised", "non_personalised"]] = None
 
 
 class BookSelectionPayload(BaseModel):
@@ -1194,7 +1455,9 @@ class CoverSelectionPayload(BaseModel):
     status: Optional[str] = None
     is_selected: Optional[bool] = True
 
+ 
 
+    
 def _cover_doc_id(grade: str, *, admin: bool = False) -> str:
     safe_grade = (grade or "").strip().lower().replace(" ", "_")
     return f"{safe_grade}__admin" if admin else safe_grade
@@ -1249,6 +1512,27 @@ def _build_rhyme_doc_id(school_id: str, grade: str, page_index: int, position: s
     return f"{safe_school}_{safe_grade}_{page_index}_{safe_position}"
 
 
+def _sum_rhyme_selected_pages(selections: Any) -> float:
+    """Return the sum of `pages` across selection items.
+
+    Used to persist a small summary field so `/rhymes/status/{school_id}` does not
+    have to fetch the full `items` array for every grade.
+    """
+    if not isinstance(selections, list):
+        return 0.0
+    total = 0.0
+    for selection in selections:
+        if not isinstance(selection, dict):
+            continue
+        pages_value = selection.get("pages", 0)
+        try:
+            normalized_pages = float(pages_value)
+        except (TypeError, ValueError):
+            normalized_pages = 0.0
+        total += normalized_pages
+    return total
+
+
 def _verify_and_decode_token(authorization: Optional[str]) -> Dict[str, Any]:
     """Wrapper to enforce auth and normalize errors."""
     if not authorization:
@@ -1267,9 +1551,32 @@ def _verify_and_decode_token_optional(authorization: Optional[str]) -> Dict[str,
         raise
 
 
+def _ensure_user_document(decoded_token: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure a Firestore user document exists and return it."""
+    return ensure_user_document(decoded_token)
+
+
 def _rhyme_collection_for_school(school_id: str):
     return db.collection("rhyme_selections").document(school_id).collection("classes")
 
+def _rhyme_root_doc(school_id: str):
+    return db.collection("rhyme_selections").document(school_id)
+
+     
+
+async def _gather_limited(
+    items: List[Any],
+    limit: int,
+    func,
+) -> List[Any]:
+    """Run async work over items with limited concurrency."""
+    semaphore = asyncio.Semaphore(max(1, int(limit or 1)))
+
+    async def _run_one(item: Any) -> Any:
+        async with semaphore:
+            return await func(item)
+
+    return await asyncio.gather(*[_run_one(item) for item in items])
 
 def _get_all_rhyme_items(school_id: str) -> List[Dict[str, Any]]:
     """Return all rhyme selection items for a school from class docs plus legacy root docs."""
@@ -1288,15 +1595,15 @@ def _get_all_rhyme_items(school_id: str) -> List[Dict[str, Any]]:
                     seen_ids.add(item_id)
                 items.append(item)
 
-    legacy_query = db.collection("rhyme_selections").where("school_id", "==", school_id)
-    for doc in legacy_query.stream():
-        data = doc.to_dict() or {}
-        item_id = data.get("id")
-        if item_id and item_id in seen_ids:
-            continue
-        if item_id:
-            seen_ids.add(item_id)
-        items.append(data)
+    # legacy_query = db.collection("rhyme_selections").where("school_id", "==", school_id)
+    # for doc in legacy_query.stream():
+    #     data = doc.to_dict() or {}
+    #     item_id = data.get("id")
+    #     if item_id and item_id in seen_ids:
+    #         continue
+    #     if item_id:
+    #         seen_ids.add(item_id)
+    #     items.append(data)
 
     return items
 
@@ -1319,6 +1626,8 @@ def _stream_book_class_docs(school_id: str):
     """Stream book selection docs from grades path."""
     primary_docs = list(_book_collection_for_school(school_id).stream())
     docs_by_id = {doc.id: doc for doc in primary_docs}
+    print(docs_by_id)
+    # {lkg:lkg_doc,"nursey:nursery_doc,playgoup:plagrou_doc,ukg:"ukg_doc}
     return list(docs_by_id.values())
 
 
@@ -1328,6 +1637,8 @@ def _normalize_class_doc_id(class_name: str) -> str:
 
 def _normalize_tree_subject(value: Any) -> str:
     raw = (value or "").strip().lower() if isinstance(value, str) else str(value or "").strip().lower()
+    if not raw:
+        return "english"
     if raw in {"eng", "english"}:
         return "english"
     if raw in {"hin", "hindi"}:
@@ -1336,7 +1647,10 @@ def _normalize_tree_subject(value: Any) -> str:
         return "tamil"
     if raw in {"kan", "kannada"}:
         return "kannada"
-    return "other"
+    if raw == "other":
+        return "other"
+    normalized = re.sub(r"[^a-z0-9_-]+", "_", raw).strip("_")
+    return normalized or "other"
 
 
 def _parse_rhyme_catalogue_entry(data: Any, code: str) -> Tuple[str, float, Any, str]:
@@ -1345,11 +1659,8 @@ def _parse_rhyme_catalogue_entry(data: Any, code: str) -> Tuple[str, float, Any,
         pages_value = data[1] if len(data) > 1 else 1
         personalized = data[2] if len(data) > 2 else "No"
         subject_value = data[3] if len(data) > 3 else "english"
-    else:
-        name = code
-        pages_value = 1
-        personalized = "No"
-        subject_value = "english"
+        
+    
 
     try:
         pages = float(pages_value)
@@ -1359,103 +1670,26 @@ def _parse_rhyme_catalogue_entry(data: Any, code: str) -> Tuple[str, float, Any,
     return str(name), pages, personalized, _normalize_tree_subject(subject_value)
 
 
-def _candidate_grade_doc_ids(grade: str) -> List[str]:
-    normalized = _normalize_class_doc_id(grade)
-    aliases = {
-        "playgroup": ["playgroup", "pg", "p", "toddler"],
-        "nursery": ["nursery", "n"],
-        "lkg": ["lkg", "lower_kg", "lowerkg", "l"],
-        "ukg": ["ukg", "upper_kg", "upperkg", "u"],
-    }
-    candidates = aliases.get(normalized, [normalized])
-    if normalized not in candidates:
-        candidates.append(normalized)
-    deduped: List[str] = []
-    seen: Set[str] = set()
-    for candidate in candidates:
-        key = _normalize_class_doc_id(candidate)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        deduped.append(key)
-    return deduped
-
-
-def _extract_personalised_rhyme_codes(value: Any) -> Set[str]:
-    codes: Set[str] = set()
-
-    if value is None:
-        return codes
-
-    if isinstance(value, str):
-        normalized = value.strip().upper()
-        if RHYME_CODE_PATTERN.match(normalized):
-            codes.add(normalized)
-        return codes
-
-    if isinstance(value, (list, tuple, set)):
-        for entry in value:
-            codes.update(_extract_personalised_rhyme_codes(entry))
-        return codes
-
-    if isinstance(value, dict):
-        candidate_values: List[Any] = []
-        for key in ("rhyme_code", "code", "rhymeCode", "rhyme_code_id"):
-            if key in value:
-                candidate_values.append(value.get(key))
-        candidate_values.extend(value.values())
-        for entry in candidate_values:
-            codes.update(_extract_personalised_rhyme_codes(entry))
-    return codes
-
-
-def _build_grade_rhyme_personalisation_context(school_id: str, grade: str) -> Dict[str, Any]:
-    docs = _stream_book_class_docs(school_id)
-    if not docs:
-        return {"grade_status": "yes", "cartoon_head_codes": set()}
-
-    candidate_ids = set(_candidate_grade_doc_ids(grade))
-    selected_data: Dict[str, Any] = {}
-
-    for doc in docs:
-        data = doc.to_dict() or {}
-        class_candidates = {
-            _normalize_class_doc_id(doc.id),
-            _normalize_class_doc_id(data.get("class")),
-            _normalize_class_doc_id(data.get("class_name")),
-            _normalize_class_doc_id(data.get("class_label")),
-        }
-        if class_candidates.intersection(candidate_ids):
-            selected_data = data
-            break
-
-    if not selected_data:
-        return {"grade_status": "yes", "cartoon_head_codes": set()}
-
-    grade_status = "yes"
-    raw_status = selected_data.get("personalisation")
-    if isinstance(raw_status, str):
-        normalized_status = raw_status.strip().lower()
-        if normalized_status in {"yes", "no"}:
-            grade_status = normalized_status
-    elif isinstance(raw_status, bool):
-        grade_status = "yes" if raw_status else "no"
-
-    codes: Set[str] = set()
-    fields_to_scan = [
-        selected_data.get("personalised_rhyme_codes"),
-        selected_data.get("personalized_rhyme_codes"),
-        selected_data.get("rhyme_personalisation"),
-        selected_data.get("rhyme_personalization"),
-        selected_data.get("rhymes"),
-        selected_data.get("rhyme_codes"),
-        selected_data.get("items"),
-    ]
-    for entry in fields_to_scan:
-        codes.update(_extract_personalised_rhyme_codes(entry))
-
-    cartoon_head_codes = codes if grade_status == "no" else set()
-    return {"grade_status": grade_status, "cartoon_head_codes": cartoon_head_codes}
+# def _candidate_grade_doc_ids(grade: str) -> List[str]:
+#     normalized = _normalize_class_doc_id(grade)
+#     aliases = {
+#         "playgroup": ["playgroup", "pg", "p"],
+#         "nursery": ["nursery", "n"],
+#         "lkg": ["lkg", "lower_kg", "lowerkg", "l"],
+#         "ukg": ["ukg", "upper_kg", "upperkg", "u"],
+#     }
+#     candidates = aliases.get(normalized, [normalized])
+#     if normalized not in candidates:
+#         candidates.append(normalized)
+#     deduped: List[str] = []
+#     seen: Set[str] = set()
+#     for candidate in candidates:
+#         key = _normalize_class_doc_id(candidate)
+#         if not key or key in seen:
+#             continue
+#         seen.add(key)
+#         deduped.append(key)
+#     return deduped
 
 
 def _rhyme_collection_for_school(school_id: str):
@@ -1587,6 +1821,436 @@ async def update_cover_freeze(school_id: str, payload: CoverFreezePayload, autho
     return {"ok": True, "freeze": bool(payload.freeze), "updated_at": now.isoformat()}
 
 
+class RhymeFreezePayload(BaseModel):
+    freeze: bool
+    updated_by: Optional[str] = None
+    updated_by_email: Optional[str] = None
+
+
+@api_router.get("/rhymes/freeze/{school_id}/{grade}")
+
+async def get_rhyme_freeze(school_id: str, grade:str,authorization: Optional[str] = Header(None)):
+  
+    """Fetch freeze flag for a school's rhyme selections."""
+    _verify_and_decode_token(authorization)
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    
+    root_data = _rhyme_collection_for_school(safe_school).document(grade).get().to_dict() or {}
+    
+    return {
+        "has_freeze_field": "freeze" in root_data,
+        "freeze": bool(root_data.get("freeze")) if "freeze" in root_data else False,
+        "freeze_updated_at": root_data.get("freeze_updated_at"),
+        "freeze_updated_by": root_data.get("freeze_updated_by"),
+        "freeze_updated_by_email": root_data.get("freeze_updated_by_email"),
+    }
+    
+    
+    
+    
+
+
+
+
+@api_router.patch("/rhymes/swap/{school_id}/{grade}/{page_index}")
+async def swap_half_page_positions(
+    school_id: str,
+    grade: str,
+    page_index: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Flip top/bottom `position` for half-page rhymes on the given page.
+    """
+    _verify_and_decode_token(authorization)
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    
+
+    class_key = grade.strip().lower().replace(" ", "_")
+    print(class_key)
+    doc_ref = _rhyme_collection_for_school(safe_school).document(class_key)
+    snap = doc_ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="grade document not found")
+
+    data = snap.to_dict() or {}
+    selections = data.get("items", [])
+    if not isinstance(selections, list) or not selections:
+        return {"ok": True, "updated": 0}
+
+    def _pages_value(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 1.0
+
+    updated = 0
+    next_items: List[Dict[str, Any]] = []
+    for selection in selections:
+        if not isinstance(selection, dict):
+            continue
+        if str(selection.get("page_index")) != str(page_index):
+            next_items.append(selection)
+            continue
+
+        pages_value = _pages_value(selection.get("pages", 1))
+        if pages_value != 0.5:
+            next_items.append(selection)
+            continue
+
+        pos = (selection.get("position") or "top").strip().lower() or "top"
+        new_pos = "bottom" if pos == "top" else "top"
+        next_selection = dict(selection)
+        next_selection["position"] = new_pos
+        next_items.append(next_selection)
+        updated += 1
+
+    doc_ref.set(
+        {
+            "grade": grade,
+            "items": next_items,
+            "selected_pages": _sum_rhyme_selected_pages(next_items),
+            "selected_items_count": len(next_items),
+            "summary_updated_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        },
+        merge=True,
+    )
+
+    return {"ok": True, "updated": updated}
+    
+     
+    
+class SwapHalfPageSlot(BaseModel):
+    page_index: int
+    position: Literal["top", "bottom"]
+
+
+class SwapHalfPageSlotsPayload(BaseModel):
+    a: SwapHalfPageSlot
+    b: SwapHalfPageSlot
+
+
+@api_router.patch("/rhymes/swap-slots/{school_id}/{grade}")
+async def swap_half_page_slots(
+    school_id: str,
+    grade: str,
+    payload: SwapHalfPageSlotsPayload,
+    authorization: Optional[str] = Header(None),
+):
+    """Swap two half-page rhyme slots, potentially across different pages.
+
+    Slots are addressed by (page_index, position). Only pages=0.5 selections are eligible.
+    """
+    _verify_and_decode_token(authorization)
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+
+    class_key = (grade or "").strip().lower().replace(" ", "_")
+    if not class_key:
+        raise HTTPException(status_code=400, detail="grade is required")
+
+    doc_ref = _rhyme_collection_for_school(safe_school).document(class_key)
+    transaction = db.transaction()
+
+    def _pages_value(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 1.0
+
+    def _norm_pos(value: Any) -> str:
+        return (value or "top").strip().lower() or "top"
+
+    @firestore.transactional
+    def _run_swap(transaction_obj):
+        snap = doc_ref.get(transaction=transaction_obj)
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="grade document not found")
+
+        data = snap.to_dict() or {}
+        items = data.get("items", [])
+        if not isinstance(items, list) or not items:
+            raise HTTPException(status_code=404, detail="no selections found")
+
+        grade_for_id = (data.get("grade") or grade or "").strip() or grade
+
+        a_slot = payload.a
+        b_slot = payload.b
+        if a_slot.page_index == b_slot.page_index and a_slot.position == b_slot.position:
+            return {"ok": True, "updated": 0}
+
+        a_index = None
+        b_index = None
+        for idx, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            if _pages_value(item.get("pages", 1)) != 0.5:
+                continue
+
+            item_page_index = item.get("page_index")
+            item_pos = _norm_pos(item.get("position"))
+            if item.get("position") is None:
+                item_pos = "top"
+
+            if item_page_index == a_slot.page_index and item_pos == a_slot.position:
+                a_index = idx
+                continue
+            if item_page_index == b_slot.page_index and item_pos == b_slot.position:
+                b_index = idx
+                continue
+
+        if a_index is None or b_index is None:
+            raise HTTPException(
+                status_code=404, detail="both swap slots must contain a half-page rhyme"
+            )
+
+        next_items: List[Dict[str, Any]] = []
+        for idx, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+
+            if idx == a_index:
+                updated_item = dict(item)
+                updated_item["page_index"] = b_slot.page_index
+                updated_item["position"] = b_slot.position
+                updated_item["id"] = _build_rhyme_doc_id(
+                    safe_school, grade_for_id, b_slot.page_index, b_slot.position
+                )
+                next_items.append(updated_item)
+                continue
+
+            if idx == b_index:
+                updated_item = dict(item)
+                updated_item["page_index"] = a_slot.page_index
+                updated_item["position"] = a_slot.position
+                updated_item["id"] = _build_rhyme_doc_id(
+                    safe_school, grade_for_id, a_slot.page_index, a_slot.position
+                )
+                next_items.append(updated_item)
+                continue
+
+            next_items.append(item)
+
+        now = datetime.utcnow()
+        transaction_obj.set(
+            doc_ref,
+            {
+                "grade": grade_for_id,
+                "items": next_items,
+                "selected_pages": _sum_rhyme_selected_pages(next_items),
+                "selected_items_count": len(next_items),
+                "summary_updated_at": now,
+                "updated_at": now,
+            },
+            merge=True,
+        )
+
+        return {"ok": True, "updated": 2}
+
+    return _run_swap(transaction)
+
+
+class SwapRhymePagesPayload(BaseModel):
+    a_page_index: int
+    b_page_index: int
+
+
+@api_router.patch("/rhymes/swap-pages/{school_id}/{grade}")
+async def swap_rhyme_pages(
+    school_id: str,
+    grade: str,
+    payload: SwapRhymePagesPayload,
+    authorization: Optional[str] = Header(None),
+):
+    """Swap two *pages* (or multi-page blocks) of rhyme selections.
+
+    This swaps the page ordering for everything on the selected pages. If a selected
+    page falls inside a multi-page rhyme (pages > 1), we treat that rhyme as a block
+    and swap the whole block to keep it intact.
+    """
+    _verify_and_decode_token(authorization)
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+
+    class_key = (grade or "").strip().lower().replace(" ", "_")
+    if not class_key:
+        raise HTTPException(status_code=400, detail="grade is required")
+
+    try:
+        a_page = int(payload.a_page_index)
+        b_page = int(payload.b_page_index)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="page indices must be integers")
+
+    if a_page < 0 or b_page < 0:
+        raise HTTPException(status_code=400, detail="page indices must be non-negative")
+
+    if a_page == b_page:
+        return {"ok": True, "updated": 0, "a": a_page, "b": b_page}
+
+    doc_ref = _rhyme_collection_for_school(safe_school).document(class_key)
+    transaction = db.transaction()
+
+    def _pages_value(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 1.0
+
+    def _span_for_pages(pages_value: float) -> int:
+        if pages_value and pages_value > 1:
+            return max(1, int(round(pages_value)))
+        return 1
+
+    def _effective_position(item: Dict[str, Any]) -> str:
+        return (item.get("position") or "top").strip().lower() or "top"
+
+    def _find_block_for_page(items: List[Dict[str, Any]], page_index: int) -> tuple[int, int]:
+        # If the page is inside a multi-page rhyme, return that rhyme's (start, span).
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                start_index = int(item.get("page_index"))
+            except (TypeError, ValueError):
+                continue
+
+            pages_value = _pages_value(item.get("pages", 1))
+            span = _span_for_pages(pages_value)
+            if span <= 1:
+                continue
+
+            if start_index <= page_index < (start_index + span):
+                return start_index, span
+
+        return page_index, 1
+
+    @firestore.transactional
+    def _run_swap(transaction_obj):
+        snap = doc_ref.get(transaction=transaction_obj)
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="grade document not found")
+
+        data = snap.to_dict() or {}
+        items = data.get("items", [])
+        if not isinstance(items, list) or not items:
+            raise HTTPException(status_code=404, detail="no selections found")
+
+        grade_for_id = (data.get("grade") or grade or "").strip() or grade
+
+        a_start, a_len = _find_block_for_page(items, a_page)
+        b_start, b_len = _find_block_for_page(items, b_page)
+
+        # Normalize so "A" is always before "B" for remapping.
+        if a_start <= b_start:
+            left_start, left_len = a_start, a_len
+            right_start, right_len = b_start, b_len
+        else:
+            left_start, left_len = b_start, b_len
+            right_start, right_len = a_start, a_len
+
+        left_end = left_start + left_len - 1
+        right_end = right_start + right_len - 1
+        if right_start <= left_end:
+            raise HTTPException(status_code=400, detail="swap ranges overlap")
+
+        delta = right_len - left_len
+        middle_start = left_end + 1
+        middle_end = right_start - 1
+
+        updated = 0
+        next_items: List[Dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            try:
+                start_index = int(item.get("page_index"))
+            except (TypeError, ValueError):
+                next_items.append(item)
+                continue
+
+            new_index = start_index
+            if left_start <= start_index <= left_end:
+                # Left block moves after the right block (and shifted middle, if any).
+                new_left_start = right_start - left_len + right_len
+                new_index = new_left_start + (start_index - left_start)
+            elif right_start <= start_index <= right_end:
+                # Right block moves to left start.
+                new_index = left_start + (start_index - right_start)
+            elif middle_start <= start_index <= middle_end:
+                # Middle pages shift to fill the gap.
+                new_index = start_index + delta
+
+            if new_index != start_index:
+                updated_item = dict(item)
+                updated_item["page_index"] = new_index
+                position = _effective_position(updated_item)
+                updated_item["id"] = _build_rhyme_doc_id(safe_school, grade_for_id, new_index, position)
+                next_items.append(updated_item)
+                updated += 1
+            else:
+                next_items.append(item)
+
+        transaction_obj.set(
+            doc_ref,
+            {
+                "grade": grade,
+                "items": next_items,
+                "selected_pages": _sum_rhyme_selected_pages(next_items),
+                "selected_items_count": len(next_items),
+                "summary_updated_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            },
+            merge=True,
+        )
+
+        return {
+            "ok": True,
+            "updated": updated,
+            "a": a_page,
+            "b": b_page,
+            "left": {"page_index": left_start, "span": left_len},
+            "right": {"page_index": right_start, "span": right_len},
+        }
+
+    return _run_swap(transaction)
+
+@api_router.patch("/rhymes/freeze/{school_id}/{grade}")
+async def update_rhyme_freeze(school_id: str, payload: RhymeFreezePayload,grade:str, authorization: Optional[str] = Header(None)):
+    """Toggle freeze flag for a school's rhyme selections.
+
+    Any authenticated user can freeze selections. Only super-admin users can unfreeze.
+    """
+    decoded_token = _verify_and_decode_token(authorization)
+    user_record = _ensure_user_document(decoded_token)
+    if payload.freeze is False and user_record.get("role") != "super-admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required to unfreeze")
+
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+
+    now = datetime.utcnow()
+    freeze_payload: Dict[str, Any] = {
+        "freeze": bool(payload.freeze),
+        "freeze_updated_at": now,
+    }
+    if payload.updated_by:
+        freeze_payload["freeze_updated_by"] = payload.updated_by
+    if payload.updated_by_email:
+        freeze_payload["freeze_updated_by_email"] = payload.updated_by_email
+
+    _rhyme_collection_for_school(safe_school).document(grade).set(freeze_payload, merge=True)
+    return {"ok": True, "freeze": bool(payload.freeze), "updated_at": now.isoformat()}
+
+
 @api_router.get("/cover-status/{school_id}")
 async def get_cover_status(school_id: str, authorization: Optional[str] = Header(None)):
     """Fetch cover status for a school."""
@@ -1635,13 +2299,13 @@ async def list_cover_statuses_admin(
             .select(
                 [
                     "status",
-                    "status_updated_at",
-                    "status_updated_by",
-                    "status_updated_by_email",
-                    "freeze",
-                    "freeze_updated_at",
-                    "freeze_updated_by",
-                    "freeze_updated_by_email",
+                    # "status_updated_at",
+                    # "status_updated_by",
+                    # "status_updated_by_email",
+                    # "freeze",
+                    # "freeze_updated_at",
+                    # "freeze_updated_by",
+                    # "freeze_updated_by_email",
                 ]
             )
             .stream()
@@ -1655,14 +2319,14 @@ async def list_cover_statuses_admin(
         statuses.append(
             {
                 "school_id": snap.id,
-                "status": _normalize_cover_status(data.get("status")),
-                "status_updated_at": data.get("status_updated_at"),
-                "status_updated_by": data.get("status_updated_by"),
-                "status_updated_by_email": data.get("status_updated_by_email"),
-                "freeze": bool(data.get("freeze")) if "freeze" in data else False,
-                "freeze_updated_at": data.get("freeze_updated_at"),
-                "freeze_updated_by": data.get("freeze_updated_by"),
-                "freeze_updated_by_email": data.get("freeze_updated_by_email"),
+                "status": _normalize_cover_status(data.get("status"))
+                # "status_updated_at": data.get("status_updated_at"),
+                # "status_updated_by": data.get("status_updated_by"),
+                # "status_updated_by_email": data.get("status_updated_by_email"),
+                # "freeze": bool(data.get("freeze")) if "freeze" in data else False,
+                # "freeze_updated_at": data.get("freeze_updated_at"),
+                # "freeze_updated_by": data.get("freeze_updated_by"),
+                # "freeze_updated_by_email": data.get("freeze_updated_by_email"),
             }
         )
 
@@ -2050,6 +2714,12 @@ async def get_phonic_link(number:str)->str:
     
     
     
+@api_router.get("/rhymes/settings")
+async def get_rhyme_settings():
+    """Return optional rhyme catalogue settings (e.g., language UI config)."""
+    return RHYMES_SETTINGS or {}
+
+
 @api_router.get("/rhymes")
 async def get_all_rhymes():
     """Get all rhymes organized by pages"""
@@ -2080,20 +2750,23 @@ def get_available_rhymes(
     school_id: str, grade: str, include_selected: bool = False
 ):
     """Get available rhymes for a specific grade"""
-    grade_context = _build_grade_rhyme_personalisation_context(school_id, grade)
-    cartoon_head_codes = grade_context.get("cartoon_head_codes") or set()
-
     if not include_selected:
-        # Get already selected rhymes for ALL grades in this school
-        selections_ref = _rhyme_collection_for_school(school_id)
-        selected_rhymes: List[Dict[str, Any]] = []
-        for class_doc in selections_ref.stream():
+        # Get already selected rhymes for a grade in this school
+        selections_ref = _rhyme_collection_for_school(school_id).document(grade)
+        class_doc = selections_ref.get()
+        if not class_doc.exists:
+            # No rhyme doc => no selections => return all rhymes.
+            selected_codes = set()
+        else:
             data = class_doc.to_dict() or {}
-            items = data.get("items", [])
-            if isinstance(items, list):
-                selected_rhymes.extend(items)
-
-        selected_codes = {selection["rhyme_code"] for selection in selected_rhymes}
+            selections = data.get("items") or []
+            if not isinstance(selections, list):
+                selections = []
+            selected_codes = {
+                (selection.get("rhyme_code") or "").strip()
+                for selection in selections
+                if isinstance(selection, dict) and selection.get("rhyme_code")
+            }
     else:
         selected_codes = set()
 
@@ -2111,44 +2784,100 @@ def get_available_rhymes(
             rhymes_by_pages[page_key].append(
                 {
                     "code": code,
-                    "name": name, 
+                    "name": name,
                     "pages": pages,
                     "personalized": personalized,
                     "subject": subject,
-                    "requires_cartoon_head": code.upper() in cartoon_head_codes,
                 }
             )
 
     return rhymes_by_pages
 
-
-@api_router.get("/rhymes/selected/{school_id}")
-def get_selected_rhymes(school_id: str):
-    """Get all selected rhymes for a school organized by grade"""
+def rhymes_summary(school_id:str)->Dict[str,list[list]]:
+    """returns the  rhymes selected per page  with respect to each grade of a school"""
     selections_ref = _rhyme_collection_for_school(school_id)
-    selections: List[Dict[str, Any]] = []
+  
+    result={}
+    
+    seen=set()
+    code_id_of_same_page=[]
     for class_doc in selections_ref.stream():
         data = class_doc.to_dict() or {}
+        
+            
         items = data.get("items", [])
-        if isinstance(items, list):
-            selections.extend(items)
-
-    result = {}
-    grade_context_cache: Dict[str, Dict[str, Any]] = {}
-    for selection in selections:
-        grade = selection["grade"]
+        grade=data.get('grade')
+        
         if grade not in result:
-            result[grade] = []
-        if grade not in grade_context_cache:
-            grade_context_cache[grade] = _build_grade_rhyme_personalisation_context(
-                school_id, grade
-            )
+                result[grade] = []
+        if data.get("freeze",False)==False:
+            continue
+                
+        items.sort(key=lambda x: x["page_index"])
+       
 
+
+        for item in items:
+            
+            code = (item.get("rhyme_code") or "").strip()
+            page_index=item["page_index"]
+            pages=item["pages"]
+            
+            if pages >=1.0:
+                
+                    
+                    result[grade].append([code])
+            elif page_index not in seen:
+                    
+                    seen.add(page_index)
+                    code_id_of_same_page.append(code)
+            else:
+                code_id_of_same_page.append(code)
+                
+                result[grade].append(code_id_of_same_page)
+            
+                code_id_of_same_page=[]
+                
+            
+        
+    
+    
+           
+        
+    return result
+           
+@api_router.get("/rhymes/selected/{school_id}/{grade}")
+def get_selected_rhymes(school_id: str,grade:str):
+    """Get all selected rhymes for a grade """
+    grade_ref = (
+        db.collection("rhyme_selections")
+        .document(school_id)
+        .collection("classes")
+        .document(grade)
+    )
+    grade_doc = grade_ref.get()
+    result = {grade: []}
+
+    if not getattr(grade_doc, "exists", False):
+        return result
+
+    data = grade_doc.to_dict() or {}
+    items = data.get("items", [])
+    if not isinstance(items, list):
+        items = []
+
+    for selection in items:
+        if not isinstance(selection, dict):
+            continue
+       
+        
+       
         code = (selection.get("rhyme_code") or "").strip()
-        _, _, _, default_subject = _parse_rhyme_catalogue_entry(
+        _, _, personalized, default_subject = _parse_rhyme_catalogue_entry(
             RHYMES_DATA.get(code, []), code
         )
-        cartoon_head_codes = grade_context_cache[grade].get("cartoon_head_codes") or set()
+        
+        resolved_subject = _normalize_tree_subject(selection.get("subject") or default_subject)
 
         result[grade].append(
             {
@@ -2157,17 +2886,17 @@ def get_selected_rhymes(school_id: str):
                 "name": selection["rhyme_name"],
                 "pages": selection["pages"],
                 "position": selection.get("position"),
-                "subject": _normalize_tree_subject(selection.get("subject") or default_subject),
-                "requires_cartoon_head": code.upper() in cartoon_head_codes,
+                "personalized": personalized,
+               
+                "subject": resolved_subject,
             }
         )
         
-    for grade in result:  
-         result[grade].sort(key=lambda x: x["page_index"])
+    result[grade].sort(key=lambda x: x["page_index"])  # Sort by page_index
 
                                          
                                            
-    # Sort by page_index
+    
     return result
 
 @api_router.get("/admin/school-logo/{school_id}")
@@ -2198,7 +2927,7 @@ async def get_school_logo(school_id:str,authorization:Optional[str] = Header(Non
         raise HTTPException(status_code=404, detail="Logo not found")
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid logo path")
-    print(logo_blob[:16])
+   
     media_type = _detect_blob_mime_type(logo_blob)
     
     ext_from_path = ""
@@ -2213,9 +2942,7 @@ async def get_school_logo(school_id:str,authorization:Optional[str] = Header(Non
         "Content-Disposition": f'attachment; filename="{filename}"',
     }
     return Response(content=logo_blob, media_type=media_type, headers=headers)
-
-
-    
+  
     
 @api_router.get("/admin/binder-json/{school_id}")
 async def get_binder_json(school_id: str, authorization: Optional[str] = Header(None)):
@@ -2263,7 +2990,7 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
         if subject in {"english", "maths"} and component in {"core", "work", "addon"} and has_book and has_skillbook and grade_key in STICKER_CODES:
             stickers[grade_key] = STICKER_CODES[grade_key]
 
-    rhyme_selections = get_selected_rhymes(school_id)
+    rhyme_selections = rhymes_summary(school_id)
 
     root_cover_snapshot = _cover_root_doc(school_id).get()
     root_cover_data = root_cover_snapshot.to_dict() or {}
@@ -2409,7 +3136,7 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
             zf.writestr(f"{school_id}_instagram_qr.png", png2)
 
         logo_original_path = raw_school_record.get("logo_original_path")
-        print(logo_original_path)
+        
         if isinstance(logo_original_path, str) and logo_original_path.strip():
             resolved_path = logo_original_path.strip()
             if "/" not in resolved_path.strip("/"):
@@ -2471,13 +3198,10 @@ async def save_book_selections(
         label_to_grade[(label or "").strip().lower()] = canonical_key
     class_groups: Dict[str, List[Dict[str, Any]]] = {}
     for item in payload.selections:
-        # Prefer the underlying grade key (class / class_name) over display labels.
-        raw_class = (
-            item.get("class")
-            or item.get("class_name")
-            or item.get("class_label")
-            or ""
-        ).strip()
+        # Prefer the underlying grade key (class / class_name). Display labels are not stable identifiers.
+        raw_class = (item.get("class") or item.get("class_name") or "").strip()
+        if not raw_class:
+            raw_class = (item.get("class_label") or "").strip()
         if not raw_class:
             continue
         normalized_raw = _normalize_class_doc_id(raw_class)
@@ -2617,33 +3341,84 @@ def get_book_selections(school_id: str, authorization: Optional[str] = Header(No
     return {"classes": classes}
 
 #checking presence of all enabled grades in book selections and return status
-@api_router.get("/book-selections/{school_id}/grades")
-def get_book_selections_grades(school_id: str, authorization: Optional[str] = Header(None)):
-    """
-    Lightweight status view for book selections.
+# @api_router.get("/book-selections/{school_id}/grades")
+# def get_book_selections_grades(school_id: str, authorization: Optional[str] = Header(None)):
+#     """
+#     Lightweight status view for book selections.
 
-    Returns which enabled grades (from the school record) have a book-selection
-    document. Keeps the legacy `classes` field for compatibility with the
-    existing AuthPage check but avoids loading full doc payloads.
-    """
-    _verify_and_decode_token(authorization)
+#     Returns which enabled grades (from the school record) have a book-selection
+#     document. Keeps the legacy `classes` field for compatibility with the
+#     existing AuthPage check but avoids loading full doc payloads.
+#     """
+#     _verify_and_decode_token(authorization)
     
 
-    # Determine enabled grades from the school profile.
-    enabled_grades: List[str] = []
-    school_doc = db.collection("schools").document(school_id).get()
-    if school_doc.exists:
-        record = school_doc.to_dict() or {}
-        grades_map = school_profiles.normalize_grades(record.get("grades"))
+#     # Determine enabled grades from the school profile.
+#     enabled_grades: List[str] = []
+#     school_doc = db.collection("schools").document(school_id).get()
+#     if school_doc.exists:
+#         record = school_doc.to_dict() or {}
+#         grades_map = school_profiles.normalize_grades(record.get("grades"))
        
-        enabled_grades = [
-            key for key, entry in grades_map.items() if isinstance(entry, dict) and entry.get("enabled")
-        ]
+#         enabled_grades = [
+#             key for key, entry in grades_map.items() if isinstance(entry, dict) and entry.get("enabled")
+#         ]
 
-    # Fetch only doc ids (no payload) from the book selections collection.
-    class_docs = list(_book_collection_for_school(school_id).select([]).stream())
+#     # Fetch only doc ids (no payload) from the book selections collection.
+#     try:
+#         class_doc_ids = [doc_ref.id for doc_ref in _book_collection_for_school(school_id).list_documents()]
+#     except AttributeError:
+#         # Fallback for older Firestore clients that do not support list_documents().
+#         class_doc_ids = [doc.id for doc in _book_collection_for_school(school_id).select([]).stream()]
 
 
+
+#     def _norm(key: str) -> str:
+#         try:
+#             return key.strip().lower().replace(" ", "_")
+#         except Exception:
+#             return ""
+
+#     present_grades: Set[str] = set()
+
+#     for doc_id in class_doc_ids:
+#         norm_id = _norm(doc_id)
+#         if norm_id:
+#             present_grades.add(norm_id)
+        
+
+#     enabled_norm = [_norm(g) for g in enabled_grades if _norm(g)]
+#     missing = [g for g in enabled_norm if g not in present_grades]
+#     all_present = len(missing) == 0
+
+#     return {
+#         "all_present": all_present
+         
+#     }
+
+
+@api_router.get("/admin/book-selections/grades")
+async def get_book_selections_grades_batch(
+    school_ids: str, authorization: Optional[str] = Header(None)
+):
+    """
+    Batch version of `/book-selections/{school_id}/grades`.
+
+    Accepts a comma-separated `school_ids` query param and returns an array of
+    `{ school_id, all_present }` entries.
+    """
+    
+    
+    _verify_and_decode_token(authorization)
+
+    raw_ids = [part.strip() for part in (school_ids or "").split(",")]
+    ids: List[str] = []
+    seen: Set[str] = set()
+    for sid in raw_ids:
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        ids.append(sid)
 
     def _norm(key: str) -> str:
         try:
@@ -2651,24 +3426,74 @@ def get_book_selections_grades(school_id: str, authorization: Optional[str] = He
         except Exception:
             return ""
 
-    present_grades: Set[str] = set()
+    statuses: List[Dict[str, Any]] = []
+    started_at = time.perf_counter()
 
-    for doc in class_docs:
-        
-        doc_id = doc.id
-        norm_id = _norm(doc_id)
-        if norm_id:
-            present_grades.add(norm_id)
-        
+    def _get_enabled_grades_from_school_record(record: Dict[str, Any]) -> List[str]:
+       
+        grades_map = school_profiles.normalize_grades(record.get("grades"))
+        return [
+            key
+            for key, entry in grades_map.items()
+            if isinstance(entry, dict) and entry.get("enabled")
+        ]
 
-    enabled_norm = [_norm(g) for g in enabled_grades if _norm(g)]
-    missing = [g for g in enabled_norm if g not in present_grades]
-    all_present = len(missing) == 0
+    def _fetch_school_status_sync(sid: str) -> Dict[str, Any]:
+        safe_sid = (sid or "").strip()
+        if not safe_sid:
+            return {"school_id": sid, "all_present": False}
 
-    return {
-        "all_present": all_present
-         
-    }
+        school_doc = db.collection("schools").document(safe_sid).get(field_paths=["grades"])
+        if not getattr(school_doc, "exists", False):
+            return {"school_id": safe_sid, "all_present": False}
+
+        record = school_doc.to_dict() or {}
+        enabled_grades = _get_enabled_grades_from_school_record(record)
+        enabled_norm: List[str] = []
+        for grade_key in enabled_grades:
+            norm_key = _norm(grade_key)
+            if not norm_key:
+                continue
+            # Some school docs contain non-grade buckets like "branches"; ignore them.
+            if norm_key == "branches":
+                continue
+            enabled_norm.append(norm_key)
+        if not enabled_norm:
+            return {"school_id": safe_sid, "all_present": False}
+
+        # Single query to fetch grade doc ids for this school (no per-grade reads).
+        try:
+            docs = _book_collection_for_school(safe_sid).select([]).stream()
+            present_ids = { _norm(doc.id) for doc in docs if _norm(doc.id) }
+        except Exception as exc:
+            logger.exception("Failed to list book selection grades for school_id=%s", safe_sid)
+            return {"school_id": safe_sid, "all_present": False}
+
+        missing = [g for g in enabled_norm if g not in present_ids]
+        return {
+            "school_id": safe_sid,
+            "all_present": len(missing) == 0,
+        }
+
+    # Keep concurrency small to avoid spiking Firestore with one request per school at once.
+    # This uses the default threadpool via `asyncio.to_thread` (no custom worker pool).
+    max_concurrent_schools = min(8, max(1, len(ids)))
+    statuses = await _gather_limited(
+        ids,
+        max_concurrent_schools,
+        lambda sid: asyncio.to_thread(_fetch_school_status_sync, sid),
+    )
+
+    elapsed = time.perf_counter() - started_at
+    if elapsed >= 2:
+        logger.info(
+            "get_book_selections_grades_batch served %d schools in %.2fs (concurrency=%d)",
+            len(ids),
+            elapsed,
+            max_concurrent_schools,
+        )
+
+    return {"statuses": statuses}
 
 
 @api_router.post("/cover-selections")
@@ -2882,26 +3707,23 @@ def cover_selection_exists(
 @api_router.get("/rhymes/selected/other-grades/{school_id}/{grade}")
 def get_selected_rhymes_other_grades(school_id: str, grade: str):
     """Get rhymes selected in other grades that can be reused"""
-    grade_context = _build_grade_rhyme_personalisation_context(school_id, grade)
-    cartoon_head_codes = grade_context.get("cartoon_head_codes") or set()
-
     all_items = _get_all_rhyme_items(school_id)
     selections = [
         item for item in all_items if item and item.get("grade") and item.get("grade") != grade
     ]
 
-    # Get unique rhymes from other gra  des
+    # Get unique rhymes from other grades
     selected_rhymes = {}
     for selection in selections:
         code = selection["rhyme_code"]
-        _, _, _, default_subject = _parse_rhyme_catalogue_entry(RHYMES_DATA.get(code, []), code)
+        _, _, personalized, default_subject = _parse_rhyme_catalogue_entry(RHYMES_DATA.get(code, []), code)
         if code not in selected_rhymes:
             selected_rhymes[code] = {
                 "code": code,
                 "name": selection["rhyme_name"],
                 "pages": selection["pages"],
+                "personalized": personalized,
                 "subject": _normalize_tree_subject(selection.get("subject") or default_subject),
-                "requires_cartoon_head": code.upper() in cartoon_head_codes,
                 "used_in_grades": [],
             }
         selected_rhymes[code]["used_in_grades"].append(selection["grade"])
@@ -2917,7 +3739,6 @@ def get_selected_rhymes_other_grades(school_id: str, grade: str):
 
     return rhymes_by_pages
 
-
 @api_router.post("/rhymes/select", response_model=RhymeSelection)
 async def select_rhyme(input: RhymeSelectionCreate):
     """Select a rhyme for a specific grade and page index"""
@@ -2926,7 +3747,7 @@ async def select_rhyme(input: RhymeSelectionCreate):
         raise HTTPException(status_code=404, detail="Rhyme not found")
 
     rhyme_data = RHYMES_DATA[input.rhyme_code]
-    name, pages, _, subject = _parse_rhyme_catalogue_entry(rhyme_data, input.rhyme_code)
+    name, pages, personalized, subject = _parse_rhyme_catalogue_entry(rhyme_data, input.rhyme_code)
 
     # Normalize position (half-page rhymes can occupy top or bottom)
     requested_position = (input.position or "").strip().lower()
@@ -2934,41 +3755,11 @@ async def select_rhyme(input: RhymeSelectionCreate):
         "bottom" if pages == 0.5 and requested_position == "bottom" else "top"
     )
 
-    page_query = {
-        "school_id": input.school_id,
-        "grade": input.grade,
-        "page_index": input.page_index,
-    }
-
-    existing_selections = [
-        doc.to_dict()
-        for doc in _rhyme_collection_for_school(input.school_id)
-        .where("grade", "==", input.grade)
-        .where("page_index", "==", input.page_index)
-        .stream()
-    ]
-
-    for existing in existing_selections:
-        existing_pages = float(existing.get("pages", 1))
-        existing_position = (existing.get("position") or "top").lower()
-
-        should_remove = False
-
-        if pages > 0.5:
-            # Full-page rhyme replaces everything on the page
-            should_remove = True
-        else:
-            # Half-page rhymes should only replace conflicting entries
-            if existing_pages > 0.5:
-                should_remove = True
-            elif existing_position == normalized_position:
-                should_remove = True
-            elif existing.get("position") is None and normalized_position == "top":
-                # Legacy records without a stored position occupy the top slot
-                should_remove = True
-
-        if should_remove:
-            _rhyme_collection_for_school(input.school_id).document(existing["id"]).delete()
+    def _pages_value(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 1.0
 
     # Create new selection
     selection_dict = input.dict()
@@ -2976,34 +3767,221 @@ async def select_rhyme(input: RhymeSelectionCreate):
         input.school_id, input.grade, input.page_index, normalized_position
     )
 
+   
+
     selection_dict.update(
         {
             "id": selection_id,
             "rhyme_name": name,
             "pages": pages,
             "subject": subject,
-            "position": normalized_position,
+            "position": normalized_position
+            
         }
     )
-
+    page_count=int(pages)
+    page_index=input.page_index
+    total_index=page_index+page_count
     class_key = input.grade.strip().lower().replace(" ", "_")
     class_doc = _rhyme_collection_for_school(input.school_id).document(class_key)
     existing = class_doc.get().to_dict() or {}
     items: List[Dict[str, Any]] = existing.get("items", [])
+    removal_page_index=[index for index in range(page_index,total_index)]
 
-    # Do not replace existing entries; append if this id is new
-    if not any(item.get("id") == selection_id for item in items):
-        items.append(selection_dict)
+    # Remove conflicts on this page (server-side mirror of frontend computeRemovalsForSelection)
+    next_items: List[Dict[str, Any]] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        
+        if (item.get("page_index") not in removal_page_index) :
+            next_items.append(item)
+            continue
+        
+        existing_pages = _pages_value(item.get("pages", 1))
+        existing_position = (item.get("position") or "top").strip().lower() or "top"
 
+        should_remove = False
+        if pages > 0.5:
+            # Full-page rhyme replaces everything on the page
+            should_remove = True
+        else:
+            # Half-page rhymes only replace conflicting entries
+            if existing_pages > 0.5:
+                should_remove = True
+            elif existing_position == normalized_position:
+                should_remove = True
+            elif item.get("position") is None and normalized_position == "top":
+                # Legacy records without a stored position occupy the top slot
+                should_remove = True
+
+        if not should_remove:
+            next_items.append(item)
+
+    # Upsert this selection id (avoid duplicates)
+    next_items = [item for item in next_items if item.get("id") != selection_id]
+    next_items.append(selection_dict)
+    
+
+    now = datetime.utcnow()
+    selected_pages = _sum_rhyme_selected_pages(next_items)
     class_doc.set(
         {
             "grade": input.grade,
-            "items": items,
-            "updated_at": datetime.utcnow(),
-        }
+            "items": next_items,
+            "selected_pages": selected_pages,
+            "selected_items_count": len(next_items),
+            "summary_updated_at": now,
+            "updated_at": now,
+        },
+        merge=True,
     )
 
     return RhymeSelection(**selection_dict)
+
+
+@api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}/{position}")
+async def remove_specific_rhyme_selection(
+    school_id: str, grade: str, page_index: int, position: str
+):
+    """Remove a specific rhyme selection for a position (top/bottom) on a page."""
+
+    def _pages_value(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 1.0
+
+    class_key = grade.strip().lower().replace(" ", "_")
+    class_doc_ref = _rhyme_collection_for_school(school_id).document(class_key)
+    class_doc = class_doc_ref.get()
+    data = class_doc.to_dict() or {}
+    selections = data.get("items", [])
+
+    if not isinstance(selections, list) or not selections:
+        return {"message": "selection is removed"}
+
+    target_position = (position or "top").strip().lower() or "top"
+
+    removed_any = False
+    remaining: List[Dict[str, Any]] = []
+    for selection in selections:
+        if not isinstance(selection, dict):
+            continue
+
+        if str(selection.get("page_index")) != str(page_index):
+            remaining.append(selection)
+            continue
+
+        pages_value = _pages_value(selection.get("pages", 1))
+        stored_position = (selection.get("position") or "top").strip().lower() or "top"
+
+        should_remove = False
+        if pages_value > 0.5:
+            # Full-page rhyme occupies the page; remove regardless of requested slot.
+            should_remove = True
+        elif pages_value == 0.5:
+            if stored_position == target_position:
+                should_remove = True
+            elif selection.get("position") is None and target_position == "top":
+                # Legacy records without a stored position occupy the top slot.
+                should_remove = True
+
+        if should_remove:
+            removed_any = True
+        else:
+            remaining.append(selection)
+
+    if removed_any:
+        now = datetime.utcnow()
+        selected_pages = _sum_rhyme_selected_pages(remaining)
+        class_doc_ref.set(
+            {
+                "grade": grade,
+                "items": remaining,
+                "selected_pages": selected_pages,
+                "selected_items_count": len(remaining),
+                "summary_updated_at": now,
+                "updated_at": now,
+            },
+            merge=True
+        )
+
+    return {"message": f"{position.capitalize()} selection removed successfully"}
+
+
+@api_router.delete("/rhymes/page/{school_id}/{grade}/{page_index}")
+async def delete_rhyme_page(school_id: str, grade: str, page_index: int):
+    """Delete a rhyme page and shift later pages forward by 1.
+
+    Removes any selections that overlap the deleted page and decrements page_index
+    for selections that start after the deleted page.
+    """
+
+    def _pages_value(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 1.0
+
+    safe_school = (school_id or "").strip()
+    if not safe_school:
+        raise HTTPException(status_code=400, detail="school_id is required")
+
+    class_key = grade.strip().lower().replace(" ", "_")
+    class_doc_ref = _rhyme_collection_for_school(safe_school).document(class_key)
+    class_doc = class_doc_ref.get()
+    data = class_doc.to_dict() or {}
+    selections = data.get("items", [])
+
+    if not isinstance(selections, list) or not selections:
+        return {"ok": True, "removed": 0, "shifted": 0}
+
+    removed = 0
+    shifted = 0
+    remaining: List[Dict[str, Any]] = []
+
+    for selection in selections:
+        if not isinstance(selection, dict):
+            continue
+
+        try:
+            start_index = int(selection.get("page_index"))
+        except (TypeError, ValueError):
+            continue
+
+        pages_value = _pages_value(selection.get("pages", 1))
+        span = int(round(pages_value)) if pages_value and pages_value > 1 else 1
+        span = max(1, span)
+
+        overlaps_deleted = start_index <= page_index < (start_index + span)
+        if overlaps_deleted:
+            removed += 1
+            continue
+
+        if start_index > page_index:
+            new_index = start_index - 1
+            selection = dict(selection)
+            selection["page_index"] = new_index
+            position = (selection.get("position") or "top").strip().lower() or "top"
+            selection["id"] = _build_rhyme_doc_id(safe_school, grade, new_index, position)
+            shifted += 1
+
+        remaining.append(selection)
+
+    class_doc_ref.set(
+        {
+            "grade": grade,
+            "items": remaining,
+            "selected_pages": _sum_rhyme_selected_pages(remaining),
+            "selected_items_count": len(remaining),
+            "summary_updated_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        },
+        merge=True,
+    )
+
+    return {"ok": True, "removed": removed, "shifted": shifted}
 
 
 # @api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}")
@@ -3021,381 +3999,327 @@ async def select_rhyme(input: RhymeSelectionCreate):
 #     return {"message": "Selection removed successfully"}
 
 
-# @api_router.delete("/rhymes/remove/{school_id}/{grade}/{page_index}/{position}")
-# async def remove_specific_rhyme_selection(
-#     school_id: str, grade: str, page_index: int, position: str
-# ):
-#     """Remove a specific rhyme selection for a position (top/bottom)"""
-#     class_key = grade.strip().lower().replace(" ", "_")
-#     class_doc_ref = _rhyme_collection_for_school(school_id).document(class_key)
-#     class_doc = class_doc_ref.get()
-#     data = class_doc.to_dict() or {}
-#     selections = data.get("items", [])
-
-#     if not selections:
-#         # raise HTTPException(status_code=404, detail="No selections found for this page")
-#         return {"message": f"selection is removed"}
-
-#     # Find and remove the specific position rhyme
-#     target_position = position.lower()
-#     selection_to_remove = None
-
-#     for selection in selections:
-#         pages = float(selection.get("pages", 0))
-#         stored_position = (selection.get("position") or "top").lower()
-
-#         if pages > 0.5:
-#             if target_position == "top":
-#                 selection_to_remove = selection
-#                 break
-#         elif pages == 0.5:
-#             if stored_position == target_position:
-#                 selection_to_remove = selection
-#                 break
-#             if selection.get("position") is None and target_position == "top":
-#                 selection_to_remove = selection
-#                 break
-
-#     if not selection_to_remove:
-#         for selection in selections:
-#             if target_position == "top" and selection.get("pages") != 0.5:
-#                 selection_to_remove = selection
-#                 break
-#             if target_position == "bottom" and selection.get("pages") == 0.5:
-#                 selection_to_remove = selection
-#                 break
-
-#     if not selection_to_remove:
-#         raise HTTPException(
-#             status_code=404, detail="Selection not found for the specified position"
-#         )
-
-#     # Remove the selection by rewriting class items
-#     remaining = [item for item in selections if item.get("id") != selection_to_remove["id"]]
-#     class_doc_ref.set(
-#         {
-#             "grade": grade,
-#             "items": remaining,
-#             "updated_at": datetime.utcnow(),
-#         }
-#     )
-
-#     return {"message": f"{position.capitalize()} selection removed successfully"}
-
-
 @api_router.get("/rhymes/status/{school_id}")
-async def get_grade_status(school_id: str):
+async def get_grade_status(school_id: str, no_cache: bool = Query(False, alias="no_cache")):
     """Get selection status for all grades"""
-    school_doc = db.collection("schools").document(school_id).get()
-    enabled_grades = []
-    if school_doc.exists:
-        record = school_doc.to_dict() or {}
-        grades_map = record.get("grades") or {}
-        if isinstance(grades_map, dict):
-            for key, value in grades_map.items():
-                try:
-                    normalized_key = key.strip().lower()
-                except Exception:
-                    continue
-                is_enabled = bool(value.get("enabled")) if isinstance(value, dict) else False
-                if is_enabled:
-                    enabled_grades.append(normalized_key)
+    
+    if not no_cache:
+        now = time.monotonic()
+        async with _RHYMES_STATUS_CACHE_LOCK:
+            _rhymes_status_cache_prune(now)
+            cached = _RHYMES_STATUS_CACHE.get(school_id)
+            if cached is not None:
+                expires_at, payload = cached
+                if expires_at > now:
+                    _RHYMES_STATUS_CACHE.move_to_end(school_id, last=True)
+                    return payload
+                _RHYMES_STATUS_CACHE.pop(school_id, None)
 
-    grades = enabled_grades or ["nursery", "lkg", "ukg", "playgroup"]
-    status = []
+    try:
+        school_doc = db.collection("schools").document(school_id).get(field_paths=["grades"])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Unable to fetch school record") from exc
 
-    for grade in grades:
-        class_key = grade.strip().lower().replace(" ", "_")
-        class_doc = _rhyme_collection_for_school(school_id).document(class_key).get()
-        class_data = class_doc.to_dict() or {}
-        selections = class_data.get("items", [])
 
-        selected_count = len(selections)
-        selected_pages = 0.0
+    record = school_doc.to_dict() or {}
+    grades_map = record.get("grades") or {}
 
-        for selection in selections:
-            pages_value = selection.get("pages", 0)
-            try:
-                normalized_pages = float(pages_value)
-            except (TypeError, ValueError):
-                normalized_pages = 0.0
+    enabled_grades = [
+        (grade, grade.strip().lower().replace(" ", "_"))
+        for grade, meta in grades_map.items()
+        if isinstance(meta, dict) and meta.get("enabled") is True
+    ]
+    
+    
 
-            if normalized_pages <= 0:
-                normalized_pages = 1.0
+    doc_refs = [
+        _rhyme_collection_for_school(school_id).document(class_key)
+        for _, class_key in enabled_grades
+    ]
+   
 
-            selected_pages += normalized_pages
+    snaps = list(db.get_all(doc_refs, field_paths=["selected_pages"]))
+  
+
+    status: List[Dict[str, Any]] = []
+   
+
+    # Do not rely on positional zips for correctness. If a grade doc is missing (or
+    # Firestore returns snapshots in an unexpected order), zipping can "shift" values
+    # and report the wrong grade's selected_pages. Key by document id instead.
+    doc_ref_by_id = {doc_ref.id: doc_ref for doc_ref in doc_refs}
+    snap_by_id = {snap.reference.id: snap for snap in snaps if getattr(snap, "reference", None)}
+
+    for grade_label, class_key in enabled_grades:
+        doc_ref = doc_ref_by_id.get(class_key)
+        snap = snap_by_id.get(class_key)
+
+        if not snap or not getattr(snap, "exists", False) or not doc_ref:
+            status.append(
+                {
+                    "grade": grade_label,
+                    "total_available": 25,
+                    "selected_pages": 0.0,
+                    "max_pages": MAX_RHYME_PAGES,
+                }
+            )
+            continue
+
+        data = snap.to_dict() or {}
+        selected_pages_raw = data.get("selected_pages")
+        # if selected_pages_raw is None:
+        #     # Backfill once for legacy docs that don't have `selected_pages` yet.
+        #     full_snap = doc_ref.get(field_paths=["items", "grade"])
+        #     full_data = full_snap.to_dict() or {}
+        #     items = full_data.get("items", [])
+        #     selected_pages = _sum_rhyme_selected_pages(items)
+        #     doc_ref.set(
+        #         {
+        #             "selected_pages": selected_pages,
+        #             "selected_items_count": len(items) if isinstance(items, list) else 0,
+        #             "summary_updated_at": datetime.utcnow(),
+        #         },
+        #         merge=True,
+        #     )
+        #     data = {**full_data, **data, "selected_pages": selected_pages}
+        # else:
+        try:
+            selected_pages = float(selected_pages_raw or 0.0)
+        except (TypeError, ValueError):
+            selected_pages = 0.0
 
         status.append(
             {
-                "grade": grade,
-                "selected_count": selected_count,
-                "total_available": 25,  # Maximum 25 rhymes can be selected
+                "grade": data.get("grade") or grade_label,
+                "total_available": 25,
                 "selected_pages": selected_pages,
                 "max_pages": MAX_RHYME_PAGES,
             }
         )
+    if not no_cache:
+        async with _RHYMES_STATUS_CACHE_LOCK:
+            now = time.monotonic()
+            _rhymes_status_cache_prune(now)
+            _RHYMES_STATUS_CACHE[school_id] = (time.monotonic() + _RHYMES_STATUS_CACHE_TTL_SECONDS, status)
+            _RHYMES_STATUS_CACHE.move_to_end(school_id, last=True)
+            _rhymes_status_cache_prune(time.monotonic())
 
     return status
 
+# @api_router.delete("/admin/schools/{school_id}")
+# async def delete_school(school_id: str, authorization: Optional[str] = Header(None)):
+#     """Delete a school and all of its rhyme selections."""
+#     decoded_token = _verify_and_decode_token(authorization)
+#     user_record = _ensure_user_document(decoded_token)
+#     if user_record.get("role") != "super-admin":
+#         raise HTTPException(status_code=403, detail="Admin privileges required")
 
-async def get_all_schools_with_selections(
-    page: int = 1, limit: int = 10, authorization: Optional[str] = Header(None)
-):
-    """Return all schools with their rhyme selections grouped by grade, with pagination."""
-    decoded_token = _verify_and_decode_token(authorization)
-    user_record = _ensure_user_document(decoded_token)
-    if user_record.get("role") != "super-admin":
-        raise HTTPException(status_code=403, detail="Admin privileges required")
+#     school_query = db.collection("schools").where("school_id", "==", school_id)
+#     school_docs = [doc for doc in school_query.stream()]
+#     for doc in school_docs:
+#         doc.reference.delete()
+#     school_result_deleted_count = len(school_docs)
 
-    # Fetch total count first
-    total_schools_query = db.collection("schools")
-    total_count = len(list(total_schools_query.stream()))
+#     selection_query = db.collection("rhyme_selections").where("school_id", "==", school_id)
+#     selection_docs = [doc for doc in selection_query.stream()]
+#     for doc in selection_docs:
+#         doc.reference.delete()
+#     selection_result_deleted_count = len(selection_docs)
 
-    # Apply pagination to the main query
-    offset = (page - 1) * limit
-    school_docs_query = (
-        db.collection("schools")
-        .order_by("timestamp", direction=firestore.Query.DESCENDING)
-    )
-    # Get all docs first then apply skip and limit
-    all_school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
-    school_docs = all_school_docs[offset : offset + limit]
+#     if school_result_deleted_count == 0 and selection_result_deleted_count == 0:
+#         raise HTTPException(status_code=404, detail="School not found")
 
-    if not school_docs:
-        return PaginatedSchoolResponse(schools=[], total_count=total_count)
-
-    school_ids = [doc.get("school_id") for doc in school_docs if doc.get("school_id")]
-
-    selection_docs: List[Dict[str, Any]] = []
-    for school_id in school_ids:
-        for class_doc in _rhyme_collection_for_school(school_id).stream():
-            data = class_doc.to_dict() or {}
-            items = data.get("items", [])
-            if isinstance(items, list):
-                selection_docs.extend(items)
-
-    selections_by_school: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
-    latest_selection_timestamp: Dict[str, datetime] = {}
-
-    for selection in selection_docs:
-        school_id = selection.get("school_id")
-        grade = selection.get("grade")
-
-        if not school_id or not grade:
-            continue
-
-        school_bucket = selections_by_school.setdefault(school_id, {})
-        grade_bucket = school_bucket.setdefault(grade, [])
-        grade_bucket.append(selection)
-
-        timestamp = selection.get("timestamp")
-        if timestamp:
-            existing = latest_selection_timestamp.get(school_id)
-            if not existing or timestamp > existing:
-                latest_selection_timestamp[school_id] = timestamp
-
-    def sort_key(selection: Dict[str, Any]):
-        page_index = selection.get("page_index")
-        try:
-            normalized_page = int(page_index)
-        except (TypeError, ValueError):
-            normalized_page = 0
-
-        position = (selection.get("position") or "top").strip().lower()
-        position_weight = 1 if position == "bottom" else 0
-
-        return (normalized_page, position_weight)
-
-    schools_with_details: List[SchoolWithSelections] = []
-
-    for doc in school_docs:
-        school_id = doc.get("school_id")
-        if not school_id:
-            continue
-
-        if not doc.get("id"):
-            doc["id"] = school_id
-
-        base_school = school_profiles.build_school_from_record(doc)
-
-        grade_map: Dict[str, List[RhymeSelectionDetail]] = {}
-
-        for grade, selections in selections_by_school.get(school_id, {}).items():
-            sorted_selections = sorted(selections, key=sort_key)
-            detailed_selections: List[RhymeSelectionDetail] = []
-
-            for selection in sorted_selections:
-                page_index_raw = selection.get("page_index", 0)
-                try:
-                    page_index = int(page_index_raw)
-                except (TypeError, ValueError):
-                    page_index = 0
-
-                pages_raw = selection.get("pages", 0)
-                try:
-                    pages_value = float(pages_raw)
-                except (TypeError, ValueError):
-                    pages_value = 0.0
-
-                detailed_selections.append(
-                    RhymeSelectionDetail(
-                        id=selection.get("id"),
-                        page_index=page_index,
-                        rhyme_code=selection.get("rhyme_code"),
-                        rhyme_name=selection.get("rhyme_name"),
-                        pages=pages_value,
-                        position=selection.get("position"),
-                        timestamp=selection.get("timestamp"),
-                    )
-                )
-
-            grade_map[grade] = detailed_selections
-
-        total_selections = sum(len(items) for items in grade_map.values())
-        last_updated = latest_selection_timestamp.get(school_id) or doc.get("timestamp")
-
-        schools_with_details.append(
-            SchoolWithSelections(
-                **base_school.dict(),
-                total_selections=total_selections,
-                last_updated=last_updated,
-                grade_selections=grade_map,
-            )
-        )
-
-    return PaginatedSchoolResponse(schools=schools_with_details, total_count=total_count)
+#     return {
+#         "message": "School and associated rhymes removed successfully",
+#         "removed_school": school_result_deleted_count,
+#         "removed_selections": selection_result_deleted_count,
+#     }
 
 
-@api_router.delete("/admin/schools/{school_id}")
-async def delete_school(school_id: str, authorization: Optional[str] = Header(None)):
-    """Delete a school and all of its rhyme selections."""
-    decoded_token = _verify_and_decode_token(authorization)
-    user_record = _ensure_user_document(decoded_token)
-    if user_record.get("role") != "super-admin":
-        raise HTTPException(status_code=403, detail="Admin privileges required")
+# def _localize_rhyme_svg_markup(svg_markup: str, source_path: Optional[Path], rhyme_code: str) -> str:
+#     """Rewrite external image references without inlining bitmap data."""
 
-    school_query = db.collection("schools").where("school_id", "==", school_id)
-    school_docs = [doc for doc in school_query.stream()]
-    for doc in school_docs:
-        doc.reference.delete()
-    school_result_deleted_count = len(school_docs)
-
-    selection_query = db.collection("rhyme_selections").where("school_id", "==", school_id)
-    selection_docs = [doc for doc in selection_query.stream()]
-    for doc in selection_docs:
-        doc.reference.delete()
-    selection_result_deleted_count = len(selection_docs)
-
-    if school_result_deleted_count == 0 and selection_result_deleted_count == 0:
-        raise HTTPException(status_code=404, detail="School not found")
-
-    return {
-        "message": "School and associated rhymes removed successfully",
-        "removed_school": school_result_deleted_count,
-        "removed_selections": selection_result_deleted_count,
-    }
+#     try:
+#         return _localize_svg_image_assets(
+#             svg_markup,
+#             source_path or Path("."),
+#             rhyme_code,
+#             inline_mode=False,
+#             cache_dir=_get_rhyme_image_cache_dir(rhyme_code),
+#             asset_url_prefix=f"/api/rhymes/images/{quote(rhyme_code, safe='')}",
+#         )
+#     except Exception as exc:  # pragma: no cover - defensive fallback
+#         logger.warning(
+#             "Unable to rewrite image assets for rhyme %s from %s: %s",
+#             rhyme_code,
+#             source_path,
+#             exc,
+#         )
+#         return svg_markup
 
 
-def _localize_rhyme_svg_markup(svg_markup: str, source_path: Optional[Path], rhyme_code: str) -> str:
-    """Rewrite external image references without inlining bitmap data."""
+# @lru_cache(maxsize=256)
+# def _get_cached_rhyme_pages(rhyme_code: str) -> Dict[str, List[str]]:
+#     """Return a cached list of localised SVG pages for ``rhyme_code``."""
 
-    try:
-        return _localize_svg_image_assets(
-            svg_markup,
-            source_path or Path("."),
-            rhyme_code,
-            inline_mode=False,
-            cache_dir=_get_rhyme_image_cache_dir(rhyme_code),
-            asset_url_prefix=f"/api/rhymes/images/{quote(rhyme_code, safe='')}",
-        )
-    except Exception as exc:  # pragma: no cover - defensive fallback
-        logger.warning(
-            "Unable to rewrite image assets for rhyme %s from %s: %s",
-            rhyme_code,
-            source_path,
-            exc,
-        )
-        return svg_markup
+#     svg_path = _resolve_rhyme_svg_path(rhyme_code)
 
+#     svg_pages: List[str] = []
+#     source_paths: List[str] = []
 
-@lru_cache(maxsize=256)
-def _get_cached_rhyme_pages(rhyme_code: str) -> Dict[str, List[str]]:
-    """Return a cached list of localised SVG pages for ``rhyme_code``."""
+#     if svg_path is not None:
+#         candidates: List[Path] = list(svg_path)
 
-    svg_path = _resolve_rhyme_svg_path(rhyme_code)
+#         for candidate in candidates:
+#             try:
+#                 svg_content = candidate.read_text(encoding="utf-8")
+#             except OSError as exc:
+#                 logger.error(
+#                     "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, candidate, exc
+#                 )
+#                 continue
 
-    svg_pages: List[str] = []
-    source_paths: List[str] = []
+#             localized_markup = _localize_rhyme_svg_markup(svg_content, candidate, rhyme_code)
+#             svg_pages.append(localized_markup)
+#             source_paths.append(str(candidate))
 
-    if svg_path is not None:
-        candidates: List[Path] = list(svg_path)
+#     if svg_pages:
+#         return {"pages": svg_pages, "sources": source_paths}
 
-        for candidate in candidates:
-            try:
-                svg_content = candidate.read_text(encoding="utf-8")
-            except OSError as exc:
-                logger.error(
-                    "Unable to read SVG for rhyme %s at %s: %s", rhyme_code, candidate, exc
-                )
-                continue
+#     try:
+#         document = _load_rhyme_svg_markup(rhyme_code)
+#     except KeyError as exc:
+#         raise HTTPException(status_code=404, detail="Rhyme not found") from exc
 
-            localized_markup = _localize_rhyme_svg_markup(svg_content, candidate, rhyme_code)
-            svg_pages.append(localized_markup)
-            source_paths.append(str(candidate))
+#     localized_markup = _localize_rhyme_svg_markup(
+#         document.markup, document.source_path, rhyme_code
+#     )
 
-    if svg_pages:
-        return {"pages": svg_pages, "sources": source_paths}
-
-    try:
-        document = _load_rhyme_svg_markup(rhyme_code)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Rhyme not found") from exc
-
-    localized_markup = _localize_rhyme_svg_markup(
-        document.markup, document.source_path, rhyme_code
-    )
-
-    return {"pages": [localized_markup], "sources": [str(document.source_path or "auto-generated")]} 
+#     return {"pages": [localized_markup], "sources": [str(document.source_path or "auto-generated")]} 
 
 
-@api_router.get("/rhymes/svg/{rhyme_code}")
-async def get_rhyme_svg(rhyme_code: str):
-    """Return all SVG pages for the requested rhyme as a JSON list.
+# @api_router.get("/rhymes/svg/{rhyme_code}")
+# async def get_rhyme_svg(
+#     rhyme_code: str,
+#     grade: Optional[str] = None,
+#     school_id: Optional[str] = None,
+#     refresh: bool = False,
+# ):
+#     """Return all SVG pages for the requested rhyme as a JSON list.
 
-    The results are cached to avoid repeated filesystem reads and asset
-    localisation work, ensuring multi-page rhymes can be stepped through on the
-    frontend without repeatedly hitting the backend.
-    """
+#     The results are cached to avoid repeated filesystem reads and asset
+#     localisation work, ensuring multi-page rhymes can be stepped through on the
+#     frontend without repeatedly hitting the backend.
+#     """
 
-    svg_payload = _get_cached_rhyme_pages(rhyme_code)
+#     if refresh: 
+#         _get_cached_rhyme_pages.cache_clear()
 
-    if not svg_payload.get("pages"):
-        raise HTTPException(status_code=404, detail="Rhyme not found")
+#     svg_payload = _get_cached_rhyme_pages(rhyme_code)
+#     pages = svg_payload.get("pages") or []
 
-    return JSONResponse(svg_payload)
+#     if not pages:
+#         raise HTTPException(status_code=404, detail="Rhyme not found")
+
+#     personalisation_value = None
+#     if school_id and grade:
+#         personalisation_value = (
+#             _get_grade_book_personalisation_value(school_id, grade) or "no"
+#         ).strip().lower()
+
+#     # Replacement requirement: when personalisation is NOT "yes", replace the head image.
+#     should_swap_head = bool(personalisation_value and personalisation_value != "yes")
+#     if not should_swap_head:
+#         return JSONResponse(svg_payload)
+
+#     public_dir = Path(__file__).resolve().parent / "public"
+   
+#     preferred_head = public_dir / "colour-head.png"
+    
+#     if preferred_head.exists():
+#         head_href = "/public/colour-head.png"
+#     else:
+#         head_href = "/public/cartoon-head.png"
+
+#     def _swap_head_image(svg_markup: str) -> str:
+#         if not isinstance(svg_markup, str) or not svg_markup.strip():
+#             return svg_markup
+
+#         try:
+#             dom = p(io.StringIO(svg_markup))
+#         except Exception:
+#             return svg_markup
+
+#         replaced = False
+#         for group in dom.getElementsByTagName("g"):
+#             try:
+#                 if group.getAttribute("id") != "head":
+#                     continue
+#             except Exception:
+#                 continue
+
+#             for image in group.getElementsByTagName("image"):
+#                 try:
+#                     image.setAttribute("xlink:href", head_href)
+#                     image.setAttribute("href", head_href)
+#                     replaced = True
+#                 except Exception:
+#                     continue
+
+#         if not replaced:
+#             return svg_markup
+
+#         try:
+#             return dom.documentElement.toxml()
+#         except Exception:
+#             return svg_markup
+
+#     updated = dict(svg_payload)
+#     updated["pages"] = [_swap_head_image(page) for page in pages]
+#     return JSONResponse(updated)
 
 
-@api_router.get("/rhymes/svg-image/{rhyme_code}")
-async def get_rhyme_svg_image(rhyme_code: str, file: str):
-    """Return a bitmap asset referenced by a rhyme SVG (legacy query API)."""
+# @api_router.get("/rhymes/svg/{school_id}/{rhyme_code}", deprecated=True)
+# async def get_rhyme_svg_for_school_grade(
+#     school_id: str, rhyme_code: str, grade: str, refresh: bool = False
+# ):
+#     return await get_rhyme_svg(
+#         rhyme_code,
+#         grade=grade,
+#         school_id=school_id,
+#         refresh=refresh,
+#     )
 
-    image_path = _resolve_rhyme_image_path(rhyme_code, file)
-    mime_type, _ = mimetypes.guess_type(image_path.name)
-    if not mime_type:
-        mime_type = "application/octet-stream"
 
-    try:
-        content = image_path.read_bytes()
-    except OSError as exc:
-        logger.error("Unable to read image %s for rhyme %s: %s", image_path, rhyme_code, exc)
-        raise HTTPException(status_code=500, detail="Unable to read image file") from exc
+# @api_router.get("/rhymes/svg-image/{rhyme_code}")
+# async def get_rhyme_svg_image(rhyme_code: str, file: str):
+#     """Return a bitmap asset referenced by a rhyme SVG (legacy query API)."""
 
-    return Response(content=content, media_type=mime_type)
+#     image_path = _resolve_rhyme_image_path(rhyme_code, file)
+#     mime_type, _ = mimetypes.guess_type(image_path.name)
+#     if not mime_type:
+#         mime_type = "application/octet-stream"
+
+#     try:
+#         content = image_path.read_bytes()
+#     except OSError as exc:
+#         logger.error("Unable to read image %s for rhyme %s: %s", image_path, rhyme_code, exc)
+#         raise HTTPException(status_code=500, detail="Unable to read image file") from exc
+
+#     return Response(content=content, media_type=mime_type)
 
 
 @api_router.get("/rhymes/images/{rhyme_code}/{file_name}")
 async def get_rhyme_image(rhyme_code: str, file_name: str):
     """Serve cached rhyme image assets as regular files for browser consumption."""
+
+    if file_name in {"cartoon-head.png", "colour-head.png"}:
+        public_dir = Path(__file__).resolve().parent / "public"
+        candidate = public_dir / file_name
+        if not candidate.exists() and file_name == "colour-head.png":
+            candidate = public_dir / "cartoon-head.png"
+        if candidate.exists():
+            return FileResponse(candidate)
 
     image_path = _resolve_rhyme_image_path(rhyme_code, file_name)
     mime_type, _ = mimetypes.guess_type(image_path.name)
@@ -3409,6 +4333,63 @@ async def get_rhyme_image(rhyme_code: str, file_name: str):
         raise HTTPException(status_code=500, detail="Unable to read image file") from exc
 
     return Response(content=content, media_type=mime_type)
+
+
+@api_router.get("/rhymes/jpeg-pages")
+async def list_rhyme_jpeg_pages(
+    rhyme_code: str = Query(...),
+    grade: str = Query(...),
+    subject: str = Query(...),
+    bucket: Literal["personalised", "non_personalised"] = Query(...),
+    variant: Optional[Literal["cartoon", "non_cartoon"]] = Query(None),
+):
+    """List JPEG preview pages for a rhyme based on the public folder hierarchy."""
+
+    safe_code = (rhyme_code or "").strip()
+    safe_grade = (grade or "").strip()
+    safe_subject = (subject or "").strip()
+
+    if not safe_code:
+        raise HTTPException(status_code=400, detail="rhyme_code is required")
+    if not safe_grade:
+        raise HTTPException(status_code=400, detail="grade is required")
+    if not safe_subject:
+        raise HTTPException(status_code=400, detail="subject is required")
+
+    if bucket == "personalised":
+        resolved_variant = "non_cartoon" if not variant else variant
+        base_dir = PUBLIC_DIR / safe_grade / safe_subject / bucket / resolved_variant
+        base_url_parts = [PUBLIC_URL_PREFIX.strip("/"), safe_grade, safe_subject, bucket, resolved_variant]
+    else:
+        base_dir = PUBLIC_DIR / safe_grade / safe_subject / bucket
+        base_url_parts = [PUBLIC_URL_PREFIX.strip("/"), safe_grade, safe_subject, bucket]
+
+    folder_dir = base_dir / safe_code
+
+    def _sort_key(path: Path) -> Tuple[int, str]:
+        stem = path.stem
+        try:
+            return (int(stem), path.name)
+        except Exception:
+            return (10_000, path.name)
+
+    pages: List[str] = []
+    if folder_dir.exists() and folder_dir.is_dir():
+        candidates = [
+            p
+            for p in folder_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg"}
+        ]
+        for candidate in sorted(candidates, key=_sort_key):
+            pages.append("/" + "/".join(base_url_parts + [safe_code, candidate.name]))
+    else:
+        for ext in ("jpeg", "jpg"):
+            single_file = base_dir / f"{safe_code}.{ext}"
+            if single_file.exists() and single_file.is_file():
+                pages.append("/" + "/".join(base_url_parts + [f"{safe_code}.{ext}"]))
+                break
+
+    return {"pages": pages}
 
 
 @api_router.get("/cover-assets/themes")
@@ -3460,8 +4441,8 @@ async def delete_library_theme_cover(theme_key: str, request: Request):
     return {"status": "ok", "theme": _build_library_theme_payload(theme_key, request), "library": _build_library_manifest(request)}
 
 
-@api_router.post("/cover-library/colours/{version}/{grade_code}")
-async def upload_library_colour(version: str, grade_code: str, file: UploadFile = File(...), request: Request = None):
+# @api_router.post("/cover-library/colours/{version}/{grade_code}")
+# async def upload_library_colour(version: str, grade_code: str, file: UploadFile = File(...), request: Request = None):
     if grade_code.upper() not in LIBRARY_GRADE_CODES:
         raise HTTPException(status_code=400, detail="Grade code must be one of P,N,L,U.")
     content = await file.read()
@@ -3477,17 +4458,17 @@ async def upload_library_colour(version: str, grade_code: str, file: UploadFile 
     return {"status": "ok", "library": _build_library_manifest(request)}
 
 
-@api_router.delete("/cover-library/colours/{version}/{grade_code}")
-async def delete_library_colour(version: str, grade_code: str, request: Request):
-    if grade_code.upper() not in LIBRARY_GRADE_CODES:
-        raise HTTPException(status_code=400, detail="Grade code must be one of P,N,L,U.")
-    # remove any extension variant
-    safe_grade = _sanitize_component(grade_code, "P")
-    safe_version = _sanitize_component(version, "V1")
-    for base_dir in LIBRARY_COLOUR_BASE_DIRS:
-        version_dir = base_dir / safe_version
-        _remove_existing_images(version_dir, safe_grade)
-    return {"status": "ok", "library": _build_library_manifest(request)}
+# @api_router.delete("/cover-library/colours/{version}/{grade_code}")
+# async def delete_library_colour(version: str, grade_code: str, request: Request):
+#     if grade_code.upper() not in LIBRARY_GRADE_CODES:
+#         raise HTTPException(status_code=400, detail="Grade code must be one of P,N,L,U.")
+#     # remove any extension variant
+#     safe_grade = _sanitize_component(grade_code, "P")
+#     safe_version = _sanitize_component(version, "V1")
+#     for base_dir in LIBRARY_COLOUR_BASE_DIRS:
+#         version_dir = base_dir / safe_version
+#         _remove_existing_images(version_dir, safe_grade)
+#     return {"status": "ok", "library": _build_library_manifest(request)}
 
 
 # ---------------------------------------------------------------------------
@@ -3536,57 +4517,57 @@ async def rebuild_cover_images(source_dir: Optional[str] = None):
     return summary
 
 
-# Temporary helper UI to trigger the rebuild endpoint from a browser.
-@app.get("/admin/rebuild-images", response_class=HTMLResponse)
-async def rebuild_images_page():
-    html = """
-    <!doctype html>
-    <html>
-    <head>
-      <meta charset="utf-8" />
-      <title>Rebuild WebP Images</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 24px; max-width: 720px; margin: auto; }
-        label { display: block; margin-bottom: 8px; font-weight: 600; }
-        input { width: 100%; padding: 8px; margin-bottom: 12px; }
-        button { padding: 10px 16px; font-size: 15px; cursor: pointer; }
-        #log { margin-top: 16px; font-family: monospace; white-space: pre-wrap; border: 1px solid #ddd; padding: 12px; border-radius: 6px; background: #f9fafb; }
-      </style>
-    </head>
-    <body>
-      <h2>Rebuild WebP Images</h2>
-      <p>Click to POST <code>/api/cover-assets/rebuild-images</code>. Leave the path blank to use defaults.</p>
-      <label for="dir">Source directory (optional)</label>
-      <input id="dir" type="text" placeholder="e.g. C:/path/to/covers or /media/cover-library/themes" />
-      <button id="run">Run rebuild</button>
-      <div id="log">Idle</div>
-      <script>
-        const btn = document.getElementById('run');
-        const log = document.getElementById('log');
-        btn.onclick = async () => {
-          btn.disabled = true;
-          log.textContent = 'Running...';
-          try {
-            const dir = document.getElementById('dir').value.trim();
-            const body = dir ? { source_dir: dir } : {};
-            const res = await fetch('/api/cover-assets/rebuild-images', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body)
-            });
-            const data = await res.json();
-            log.textContent = JSON.stringify(data, null, 2);
-          } catch (err) {
-            log.textContent = 'Error: ' + err;
-          } finally {
-            btn.disabled = false;
-          }
-        };
-      </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html)
+# # Temporary helper UI to trigger the rebuild endpoint from a browser.
+# @app.get("/admin/rebuild-images", response_class=HTMLResponse)
+# async def rebuild_images_page():
+#     html = """
+#     <!doctype html>
+#     <html>
+#     <head>
+#       <meta charset="utf-8" />
+#       <title>Rebuild WebP Images</title>
+#       <style>
+#         body { font-family: Arial, sans-serif; padding: 24px; max-width: 720px; margin: auto; }
+#         label { display: block; margin-bottom: 8px; font-weight: 600; }
+#         input { width: 100%; padding: 8px; margin-bottom: 12px; }
+#         button { padding: 10px 16px; font-size: 15px; cursor: pointer; }
+#         #log { margin-top: 16px; font-family: monospace; white-space: pre-wrap; border: 1px solid #ddd; padding: 12px; border-radius: 6px; background: #f9fafb; }
+#       </style>
+#     </head>
+#     <body>
+#       <h2>Rebuild WebP Images</h2>
+#       <p>Click to POST <code>/api/cover-assets/rebuild-images</code>. Leave the path blank to use defaults.</p>
+#       <label for="dir">Source directory (optional)</label>
+#       <input id="dir" type="text" placeholder="e.g. C:/path/to/covers or /media/cover-library/themes" />
+#       <button id="run">Run rebuild</button>
+#       <div id="log">Idle</div>
+#       <script>
+#         const btn = document.getElementById('run');
+#         const log = document.getElementById('log');
+#         btn.onclick = async () => {
+#           btn.disabled = true;
+#           log.textContent = 'Running...';
+#           try {
+#             const dir = document.getElementById('dir').value.trim();
+#             const body = dir ? { source_dir: dir } : {};
+#             const res = await fetch('/api/cover-assets/rebuild-images', {
+#               method: 'POST',
+#               headers: { 'Content-Type': 'application/json' },
+#               body: JSON.stringify(body)
+#             });
+#             const data = await res.json();
+#             log.textContent = JSON.stringify(data, null, 2);
+#           } catch (err) {
+#             log.textContent = 'Error: ' + err;
+#           } finally {
+#             btn.disabled = false;
+#           }
+#         };
+#       </script>
+#     </body>
+#     </html>
+#     """
+#     return HTMLResponse(content=html)
 
 # @api_router.post("/cover-assets/themes/{theme_id}/thumbnail")
 # async def upload_cover_theme_thumbnail(
@@ -3910,357 +4891,357 @@ def _draw_text_only_rhyme(
     pdf_canvas.drawCentredString(badge_center_x, badge_center_y - 10, "♪")
 
 
-def _render_svg_on_canvas(
-    pdf_canvas: Any,
-    backend: _SvgBackend,
-    svg_document: _SvgDocument,
-    width: float,
-    height: float,
-    *,
-    x: float = 0,
-    y: float = 0,
-    rhyme_code: Optional[str] = None,
-) -> bool:
-    """Render ``svg_document`` onto ``pdf_canvas`` using the available backend."""
+# def _render_svg_on_canvas(
+#     pdf_canvas: Any,
+#     backend: _SvgBackend,
+#     svg_document: _SvgDocument,
+#     width: float,
+#     height: float,
+#     *,
+#     x: float = 0,
+#     y: float = 0,
+#     rhyme_code: Optional[str] = None,
+# ) -> bool:
+#     """Render ``svg_document`` onto ``pdf_canvas`` using the available backend."""
 
-    logger = logging.getLogger(__name__)
+#     logger = logging.getLogger(__name__)
 
-    original_markup = svg_document.markup
-    effective_markup = original_markup
-    source_path = svg_document.source_path
+#     original_markup = svg_document.markup
+#     effective_markup = original_markup
+#     source_path = svg_document.source_path
 
-    raster_only = _svg_requires_raster_backend(svg_document)
+#     raster_only = _svg_requires_raster_backend(svg_document)
 
-    if source_path is not None:
-        localized_markup = _localize_svg_image_assets(
-            effective_markup,
-            source_path,
-            rhyme_code or "unknown",
-            inline_mode=True,
-            preprocess_for_pdf=True,
-        )
-        if localized_markup != effective_markup:
-            effective_markup = localized_markup
+#     if source_path is not None:
+#         localized_markup = _localize_svg_image_assets(
+#             effective_markup,
+#             source_path,
+#             rhyme_code or "unknown",
+#             inline_mode=True,
+#             preprocess_for_pdf=True,
+#         )
+#         if localized_markup != effective_markup:
+#             effective_markup = localized_markup
 
-    sanitized_markup = _sanitize_svg_for_svglib(effective_markup)
-    gradient_requires_raster = sanitized_markup != effective_markup
-    if gradient_requires_raster:
-        logger.debug(
-            "Gradient sanitization required for %s; falling back to raster rendering",
-            rhyme_code or "unknown",
-        )
+#     sanitized_markup = _sanitize_svg_for_svglib(effective_markup)
+#     gradient_requires_raster = sanitized_markup != effective_markup
+#     if gradient_requires_raster:
+#         logger.debug(
+#             "Gradient sanitization required for %s; falling back to raster rendering",
+#             rhyme_code or "unknown",
+#         )
 
-    vector_markup = sanitized_markup if not gradient_requires_raster else effective_markup
+#     vector_markup = sanitized_markup if not gradient_requires_raster else effective_markup
 
-    needs_temp_file = source_path is not None and vector_markup != original_markup
+#     needs_temp_file = source_path is not None and vector_markup != original_markup
 
-    vector_backend_available = (
-        backend.svg2rlg
-        and backend.render_pdf
-        and not raster_only
-    )
+#     vector_backend_available = (
+#         backend.svg2rlg
+#         and backend.render_pdf
+#         and not raster_only
+#     )
 
-    temp_svg_path: Optional[Path] = None
+#     temp_svg_path: Optional[Path] = None
 
-    if vector_backend_available and not gradient_requires_raster:
-        try:
-            svg_input: Any
-            if source_path is not None:
-                if needs_temp_file:
-                    candidate_dirs: List[Path] = []
-                    parent_dir = source_path.parent
-                    if parent_dir.exists() and parent_dir.is_dir():
-                        candidate_dirs.append(parent_dir)
-                    try:
-                        cache_dir = _ensure_image_cache_dir()
-                    except OSError:
-                        cache_dir = None
-                    if cache_dir and cache_dir not in candidate_dirs:
-                        candidate_dirs.append(cache_dir)
+#     if vector_backend_available and not gradient_requires_raster:
+#         try:
+#             svg_input: Any
+#             if source_path is not None:
+#                 if needs_temp_file:
+#                     candidate_dirs: List[Path] = []
+#                     parent_dir = source_path.parent
+#                     if parent_dir.exists() and parent_dir.is_dir():
+#                         candidate_dirs.append(parent_dir)
+#                     try:
+#                         cache_dir = _ensure_image_cache_dir()
+#                     except OSError:
+#                         cache_dir = None
+#                     if cache_dir and cache_dir not in candidate_dirs:
+#                         candidate_dirs.append(cache_dir)
 
-                    for directory in candidate_dirs:
-                        try:
-                            with tempfile.NamedTemporaryFile(
-                                "w",
-                                encoding="utf-8",
-                                suffix=".svg",
-                                prefix=f"{source_path.stem}_sanitized_",
-                                dir=directory,
-                                delete=False,
-                            ) as temp_file:
-                                temp_file.write(vector_markup)
-                            temp_svg_path = Path(temp_file.name)
-                            break
-                        except OSError as exc:
-                            logger.debug(
-                                "Unable to create temporary sanitized SVG in %s: %s",
-                                directory,
-                                exc,
-                            )
+#                     for directory in candidate_dirs:
+#                         try:
+#                             with tempfile.NamedTemporaryFile(
+#                                 "w",
+#                                 encoding="utf-8",
+#                                 suffix=".svg",
+#                                 prefix=f"{source_path.stem}_sanitized_",
+#                                 dir=directory,
+#                                 delete=False,
+#                             ) as temp_file:
+#                                 temp_file.write(vector_markup)
+#                             temp_svg_path = Path(temp_file.name)
+#                             break
+#                         except OSError as exc:
+#                             logger.debug(
+#                                 "Unable to create temporary sanitized SVG in %s: %s",
+#                                 directory,
+#                                 exc,
+#                             )
 
-                    if temp_svg_path is None:
-                        logger.warning(
-                            "Falling back to in-memory sanitized SVG for %s", source_path
-                        )
-                        svg_input = BytesIO(vector_markup.encode("utf-8"))
-                    else:
-                        svg_input = str(temp_svg_path)
-                else:
-                    svg_input = str(source_path)
-            else:
-                svg_input = BytesIO(vector_markup.encode("utf-8"))
+#                     if temp_svg_path is None:
+#                         logger.warning(
+#                             "Falling back to in-memory sanitized SVG for %s", source_path
+#                         )
+#                         svg_input = BytesIO(vector_markup.encode("utf-8"))
+#                     else:
+#                         svg_input = str(temp_svg_path)
+#                 else:
+#                     svg_input = str(source_path)
+#             else:
+#                 svg_input = BytesIO(vector_markup.encode("utf-8"))
 
-            drawing = backend.svg2rlg(svg_input)
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Failed to parse SVG using svglib: %s", exc)
-            drawing = None
-        finally:
-            if temp_svg_path is not None:
-                try:
-                    temp_svg_path.unlink()
-                except OSError as exc:
-                    logger.debug(
-                        "Unable to remove temporary sanitized SVG %s: %s", temp_svg_path, exc
-                    )
+#             drawing = backend.svg2rlg(svg_input)
+#         except Exception as exc:  # pragma: no cover - defensive logging
+#             logger.warning("Failed to parse SVG using svglib: %s", exc)
+#             drawing = None
+#         finally:
+#             if temp_svg_path is not None:
+#                 try:
+#                     temp_svg_path.unlink()
+#                 except OSError as exc:
+#                     logger.debug(
+#                         "Unable to remove temporary sanitized SVG %s: %s", temp_svg_path, exc
+#                     )
 
-        if drawing and getattr(drawing, "width", None) and getattr(drawing, "height", None):
-            try:
-                scale_x = width / float(drawing.width)
-                scale_y = height / float(drawing.height)
-                drawing.scale(scale_x, scale_y)
-                min_x = getattr(drawing, "minX", 0) or 0
-                min_y = getattr(drawing, "minY", 0) or 0
-                drawing.translate(-min_x, -min_y)
-                backend.render_pdf.draw(drawing, pdf_canvas, x, y)
-                return True
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.warning("Failed to render SVG using svglib: %s", exc)
-        else:
-            logger.debug(
-                "svglib was unable to determine geometry for SVG; falling back to raster rendering"
-            )
+#         if drawing and getattr(drawing, "width", None) and getattr(drawing, "height", None):
+#             try:
+#                 scale_x = width / float(drawing.width)
+#                 scale_y = height / float(drawing.height)
+#                 drawing.scale(scale_x, scale_y)
+#                 min_x = getattr(drawing, "minX", 0) or 0
+#                 min_y = getattr(drawing, "minY", 0) or 0
+#                 drawing.translate(-min_x, -min_y)
+#                 backend.render_pdf.draw(drawing, pdf_canvas, x, y)
+#                 return True
+#             except Exception as exc:  # pragma: no cover - defensive logging
+#                 logger.warning("Failed to render SVG using svglib: %s", exc)
+#         else:
+#             logger.debug(
+#                 "svglib was unable to determine geometry for SVG; falling back to raster rendering"
+#             )
 
-    if (
-        backend.svg2png
-        and backend.image_reader
-    ):
-        try:
-            image_buffer = BytesIO()
-            cairosvg_markup = effective_markup
-            if svg_document.source_path is not None:
-                cairosvg_markup = _localize_svg_image_assets(
-                    cairosvg_markup,
-                    svg_document.source_path,
-                    rhyme_code or "unknown",
-                    inline_mode=True,
-                    preprocess_for_pdf=True,
-                )
-            backend.svg2png(
-                bytestring=cairosvg_markup.encode("utf-8"),
-                write_to=image_buffer,
-                output_width=int(width),
-                output_height=int(height),
-                background_color="transparent",
-            )
-            image_buffer.seek(0)
-            pdf_canvas.drawImage(
-                backend.image_reader(image_buffer),
-                x,
-                y,
-                width=width,
-                height=height,
-                mask="auto",
-            )
-            return True
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Failed to render SVG using CairoSVG: %s", exc)
+#     if (
+#         backend.svg2png
+#         and backend.image_reader
+#     ):
+#         try:
+#             image_buffer = BytesIO()
+#             cairosvg_markup = effective_markup
+#             if svg_document.source_path is not None:
+#                 cairosvg_markup = _localize_svg_image_assets(
+#                     cairosvg_markup,
+#                     svg_document.source_path,
+#                     rhyme_code or "unknown",
+#                     inline_mode=True,
+#                     preprocess_for_pdf=True,
+#                 )
+#             backend.svg2png(
+#                 bytestring=cairosvg_markup.encode("utf-8"),
+#                 write_to=image_buffer,
+#                 output_width=int(width),
+#                 output_height=int(height),
+#                 background_color="transparent",
+#             )
+#             image_buffer.seek(0)
+#             pdf_canvas.drawImage(
+#                 backend.image_reader(image_buffer),
+#                 x,
+#                 y,
+#                 width=width,
+#                 height=height,
+#                 mask="auto",
+#             )
+#             return True
+#         except Exception as exc:  # pragma: no cover - defensive logging
+#             logger.warning("Failed to render SVG using CairoSVG: %s", exc)
 
-    return False
-
-
-@api_router.get("/rhymes/binder/{school_id}/{grade}")
-async def download_rhyme_binder(school_id: str, grade: str):
-    """Generate a PDF binder containing all rhymes for the specified grade."""
+#     return False
 
 
-    try:
-        pdf_resources = _load_pdf_dependencies()
+# @api_router.get("/rhymes/binder/{school_id}/{grade}")
+# async def download_rhyme_binder(school_id: str, grade: str):
+#     """Generate a PDF binder containing all rhymes for the specified grade."""
+
+
+#     try:
+#         pdf_resources = _load_pdf_dependencies()
          
         
         
-    except PDFDependencyUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+#     except PDFDependencyUnavailableError as exc:
+#         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    all_rhyme_items = _get_all_rhyme_items(school_id)
-    selections = [
-        item for item in all_rhyme_items if item and item.get("grade") == grade and item.get("rhyme_code")
-    ]
+#     all_rhyme_items = _get_all_rhyme_items(school_id)
+#     selections = [
+#         item for item in all_rhyme_items if item and item.get("grade") == grade and item.get("rhyme_code")
+#     ]
 
-    if not selections:
-        return Response(
-            content="Please select at least one rhyme page before downloading the binder.",
-            status_code=400,
-            media_type="text/plain",
-        )
+#     if not selections:
+#         return Response(
+#             content="Please select at least one rhyme page before downloading the binder.",
+#             status_code=400,
+#             media_type="text/plain",
+#         )
 
-    total_pages = 0.0
-    for selection in selections:
-        try:
-            total_pages += float(selection.get("pages", 0))
-        except (TypeError, ValueError):
-            continue
+#     total_pages = 0.0
+#     for selection in selections:
+#         try:
+#             total_pages += float(selection.get("pages", 0))
+#         except (TypeError, ValueError):
+#             continue
 
-    if total_pages <= 0:
-        return Response(
-            content="Please select at least one rhyme page before downloading the binder.",
-            status_code=400,
-            media_type="text/plain",
-        )
+#     if total_pages <= 0:
+#         return Response(
+#             content="Please select at least one rhyme page before downloading the binder.",
+#             status_code=400,
+#             media_type="text/plain",
+#         )
 
-    pages_map: Dict[int, List[Dict[str, Any]]] = {}
+#     pages_map: Dict[int, List[Dict[str, Any]]] = {}
 
-    for selection in selections:
-        try:
-            page_index = int(selection.get("page_index", 0))
-        except (TypeError, ValueError):
-            page_index = 0
-        pages_map.setdefault(page_index, []).append(selection)
+#     for selection in selections:
+#         try:
+#             page_index = int(selection.get("page_index", 0))
+#         except (TypeError, ValueError):
+#             page_index = 0
+#         pages_map.setdefault(page_index, []).append(selection)
 
-    buffer = BytesIO()
-    pdf_canvas = pdf_resources.canvas_factory(buffer, pagesize=pdf_resources.page_size)
-    page_width, page_height = pdf_resources.page_size
-    svg_backend = pdf_resources.svg_backend
+#     buffer = BytesIO()
+#     pdf_canvas = pdf_resources.canvas_factory(buffer, pagesize=pdf_resources.page_size)
+#     page_width, page_height = pdf_resources.page_size
+#     svg_backend = pdf_resources.svg_backend
 
-    svg_document_cache: Dict[str, List[_SvgDocument]] = {}
+#     svg_document_cache: Dict[str, List[_SvgDocument]] = {}
 
-    def _get_svg_documents(rhyme_code: str) -> List[_SvgDocument]:
-        """Return cached SVG pages for ``rhyme_code`` within this request."""
+#     def _get_svg_documents(rhyme_code: str) -> List[_SvgDocument]:
+#         """Return cached SVG pages for ``rhyme_code`` within this request."""
 
-        if rhyme_code in svg_document_cache:
-            return svg_document_cache[rhyme_code]
+#         if rhyme_code in svg_document_cache:
+#             return svg_document_cache[rhyme_code]
 
-        documents: List[_SvgDocument] = []
-        try:
-            svg_payload = _get_cached_rhyme_pages(rhyme_code)
-            pages = svg_payload.get("pages") or []
-            sources = svg_payload.get("sources") or []
-            for index, page_markup in enumerate(pages):
-                source_value = sources[index] if index < len(sources) else None
-                source_path = Path(source_value) if source_value else None
-                documents.append(_SvgDocument(page_markup, source_path))
-        except HTTPException:
-            documents = []
+#         documents: List[_SvgDocument] = []
+#         try:
+#             svg_payload = _get_cached_rhyme_pages(rhyme_code)
+#             pages = svg_payload.get("pages") or []
+#             sources = svg_payload.get("sources") or []
+#             for index, page_markup in enumerate(pages):
+#                 source_value = sources[index] if index < len(sources) else None
+#                 source_path = Path(source_value) if source_value else None
+#                 documents.append(_SvgDocument(page_markup, source_path))
+#         except HTTPException:
+#             documents = []
 
-        if not documents:
-            try:
-                documents.append(_load_rhyme_svg_markup(rhyme_code))
-            except KeyError:
-                documents = []
+#         if not documents:
+#             try:
+#                 documents.append(_load_rhyme_svg_markup(rhyme_code))
+#             except KeyError:
+#                 documents = []
 
-        svg_document_cache[rhyme_code] = documents
-        return documents
+#         svg_document_cache[rhyme_code] = documents
+#         return documents
 
-    for page_index in sorted(pages_map.keys()):
-        entries = pages_map[page_index]
-        # Sort so that "top" entries are rendered before "bottom"
-        entries.sort(
-            key=lambda item: (
-                1 if (item.get("position") or "top").lower() == "bottom" else 0
-            )
-        )
+#     for page_index in sorted(pages_map.keys()):
+#         entries = pages_map[page_index]
+#         # Sort so that "top" entries are rendered before "bottom"
+#         entries.sort(
+#             key=lambda item: (
+#                 1 if (item.get("position") or "top").lower() == "bottom" else 0
+#             )
+#         )
 
-        full_page_entry = None
-        for item in entries:
-            try:
-                if float(item.get("pages", 1)) > 0.5:
-                    full_page_entry = item
-                    break
-            except (TypeError, ValueError):
-                continue
+#         full_page_entry = None
+#         for item in entries:
+#             try:
+#                 if float(item.get("pages", 1)) > 0.5:
+#                     full_page_entry = item
+#                     break
+#             except (TypeError, ValueError):
+#                 continue
 
-        if full_page_entry:
-            rhyme_code = full_page_entry.get("rhyme_code")
-            svg_documents = _get_svg_documents(rhyme_code) if rhyme_code else []
+#         if full_page_entry:
+#             rhyme_code = full_page_entry.get("rhyme_code")
+#             svg_documents = _get_svg_documents(rhyme_code) if rhyme_code else []
 
-            if svg_documents:
-                for svg_document in svg_documents:
-                    if not _render_svg_on_canvas(
-                        pdf_canvas,
-                        svg_backend,
-                        svg_document,
-                        page_width,
-                        page_height,
-                        rhyme_code=rhyme_code,
-                    ):
-                        _draw_text_only_rhyme(
-                            pdf_canvas, full_page_entry, page_width, page_height
-                        )
-                    pdf_canvas.showPage()
-                continue
+#             if svg_documents:
+#                 for svg_document in svg_documents:
+#                     if not _render_svg_on_canvas(
+#                         pdf_canvas,
+#                         svg_backend,
+#                         svg_document,
+#                         page_width,
+#                         page_height,
+#                         rhyme_code=rhyme_code,
+#                     ):
+#                         _draw_text_only_rhyme(
+#                             pdf_canvas, full_page_entry, page_width, page_height
+#                         )
+#                     pdf_canvas.showPage()
+#                 continue
 
-            _draw_text_only_rhyme(pdf_canvas, full_page_entry, page_width, page_height)
-            pdf_canvas.showPage()
-            continue
-        else:
-            slot_height = page_height / 2
-            positioned_entries: Dict[str, Optional[Dict[str, Any]]] = {
-                "top": None,
-                "bottom": None,
-            }
+#             _draw_text_only_rhyme(pdf_canvas, full_page_entry, page_width, page_height)
+#             pdf_canvas.showPage()
+#             continue
+#         else:
+#             slot_height = page_height / 2
+#             positioned_entries: Dict[str, Optional[Dict[str, Any]]] = {
+#                 "top": None,
+#                 "bottom": None,
+#             }
 
-            for entry in entries:
-                position = (entry.get("position") or "top").lower()
-                if position not in positioned_entries:
-                    position = "top"
-                if positioned_entries[position] is None:
-                    positioned_entries[position] = entry
+#             for entry in entries:
+#                 position = (entry.get("position") or "top").lower()
+#                 if position not in positioned_entries:
+#                     position = "top"
+#                 if positioned_entries[position] is None:
+#                     positioned_entries[position] = entry
 
-            for position, entry in positioned_entries.items():
-                if not entry:
-                    continue
+#             for position, entry in positioned_entries.items():
+#                 if not entry:
+#                     continue
 
-                y_position = page_height - slot_height if position == "top" else 0
+#                 y_position = page_height - slot_height if position == "top" else 0
 
-                svg_rendered = False
+#                 svg_rendered = False
 
-                rhyme_code = entry.get("rhyme_code")
-                svg_documents = _get_svg_documents(rhyme_code) if rhyme_code else []
-                svg_document = svg_documents[0] if svg_documents else None
+#                 rhyme_code = entry.get("rhyme_code")
+#                 svg_documents = _get_svg_documents(rhyme_code) if rhyme_code else []
+#                 svg_document = svg_documents[0] if svg_documents else None
 
-                if svg_document:
-                    svg_rendered = _render_svg_on_canvas(
-                        pdf_canvas,
-                        svg_backend,
-                        svg_document,
-                        page_width,
-                        slot_height,
-                        x=0,
-                        y=y_position,
-                        rhyme_code=entry["rhyme_code"],
-                    )
+#                 if svg_document:
+#                     svg_rendered = _render_svg_on_canvas(
+#                         pdf_canvas,
+#                         svg_backend,
+#                         svg_document,
+#                         page_width,
+#                         slot_height,
+#                         x=0,
+#                         y=y_position,
+#                         rhyme_code=entry["rhyme_code"],
+#                     )
 
-                if not svg_rendered:
-                    _draw_text_only_rhyme(
-                        pdf_canvas,
-                        entry,
-                        page_width,
-                        slot_height,
-                        y_offset=y_position,
-                    )
+#                 if not svg_rendered:
+#                     _draw_text_only_rhyme(
+#                         pdf_canvas,
+#                         entry,
+#                         page_width,
+#                         slot_height,
+#                         y_offset=y_position,
+#                     )
 
-        pdf_canvas.showPage()
+#         pdf_canvas.showPage()
 
-    pdf_canvas.save()
-    buffer.seek(0)
+#     pdf_canvas.save()
+#     buffer.seek(0)
 
-    filename = f"{grade}_rhyme_binder.pdf"
-    headers = {"Content-Disposition": f"attachment; filename={filename}"}
+#     filename = f"{grade}_rhyme_binder.pdf"
+#     headers = {"Content-Disposition": f"attachment; filename={filename}"}
 
-    svg_document_cache.clear()
+#     svg_document_cache.clear()
 
-    return Response(
-        content=buffer.getvalue(), media_type="application/pdf", headers=headers
-    )
+#     return Response(
+#         content=buffer.getvalue(), media_type="application/pdf", headers=headers
+#     )
 
 
 # Include the router in the main app

@@ -6,6 +6,7 @@
 .pnp.js
 dist/
 
+
 # testing
 /coverage
 
@@ -15,6 +16,7 @@ dist/
 
 # Virtual environments
 backend/virtual_env/
+
 
 # misc
 .DS_Store

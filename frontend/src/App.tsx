@@ -64,7 +64,7 @@ const AppRoutes: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800">
-      <main className="p-4 sm:p-6 md:p-8">
+      <main className="p-2 sm:p-4 md:p-6">
         <Routes>
           <Route path="/" element={<RhymesWorkflowApp />} />
           <Route path="/sign-in" element={<Navigate to="/" replace />} />

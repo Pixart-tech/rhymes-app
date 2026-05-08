@@ -25,12 +25,13 @@ class School(BaseModel):
     principal_name: Optional[str] = None
     principal_email: Optional[str] = None
     principal_phone: Optional[str] = None
-    facebook_image_url: Optional[str] = None
-    instagram_image_url: Optional[str] = None
+    # facebook_image_url: Optional[str] = None
+    # instagram_image_url: Optional[str] = None
     sales_representative: Optional[str] = None
     service_type: Optional[List[str]] = None
     service_status: Optional[Dict[str, str]] = None
     grades: Optional[Dict[str, Dict[str, Any]]] = None
+    branch_ids: Optional[List[str]] = None
     grade_default_labels: Optional[Dict[str, str]] = None
     grade_unique_values: Optional[Dict[str, str]] = None
     school_image_urls: List[str] = Field(default_factory=list)

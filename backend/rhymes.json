@@ -1,8 +1,57 @@
 {
+    "__settings__": {
+        "languageConfig": {
+            "default": {
+                "groupByLanguage": true,
+                "allowedLanguages": [
+                    "english",
+                    "hindi",
+                    "tamil",
+                    "kannada",
+                    "other"
+                ]
+            },   
+            "grades": {
+                "playgroup": {
+                    "groupByLanguage": true,
+                    "allowedLanguages": [
+                        "english"
+                    ]
+                },
+                "nursery": {  
+                    "groupByLanguage": true,
+                    "allowedLanguages": [
+                        "english","hindi"
+                    ]
+                },
+                "lkg": {
+                    "groupByLanguage": true
+                },
+                "ukg": {
+                    "groupByLanguage": true
+                }
+            },
+            "languageOrder": [
+                "english",
+                "hindi",
+                "tamil",
+                "kannada",
+                "other"
+            ],
+            "languageLabels": {
+                "english": "English",
+                "hindi": "Hindi",
+                "tamil": "Tamil",
+                "kannada": "Kannada",
+                "other": "Other"
+            }
+        }
+    },
     "RE00001": [
         "one, two, buckle my shoes",
         0.5,
         "Yes"
+       
     ],
     "RE00002": [
         "A Ram sam sam",
@@ -27,11 +76,12 @@
     "RE00006": [
         "Aeroplane",
         0.5,
-        "Yes"
+        "Yes",
+        "hindi"
     ],
     "RE00007": [
         "All about me",
-        0.5,
+        1.0,
         "Yes"
     ],
     "RE00008": [
@@ -41,8 +91,9 @@
     ],
     "RE00009": [
         "Ba ba black sheep",
-        0.5,
+        1.0,
         "Yes"
+        
     ],
     "RE00010": [
         "Bits of paper",
@@ -61,7 +112,7 @@
     ],
     "RE00013": [
         "Good manners",
-        0.5,
+        1.0,
         "Yes"
     ],
     "RE00014": [
@@ -71,7 +122,7 @@
     ],
     "RE00015": [
         "Hop a little ",
-        0.5,
+        1.0,
         "Yes"
     ],
     "RE00016": [
@@ -86,7 +137,7 @@
     ],
     "RE00018": [
         "Kites kites flying high",
-        0.5,
+        1.0,
         "Yes"
     ],
     "RE00019": [
@@ -111,7 +162,7 @@
     ],
     "RE00023": [
         "Me an apple",
-        0.5,
+        1.0,
         "Yes"
     ],
     "RE00024": [
@@ -123,6 +174,8 @@
         "Mummy and daddy, I love you",
         0.5,
         "Yes"
+
+        
     ],
     "RE00026": [
         "My band",
@@ -176,12 +229,12 @@
     ],
     "RE00036": [
         "Prayer",
-        0.5,
+        1.0,
         "Yes"
     ],
     "RE00037": [
         "Rain",
-        0.5,
+        1.0,
         "Yes"
     ],
     "RE00038": [
@@ -201,7 +254,7 @@
     ],
     "RE00041": [
         "Roses are red",
-        0.5,
+        1.0,
         "Yes"
     ],
     "RE00042": [
@@ -211,7 +264,7 @@
     ],
     "RE00043": [
         "See-saw",
-        0.5,
+        1.0,
         "Yes"
     ],
     "RE00044": [
@@ -276,7 +329,7 @@
     ],
     "RE00056": [
         "You shall have an apple",
-        0.5,
+        1.0,
         "Yes"
     ],
     "RE00057": [
@@ -326,7 +379,7 @@
     ],
     "RE00067": [
         "Chubby cheeks",
-        0.5,
+        1.0,
         "No"
     ],
     "RE00068": [
@@ -345,8 +398,8 @@
         "No"
     ],
     "RE00071": [
-        "Doctor doctor",
-        0.5,
+        "Doctor Doctor",
+        1.0,
         "No"
     ],
     "RE00072": [
@@ -356,12 +409,12 @@
     ],
     "RE00073": [
         "Elly the elephant",
-        0.5,
+        1.0,
         "No"
     ],
     "RE00074": [
         "Fishy fish",
-        0.5,
+        1.0,
         "No"
     ],
     "RE00075": [
@@ -411,7 +464,7 @@
     ],
     "RE00084": [
         "I am a little tea pot",
-        0.5,
+        1.0,
         "No"
     ],
     "RE00085": [
@@ -435,8 +488,8 @@
         "No"
     ],
     "RE00089": [
-        "Jelly on the plate",
-        0.5,
+        "Jelly on a plate",
+        1.0,
         "No"
     ],
     "RE00090": [
@@ -471,12 +524,12 @@
     ],
     "RE00096": [
         "Little fish",
-        0.5,
+        1.0,
         "No"
     ],
     "RE00097": [
         "London bridge is falling down",
-        0.5,
+        1.0,
         "No"
     ],
     "RE00098": [
@@ -521,7 +574,7 @@
     ],
     "RE00106": [
         "Oh! Look at the moon",
-        0.5,
+        1.0,
         "No"
     ],
     "RE00107": [
@@ -641,7 +694,7 @@
     ],
     "RE00130": [
         "Ten little fingers",
-        0.5,
+        1.0,
         "No"
     ],
     "RE00131": [
@@ -715,13 +768,13 @@
         "No"
     ],
     "RE00145": [
-        "washong day",
-        0.5,
+        "washing day",
+        1.0,
         "No"
     ],
     "RE00146": [
         "Vegetables song",
-        0.5,
+        1.0,
         "No"
     ],
     "RE00147": [
@@ -829,16 +882,44 @@
         0.5,
         "No"
     ],
+    "RE00168":[
+        "TODDLERS rhyme",
+        1.0,
+        "No",
+        "kannada"
+
+    ],
+    "RE00169":[
+        "TODDLERS rhyme",
+        1.0,
+        "No",
+        "tamil"
+
+    ],
+    "RE00170":[
+        "TODDLERS rhyme",
+        1.0,
+        "No",
+        "tamil"
+
+    ],
     "RE00285": [
         "Five little speckled frogs",
         2.0,
         "Yes"
     ],
     "RE00300": [
-        "The wheels on the bus",
+        "phonic rhyme",
         3.0,
         "No"
+    ],
+
+    "ST00301":[
+        "lion and the mouse ",
+        2.0,
+        "No"
     ]
+    
     
    
     

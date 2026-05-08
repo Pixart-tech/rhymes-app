@@ -206,8 +206,8 @@ const RAW_SCHOOL_DATA: ClassData[] = [
         name: "Prewritten Books",
         isMultiSelect: true,
         options: [
-          { typeId: generateId(), label: "English Pre-Written", jsonSubject: "English Pre-Written", coreId: "100000240", coreCover: "0240", coreSpine: "N38", defaultCoreCoverTitle: "English Pre-written", isRecommended: false, link1: "Nursery_English", info: "English  prewritten book" },
-          { typeId: generateId(), label: "Maths Pre-Written ", jsonSubject: "Maths Pre-Written", coreId: "100000241", coreCover: "0241", coreSpine: "N39", defaultCoreCoverTitle: "Maths Pre-Written", isRecommended: false, link1: "Nursery_Maths", info: "maths prewritten book" },
+          { typeId: generateId(), label: "English", jsonSubject: " Pre-written", coreId: "100000240", coreCover: "0240", coreSpine: "N38", defaultCoreCoverTitle: "English", isRecommended: false, link1: "Nursery_English", info: "English  prewritten book" },
+          { typeId: generateId(), label: "Maths", jsonSubject: "Pre-written", coreId: "100000241", coreCover: "0241", coreSpine: "N39", defaultCoreCoverTitle: "Maths", isRecommended: false, link1: "Nursery_Maths", info: "maths prewritten book" },
         ]
       }
     ]
@@ -252,9 +252,8 @@ const RAW_SCHOOL_DATA: ClassData[] = [
         name: "Prewritten Books",
         isMultiSelect: true,
         options: [
-          { typeId: generateId(), label: "English Pre-Written", jsonSubject: "English Pre-Written", coreId: "100000340", coreCover: "0340", coreSpine: "L20", defaultCoreCoverTitle: "English Pre-written", isRecommended: false, link1: "LKG_English", info: "English prewritten " },
-          { typeId: generateId(), label: "Maths Pre-Written ", jsonSubject: "Maths Pre-Written", coreId: "100000341", coreCover: "0341", coreSpine: "L21", defaultCoreCoverTitle: "Maths Pre-Written", isRecommended: false, link1: "LKG_Maths", info:"Maths prewritten"},
-          { typeId: generateId(), label: "EVS Pre-Written", jsonSubject: "EVS Pre-Written", coreId: "100000342", coreCover: "0342", coreSpine: "L22", defaultCoreCoverTitle: "EVS Pre-Written", isRecommended: false, link1: "LKG_EVS", info: "EVS prewritten"},
+          { typeId: generateId(), label: "English", jsonSubject: " Pre-written", coreId: "100000340", coreCover: "0340", coreSpine: "L20", defaultCoreCoverTitle:"English", isRecommended: false, link1: "LKG_English", info: "English prewritten " },
+          { typeId: generateId(), label: "Maths", jsonSubject: "Pre-written", coreId: "100000341", coreCover: "0341", coreSpine: "L21", defaultCoreCoverTitle: "Maths", isRecommended: false, link1: "LKG_Maths", info:"Maths prewritten"},
         ]
       },
       {
@@ -314,9 +313,9 @@ const RAW_SCHOOL_DATA: ClassData[] = [
         name: "Prewritten Books",
         isMultiSelect: true,
         options: [
-          { typeId: generateId(), label: "English Pre-Written", jsonSubject: "English Pre-Written", coreId: "100000440", coreCover: "0440", coreSpine: "U22", defaultCoreCoverTitle: "English Pre-written", isRecommended: false, link1: "UKG_English", info: "english prewritten" },
-          { typeId: generateId(), label: "Maths Pre-Written ", jsonSubject: "Maths Pre-Written", coreId: "100000441", coreCover: "0441", coreSpine: "U23", defaultCoreCoverTitle: "Maths Pre-Written", isRecommended: false, link1: "UKG_Maths", info: "maths prewritten" },
-          { typeId: generateId(), label: "EVS Pre-Written", jsonSubject: "EVS Pre-Written", coreId: "100000442", coreCover: "0442", coreSpine: "U24", defaultCoreCoverTitle: "EVS Pre-Written", isRecommended: false, link1: "UKG_EVS", info: "EVS prewritten"},
+          { typeId: generateId(), label: "English ", jsonSubject: "English Pre-written", coreId: "100000440", coreCover: "0440", coreSpine: "U22", defaultCoreCoverTitle: "English", isRecommended: false, link1: "UKG_English", info: "english prewritten" },
+          { typeId: generateId(), label: "Maths ", jsonSubject: "Maths Pre-written", coreId: "100000441", coreCover: "0441", coreSpine: "U23", defaultCoreCoverTitle: "Maths", isRecommended: false, link1: "UKG_Maths", info: "maths prewritten" },
+          { typeId: generateId(), label: "EVS", jsonSubject: "EVS Pre-written", coreId: "100000442", coreCover: "0442", coreSpine: "U24", defaultCoreCoverTitle: "EVS", isRecommended: false, link1: "UKG_EVS", info: "EVS prewritten"},
         ] 
       },
       {
@@ -327,7 +326,7 @@ const RAW_SCHOOL_DATA: ClassData[] = [
           { typeId: generateId(), label: "Hindi Swara & vyanjana", jsonSubject: "Hindi", coreId: "100000419", coreCover: "0412", coreSpine: "U9", defaultCoreCoverTitle: "Hindi", isRecommended: false, link1: "UKG_Hindi", info: "The book covers Hindi letter practice (varnamala) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
           { typeId: generateId(), label: "Tamil Swara & vyanjana", jsonSubject: "Tamil", coreId: "100000420", coreCover: "0413", coreSpine: "U11", defaultCoreCoverTitle: "Tamil", isRecommended: false, link1: "UKG_Tamil", info: "The book covers Tamil letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
           { typeId: generateId(), label: "Telugu Swara & vyanjana", jsonSubject: "Telugu", coreId: "100000421", coreCover: "0414", coreSpine: "U21", defaultCoreCoverTitle: "Telugu", isRecommended: false, link1: "UKG_Telugu", info: "The book covers Telugu letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set." },
-            { typeId: generateId(), label: "Marathi Swara", jsonSubject: "Marathi", coreId: "100000422", coreCover: "0415", coreSpine: "U25", defaultCoreCoverTitle: "Marathi", isRecommended: false, link1: "UKG_Marati", info: "The book covers Marathi letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set"},
+          { typeId: generateId(), label: "Marathi Swara & swara", jsonSubject: "Marathi", coreId: "100000422", coreCover: "0416", coreSpine: "U25", defaultCoreCoverTitle: "Marathi", isRecommended: false, link1: "UKG_Marati", info: "The book covers Marathi letter practice (varnamale) for all consonant groups, each with writing, picture-reading, and recognition activities, followed by revision pages placed after every major set"},
         ]
         
       }
@@ -377,7 +376,7 @@ export const getAllAssessmentClass = (className: string) => {
   }
   if(normalizedClassName === "lkg") {
     
-    return ["100000312","100000313","100000318", "100000319"];
+    return ["100000312","100000313","100000318", "100000319","100000321","100000322","100000323","100000324"];
   }
   
   if(normalizedClassName === "ukg") {
@@ -511,27 +510,84 @@ export const getAssessmentForClass = (
   if (normalizedClassName === "lkg") {
 
      const eng = englishOpt?.label.toLowerCase();
+     const mat=mathsOpt?.label
      const coreCover = "0307";
-     if (!eng ||eng?.includes("small + vowels")) {
-         return { 
+     const is50 = mat ? mat.includes("1-50 and 1-10 number names"): false;
+     
+     
+     if ((eng?.includes("small + vowels"))){
+      return is50 ? { 
             label: `Small 1-50${isWithMarks ? '' : ' (NM)'}`, 
             coreId: isWithMarks ? "100000312" : "100000318", 
             coreCover, 
             coreSpine: isWithMarks ? "L7" : "L18",
             defaultCoreCoverTitle,
             link: "LKG_Assessment" 
-         };
-     }
-     if (eng?.includes("caps + vowels")) {
-         return { 
-            label: `Big1-50${isWithMarks ? '' : ' (NM)'}`, 
+            }:{ 
+          label: `Small 51-100${isWithMarks ? '' : ' (NM)'}`, 
+          coreId: isWithMarks ? "100000321" : "100000322", 
+          coreCover, 
+          coreSpine: isWithMarks ? "L24" : "L25",
+          defaultCoreCoverTitle,
+          link: "LKG_Assessment" 
+        };
+      }
+     
+
+    if ((eng?.includes("caps + vowels"))){
+
+
+      return is50? { 
+            label: `Big 1-50${isWithMarks ? '' : ' (NM)'}`, 
             coreId: isWithMarks ? "100000313" : "100000319", 
             coreCover, 
             coreSpine: isWithMarks ? "L17" : "L19",
             defaultCoreCoverTitle,
             link: "LKG_Assessment" 
+         }:
+         { 
+            label: `Big 51-100${isWithMarks ? '' : ' (NM)'}`, 
+            coreId: isWithMarks ? "100000323" : "100000324", 
+            coreCover, 
+            coreSpine: isWithMarks ? "L26" : "L27",
+            defaultCoreCoverTitle,
+            link: "LKG_Assessment" 
          };
-     }
+
+    }
+      
+    //    return is50 { 
+    //         label: `Big 1-50${isWithMarks ? '' : ' (NM)'}`, 
+    //         coreId: isWithMarks ? "100000313" : "100000319", 
+    //         coreCover, 
+    //         coreSpine: isWithMarks ? "L17" : "L19",
+    //         defaultCoreCoverTitle,
+    //         link: "LKG_Assessment" 
+    //      };
+    //  }
+        
+     
+    //   if ((eng?.includes("small + vowels"))&&(is100)) {
+    //     return { 
+    //       label: `Small 51-100${isWithMarks ? '' : ' (NM)'}`, 
+    //       coreId: isWithMarks ? "100000321" : "100000322", 
+    //       coreCover, 
+    //       coreSpine: isWithMarks ? "L24" : "L25",
+    //       defaultCoreCoverTitle,
+    //       link: "LKG_Assessment" 
+    //     };
+    //  }
+    //  if (eng?.includes("caps + vowels")&&(is100)) {
+    //      return { 
+    //         label: `Big 51-100${isWithMarks ? '' : ' (NM)'}`, 
+    //         coreId: isWithMarks ? "100000323" : "100000324", 
+    //         coreCover, 
+    //         coreSpine: isWithMarks ? "L26" : "L27",
+    //         defaultCoreCoverTitle,
+    //         link: "LKG_Assessment" 
+    //      };
+    // }
+
   }
 
   if (normalizedClassName === "ukg") {

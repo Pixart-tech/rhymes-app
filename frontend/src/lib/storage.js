@@ -6,6 +6,20 @@ const BOOK_WORKFLOW_KEY_PREFIX = 'rhymes-app::books::';
 
 const isBrowser = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
+const resolveAppStateStorage = () => {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  // Persist app state per-tab so opening a new tab always starts at the dashboard
+  // (instead of restoring where another tab left off).
+  if (typeof window.sessionStorage !== 'undefined') {
+    return window.sessionStorage;
+  }
+
+  return window.localStorage;
+};
+
 const safeParseJson = (value) => {
   if (typeof value !== 'string' || value.trim().length === 0) {
     return null;
@@ -24,7 +38,12 @@ export const loadPersistedAppState = () => {
     return null;
   }
 
-  const raw = window.localStorage.getItem(APP_STATE_KEY);
+  const storage = resolveAppStateStorage();
+  if (!storage) {
+    return null;
+  }
+
+  const raw = storage.getItem(APP_STATE_KEY);
   return safeParseJson(raw);
 };
 
@@ -33,14 +52,19 @@ export const savePersistedAppState = (state) => {
     return;
   }
 
+  const storage = resolveAppStateStorage();
+  if (!storage) {
+    return;
+  }
+
   if (!state) {
-    window.localStorage.removeItem(APP_STATE_KEY);
+    storage.removeItem(APP_STATE_KEY);
     return;
   }
 
   try {
     const payload = JSON.stringify(state);
-    window.localStorage.setItem(APP_STATE_KEY, payload);
+    storage.setItem(APP_STATE_KEY, payload);
   } catch (error) {
     console.warn('Unable to persist application state:', error);
   }
@@ -50,7 +74,11 @@ export const clearPersistedAppState = () => {
   if (!isBrowser()) {
     return;
   }
-  window.localStorage.removeItem(APP_STATE_KEY);
+  const storage = resolveAppStateStorage();
+  if (!storage) {
+    return;
+  }
+  storage.removeItem(APP_STATE_KEY);
 };
 
 export const loadWorkspaceCache = () => {

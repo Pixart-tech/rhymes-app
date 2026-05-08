@@ -44,9 +44,6 @@ const SERVICE_OPTIONS: { value: SchoolServiceType; prompt: string }[] = [
   { value: 'id_cards', prompt: 'Are you taking ID cards?' },
   { value: 'report_cards', prompt: 'Are you taking report cards?' },
   { value: 'certificates', prompt: 'Are you taking certificates?' },
-  { value: 'Pre-Written Nursery Set', prompt: 'Do you want the Pre-Written Nursery Set?' },
-  { value: 'Pre-Written LKG Set', prompt: 'Do you want the Pre-Written LKG Set?' },
-  { value: 'Pre-Written UKG Set', prompt: 'Do you want the Pre-Written UKG Set?' },
   { value: 'Birthday  card', prompt: 'Do you want the Birthday card?' },
   { value: 'Independence Day activity card', prompt: 'Do you want the Independence Day activity card?' },
   { value: "Children's Day Gifting Book", prompt: "Do you want the Children's Day Gifting Book?" },
@@ -57,9 +54,6 @@ export const SCHOOL_SERVICE_KEYS: SchoolServiceType[] = [
   'id_cards',
   'report_cards',
   'certificates',
-  'Pre-Written Nursery Set',
-  'Pre-Written LKG Set',
-  'Pre-Written UKG Set',
   'Birthday  card',
   'Independence Day activity card',
   "Children's Day Gifting Book",
@@ -70,9 +64,6 @@ const createDefaultServiceStatus = (): ServiceStatusMap => ({
   id_cards: '',
   report_cards: '',
   certificates: '',
-  'Pre-Written Nursery Set': '',
-  'Pre-Written LKG Set': '',
-  'Pre-Written UKG Set': '',
   'Birthday  card': '',
   'Independence Day activity card': '',
   "Children's Day Gifting Book": '',
@@ -137,6 +128,7 @@ export const buildSchoolFormValuesFromProfile = (
     logo_url: profile?.logo_url ?? null,
     logo_file: null,
     sales_representative: salesRepresentative,
+  
     email: profile?.email ?? '',
     phone: profile?.phone ?? '',
     address: profile?.address ?? '',
@@ -528,7 +520,7 @@ const handleAddressFieldChange =
       }
 
       if (isPdfFile(file)) {
-        console.log("Iam running")
+        
         try {
           const previewSrc = await requestPdfPreview(file);
           if (logoPreviewUrlRef.current) {
@@ -718,6 +710,12 @@ const handleAddressFieldChange =
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setInvalidFields(new Set());
+    console.log(mode)
+    if ((mode === 'create' || mode==='edit') && !validateSection2()) {
+      
+      setCurrentSection(2);
+      return;
+    }
     if (isSuperAdmin && !validateSection3()) {
       setCurrentSection(totalSections);
       return;
@@ -769,13 +767,13 @@ const handleAddressFieldChange =
       }
     }
     const hasSelectedGrade = GRADE_RENDER_ORDER.some((grade) => values.grades[grade].enabled);
-    if (mode === 'create' && !hasSelectedGrade) {
+    if ((mode === 'create'|| mode==='edit') && !hasSelectedGrade) {
       errors.add('grade-selection');
     }
     setInvalidFields(errors);
     if (errors.size > 0) {
       if (errors.has('grade-selection')) {
-        toast.error('Please select at least one class before continuing.');
+        toast.error('Please select at least one grade before continuing.');
       } else {
         toast.error('Please provide a name for all enabled grades.');
       }

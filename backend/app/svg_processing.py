@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 import mimetypes
+import os
 import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
@@ -478,7 +479,7 @@ def localize_svg_image_assets(
 
 
 def _read_packaged_rhyme(rhyme_code: str) -> Optional[SvgDocument]:
-    packaged_path = config.PACKAGED_COVER_SVG_BASE_PATH / f"{rhyme_code}.svg"
+    packaged_path = config.PACKAGED_RHYME_SVG_BASE_PATH / f"{rhyme_code}.svg"
     if not packaged_path.exists():
         return None
 
@@ -526,6 +527,12 @@ def load_rhyme_svg_markup(
         return packaged
 
     generator = fallback_factory or generate_rhyme_svg
+    logger.warning(
+        "Falling back to generated SVG for rhyme %s (base_path=%s, RHYME_SVG_BASE_PATH=%s)",
+        rhyme_code,
+        base_path,
+        os.environ.get("RHYME_SVG_BASE_PATH"),
+    )
     return SvgDocument(generator(rhyme_code), None)
 
 

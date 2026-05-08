@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 import json
 from typing import Any, Dict, Iterable, List, Literal, Optional, Set, Tuple
+from urllib.parse import quote
 
 from fastapi import Form, HTTPException, Request
 from firebase_admin import firestore
@@ -16,27 +17,14 @@ SERVICE_TYPE_VALUES: Tuple[SchoolServiceType, ...] = (
     "id_cards",
     "report_cards",
     "certificates",
-    "Pre-Written Nursery Set",
-    "Pre-Written LKG Set",
-    "Pre-Written UKG Set",
+  
     "Birthday  card",
     "Independence Day activity card",
     "Children's Day Gifting Book",
     "Calendars 26"
     
 )
-# SERVICE_TYPE_VALUES: dict[SchoolServiceType, str] = {
-#     "id_cards": "840442000002690064",
-#     "report_cards": "840442000002690020",
-#     "certificates": "840442000002690009",
-#     "Pre-Written Nursery Set": "840442000002690031",
-#     "Pre-Written LKG Set": "840442000002690042",
-#     "Pre-Written UKG Set": "840442000002690053",
-#     "Birthday Gifting card": "1004",
-#     "Independence Day activity card": "1001",
-#     "Children's Day Gifting Book": "1002",
-#     "Calendar 26": "1003",
-# }
+
 SERVICE_STATUS_VALUES = ("yes", "no")
 ServiceStatus = Literal["yes", "no"]
 ServiceStatusMap = Dict[SchoolServiceType, ServiceStatus]
@@ -53,6 +41,30 @@ SCHOOL_ID_COUNTER_FIELD = "next_id"
 BranchStatus = Literal["active", "inactive"]
 BRANCH_STATUS_ACTIVE: BranchStatus = "active"
 BRANCH_STATUS_INACTIVE: BranchStatus = "inactive"
+
+
+def _cache_buster(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)):
+        return str(int(value))
+    if isinstance(value, str):
+        return value.strip()
+    timestamp_fn = getattr(value, "timestamp", None)
+    if callable(timestamp_fn):
+        try:
+            return str(int(timestamp_fn()))
+        except Exception:
+            return ""
+    return ""
+
+
+def build_school_logo_url(school_id: str, updated_at: Any = None) -> str:
+    base = f"/api/schools/{school_id}/logo"
+    buster = _cache_buster(updated_at)
+    if not buster:
+        return base
+    return f"{base}?v={quote(buster)}"
 
 
 def normalize_service_types(values: Optional[Iterable[SchoolServiceType]]) -> List[SchoolServiceType]:
@@ -300,8 +312,6 @@ class SchoolCreatePayload(BaseModel):
     facebook_link: Optional[str] = None
     instagram_link: Optional[str] = None
     principal_name: str = Field(..., min_length=2)
-    
-    
     principal_email: EmailStr
     principal_phone: str = Field(..., min_length=5)
     service_type: List[SchoolServiceType] = Field(default_factory=list)
@@ -870,71 +880,58 @@ def grant_school_access_to_user_by_email(
 
     
 def build_school_from_record(record: Dict[str, Any]) -> School:
+    return School(**build_school_payload_from_record(record))
+
+      
+def build_school_payload_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
     now = datetime.utcnow()
     school_id = record.get("school_id") or record.get("id")
     if not school_id:
         raise HTTPException(status_code=500, detail="School record is missing an id")
-    logo_url: Optional[str] = None
- 
-    # if record.get("logo_blob"):
-    #     logo_url = f"/api/schools/{school_id}/logo"
-    logo_url = f"/api/schools/{school_id}/logo"
-    school_image_urls: List[str] = []
-    for idx in range(1, 5):
-        key = f"school_image_{idx}"
-        if record.get(key):
-            school_image_urls.append(f"/api/schools/{school_id}/images/{idx}")
 
-    facebook_image_url: Optional[str] = None
-    if record.get("facebook_image_blob"):
-        facebook_image_url = f"/api/schools/{school_id}/social/facebook"
-    instagram_image_url: Optional[str] = None
-    if record.get("instagram_image_blob"):
-        instagram_image_url = f"/api/schools/{school_id}/social/instagram"
-
+    updated_at_for_cache = record.get("updated_at") or record.get("timestamp") or now
+    logo_url = build_school_logo_url(str(school_id), updated_at_for_cache)
     grades_from_record = record.get("grades")
-   
-    logging.debug(f"build_school_from_record: grades from record type: {type(grades_from_record)}, value: {grades_from_record}")
 
-    return School(
-        id=record.get("id") or school_id,
-        school_id=school_id,
-        school_name=_coerce_record_string(record, "school_name") or "School",
-        logo_url=logo_url,
-        school_image_urls=school_image_urls,
-        email=_coerce_record_string(record, "email"),
-        phone=_coerce_record_string(record, "phone"),
-        address=_coerce_record_string(record, "address"),
-        city=_coerce_record_string(record, "city"),
-        state=_coerce_record_string(record, "state"),
-        pin=_coerce_record_string(record, "pin"),
-        tagline=_coerce_record_string(record, "tagline"),
-        website=_coerce_record_string(record, "website"),
-        facebook_link=_coerce_record_string(record, "facebook_link"),
-        instagram_link=_coerce_record_string(record, "instagram_link"),
-        principal_name=_coerce_record_string(record, "principal_name"),
-        principal_email=_coerce_record_string(record, "principal_email"),
-        principal_phone=_coerce_record_string(record, "principal_phone"),
-        facebook_image_url=facebook_image_url,
-        instagram_image_url=instagram_image_url,
-        service_type=extract_service_type(record.get("service_type")),
-        service_status=normalize_service_status(record.get("service_status")),
-        grades=normalize_grades(grades_from_record),
-        grade_default_labels=record.get("grade_default_labels"),
-        grade_unique_values=record.get("grade_unique_values"),
-        branch_parent_id=record.get("branch_parent_id"),
-        status=record.get("status") or BRANCH_STATUS_ACTIVE,
-        selection_status=record.get("selection_status"),
-        selections_approved=bool(record.get("selections_approved")),
-        selection_locked_at=record.get("selection_locked_at"),
-        selection_locked_by=record.get("selection_locked_by"),
-        id_card_fields=record.get("id_card_fields"),
-        zoho_customer_id=record.get("zoho_customer_id"),
-        sales_representative=record.get("sales_representative"),
-        created_at=record.get("created_at") or record.get("timestamp") or now,
-        updated_at=record.get("updated_at") or record.get("timestamp") or now,
-        timestamp=record.get("timestamp") or record.get("updated_at") or now,
-    )
+    payload: Dict[str, Any] = {
+        "id": record.get("id") or school_id,
+        "school_id": school_id,
+        "school_name": _coerce_record_string(record, "school_name") or "School",
+        "logo_url": logo_url,
+        "email": _coerce_record_string(record, "email"),
+        "phone": _coerce_record_string(record, "phone"),
+        "address": _coerce_record_string(record, "address"),
+        "city": _coerce_record_string(record, "city"),
+        "state": _coerce_record_string(record, "state"),
+        "pin": _coerce_record_string(record, "pin"),
+        "tagline": _coerce_record_string(record, "tagline"),
+        "website": _coerce_record_string(record, "website"),
+        "facebook_link": _coerce_record_string(record, "facebook_link"),
+        "instagram_link": _coerce_record_string(record, "instagram_link"),
+        "principal_name": _coerce_record_string(record, "principal_name"),
+        "principal_email": _coerce_record_string(record, "principal_email"),
+        "principal_phone": _coerce_record_string(record, "principal_phone"),
+        "sales_representative": record.get("sales_representative"),
+        "service_type": extract_service_type(record.get("service_type")),
+        "service_status": normalize_service_status(record.get("service_status")),
+        "grades": normalize_grades(grades_from_record),
+        "branch_ids": record.get("branch_ids"),
+        "grade_default_labels": record.get("grade_default_labels"),
+        "grade_unique_values": record.get("grade_unique_values"),
+        "branch_parent_id": record.get("branch_parent_id"),
+        "status": record.get("status") or BRANCH_STATUS_ACTIVE,
+        "selection_status": record.get("selection_status"),
+        "selections_approved": bool(record.get("selections_approved")),
+        "selection_locked_at": record.get("selection_locked_at"),
+        "selection_locked_by": record.get("selection_locked_by"),
+        "id_card_fields": record.get("id_card_fields"),
+        "zoho_customer_id": record.get("zoho_customer_id"),
+        "created_at": record.get("created_at") or record.get("timestamp") or now,
+        "updated_at": record.get("updated_at") or record.get("timestamp") or now,
+        "timestamp": record.get("timestamp") or record.get("updated_at") or now,
+    }
+
+    return payload
 
 
 def locate_school_record(
@@ -977,11 +974,13 @@ def locate_school_record(
 def allocate_school_id(
     db: firestore.Client,
     start_value: int = SCHOOL_ID_START,
+    *,
+    counter_doc_id: str = SCHOOL_ID_COUNTER_DOC_ID,
 ) -> str:
     """Atomically increment and return the next numeric school id."""
     counter_ref = (
         db.collection(SCHOOL_ID_COUNTER_COLLECTION)
-        .document(SCHOOL_ID_COUNTER_DOC_ID)
+        .document(counter_doc_id)
     )
 
     @firestore.transactional
@@ -1020,20 +1019,26 @@ def create_school_profile(
     facebook_image_mime: Optional[str] = None,
     instagram_image_blob: Optional[bytes] = None,
     instagram_image_mime: Optional[str] = None,
+    *,
+    counter_doc_id: str = SCHOOL_ID_COUNTER_DOC_ID,
+    enforce_uniqueness: bool = True,
+    testing: bool = False,
 ) -> School:
     user_id = user_record.get("uid")
     if not user_id:
         raise HTTPException(status_code=400, detail="User record is missing a user id")
 
     allow_conflict = user_record.get("role") == "super-admin"
+    if testing:
+        allow_conflict = True
     normalized_school_email = (
         _ensure_unique_email(db, str(payload.email), "school email")
-        if not allow_conflict
+        if (enforce_uniqueness and not allow_conflict)
         else _normalize_email(str(payload.email))
     )
     normalized_principal_email = (
         _ensure_unique_email(db, str(payload.principal_email), "principal email")
-        if not allow_conflict
+        if (enforce_uniqueness and not allow_conflict)
         else _normalize_email(str(payload.principal_email))
     )
     phone_query = (
@@ -1046,7 +1051,7 @@ def create_school_profile(
     #         detail="A school with this phone number already exists. Please use a different phone number.",
     #     )
 
-    school_id = allocate_school_id(db)
+    school_id = allocate_school_id(db, counter_doc_id=counter_doc_id)
     now = datetime.utcnow()
 
     owner_email_input = _clean_optional_string(str(payload.email) if payload.email else None)
@@ -1075,6 +1080,7 @@ def create_school_profile(
         "city": city,
         "state": state,
         "pin": pin,
+        
         "tagline": _clean_optional_string(payload.tagline),
         "website": _clean_optional_string(payload.website),
         "facebook_link": _clean_optional_string(payload.facebook_link),
@@ -1084,6 +1090,7 @@ def create_school_profile(
         "principal_phone": _clean_optional_string(payload.principal_phone),
         "service_type": services_from_status(service_status_map),
         "service_status": service_status_map,
+        "sales_representative":_clean_optional_string(payload.sales_representative),
         "grades": grade_map,
         "branches": {},
         "branch_ids": [],
@@ -1092,6 +1099,9 @@ def create_school_profile(
         "updated_at": now,
         "timestamp": now,
     }
+
+    if testing:
+        school_payload["testing"] = True
 
     if school_image_blobs:
         for idx, (blob, mime) in enumerate(school_image_blobs, start=1):
@@ -1120,6 +1130,91 @@ def create_school_profile(
             existing_ids.add(school_id)
             assignee_record["school_ids"] = list(existing_ids)
 
+    return build_school_from_record(school_payload)
+
+
+def create_school_profile_testing(
+    db: firestore.Client,
+    payload: SchoolCreatePayload,
+    user_record: Dict[str, Any],
+    logo_blob: Optional[bytes] = None,
+    school_image_blobs: Optional[List[Tuple[Optional[bytes], Optional[str]]]] = None,
+    facebook_image_blob: Optional[bytes] = None,
+    facebook_image_mime: Optional[str] = None,
+    instagram_image_blob: Optional[bytes] = None,
+    instagram_image_mime: Optional[str] = None,
+    *,
+    collection_name: str = "schools_testing",
+    counter_doc_id: str = "school_id_counter_testing",
+) -> School:
+    """Create a school profile in a separate collection without consuming the production id counter."""
+
+    user_id = user_record.get("uid")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="User record is missing a user id")
+
+    school_id = allocate_school_id(db, counter_doc_id=counter_doc_id)
+    now = datetime.utcnow()
+
+    normalized_school_email = _normalize_email(str(payload.email) if payload.email else "")
+    normalized_principal_email = _normalize_email(
+        str(payload.principal_email) if payload.principal_email else ""
+    )
+
+    address = _clean_optional_string(payload.address)
+    city = _clean_optional_string(payload.city)
+    state = _clean_optional_string(payload.state)
+    pin = _clean_optional_string(payload.pin)
+    grade_map = normalize_grades(payload.grades)
+
+    school_payload: Dict[str, Any] = {
+        "school_id": school_id,
+        "school_name": payload.school_name.strip(),
+        "logo_blob": logo_blob,
+        "email": normalized_school_email or None,
+        "phone": _clean_optional_string(payload.phone),
+        "address": address,
+        "city": city,
+        "state": state,
+        "pin": pin,
+        "tagline": _clean_optional_string(payload.tagline),
+        "website": _clean_optional_string(payload.website),
+        "facebook_link": _clean_optional_string(payload.facebook_link),
+        "instagram_link": _clean_optional_string(payload.instagram_link),
+        "principal_name": _clean_optional_string(payload.principal_name),
+        "principal_email": normalized_principal_email or None,
+        "principal_phone": _clean_optional_string(payload.principal_phone),
+        "service_type": normalize_service_types(payload.service_type),
+        "service_status": normalize_service_status(payload.service_status),
+        "sales_representative": _clean_optional_string(payload.sales_representative),
+        "grades": grade_map,
+        "branches": {},
+        "branch_ids": [],
+        "id_card_fields": payload.id_card_fields if payload.id_card_fields is not None else [],
+        "created_at": now,
+        "updated_at": now,
+        "timestamp": now,
+        "testing": True,
+        "created_by_uid": user_id,
+    }
+
+    if school_image_blobs:
+        for idx, (blob, mime) in enumerate(school_image_blobs, start=1):
+            if blob:
+                school_payload[f"school_image_{idx}"] = blob
+                school_payload[f"school_image_{idx}_mime"] = mime
+
+    if facebook_image_blob is not None:
+        school_payload["facebook_image_blob"] = facebook_image_blob
+        if facebook_image_mime:
+            school_payload["facebook_image_mime"] = facebook_image_mime
+
+    if instagram_image_blob is not None:
+        school_payload["instagram_image_blob"] = instagram_image_blob
+        if instagram_image_mime:
+            school_payload["instagram_image_mime"] = instagram_image_mime
+
+    db.collection(collection_name).document(school_id).set(school_payload)
     return build_school_from_record(school_payload)
 
 

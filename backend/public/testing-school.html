@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Testing School Creator</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      label { display:block; font-size: 12px; color:#333; margin-bottom: 4px; }
+      input, textarea, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; }
+      .full { grid-column: 1 / -1; }
+      button { padding: 10px 14px; border: 0; border-radius: 10px; background: #111827; color: white; cursor:pointer; }
+      button:disabled { opacity: .6; cursor: default; }
+      pre { background: #0b1020; color: #d1e7ff; padding: 12px; border-radius: 10px; overflow:auto; }
+      .note { font-size: 12px; color: #555; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <h2>Testing School Creator</h2>
+    <div class="note">
+      Uses <code>POST /api/testing/schools</code> and does not increment the production school counter.
+      The backend must be started with <code>ENABLE_TESTING_INTERFACE=true</code>.
+    </div>
+
+    <h3 style="margin-top:18px;">Login (Firebase)</h3>
+    <div class="note">
+      This logs into the same Firebase project as the main app and fetches an ID token automatically.
+      If you see an “unauthorized domain” error, add this site (e.g. <code>localhost</code>) to Firebase Auth → Settings → Authorized domains.
+    </div>
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+      <button id="googleLoginBtn" type="button">Login with Google</button>
+      <button id="fetchTokenBtn" type="button" style="background:#111827;">Get token</button>
+      <button id="logoutBtn" type="button" style="background:#374151;">Logout</button>
+      <span id="loginStatus" class="note"></span>
+    </div>
+    <pre id="loginDebug" style="margin-top:10px; max-height: 220px;">(login debug)</pre>
+
+    <form id="form" style="margin-top:16px;">
+      <div class="row">
+        <div class="full">
+          <label for="testing_secret">Testing secret (optional)</label>
+          <input id="testing_secret" name="testing_secret" placeholder="X-Testing-Secret (only if configured on server)" />
+        </div>
+        <div class="full">
+          <label for="token">Authorization (Bearer token)</label>
+          <input id="token" name="token" placeholder="Bearer eyJ..." />
+        </div>
+
+        <div>
+          <label for="school_name">School name</label>
+          <input id="school_name" name="school_name" required value="Test School" />
+        </div>
+        <div>
+          <label for="phone">Phone</label>
+          <input id="phone" name="phone" required value="9999999999" />
+        </div>
+        <div>
+          <label for="email">School email</label>
+          <input id="email" name="email" type="email" required value="test.school@example.com" />
+        </div>
+        <div>
+          <label for="principal_name">Principal name</label>
+          <input id="principal_name" name="principal_name" required value="Test Principal" />
+        </div>
+        <div>
+          <label for="principal_phone">Principal phone</label>
+          <input id="principal_phone" name="principal_phone" required value="8888888888" />
+        </div>
+        <div>
+          <label for="principal_email">Principal email</label>
+          <input id="principal_email" name="principal_email" type="email" required value="test.principal@example.com" />
+        </div>
+
+        <div class="full">
+          <label for="logo_file">Logo file (optional)</label>
+          <input id="logo_file" name="logo_file" type="file" accept="image/*" />
+        </div>
+
+        <div>
+          <label for="school_image_1">School image 1 (optional)</label>
+          <input id="school_image_1" name="school_image_1" type="file" accept="image/*" />
+        </div>
+        <div>
+          <label for="school_image_2">School image 2 (optional)</label>
+          <input id="school_image_2" name="school_image_2" type="file" accept="image/*" />
+        </div>
+        <div>
+          <label for="school_image_3">School image 3 (optional)</label>
+          <input id="school_image_3" name="school_image_3" type="file" accept="image/*" />
+        </div>
+        <div>
+          <label for="school_image_4">School image 4 (optional)</label>
+          <input id="school_image_4" name="school_image_4" type="file" accept="image/*" />
+        </div>
+      </div>
+
+      <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
+        <button id="submit" type="submit">Create test school</button>
+        <span id="status" class="note"></span>
+      </div>
+    </form>
+
+    <h3 style="margin-top:18px;">Response</h3>
+    <pre id="out">{}</pre>
+
+    <script type="module">
+      import { initializeApp } from "https://cdn.jsdelivr.net/npm/firebase@10.12.5/app/+esm";
+      import {
+        getAuth,
+        onAuthStateChanged,
+        GoogleAuthProvider,
+        signInWithRedirect,
+        getRedirectResult,
+        signOut,
+      } from "https://cdn.jsdelivr.net/npm/firebase@10.12.5/auth/+esm";
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyAcu52UUBUwJYb_wNhFr14IrcsEKgEl8P4",
+        authDomain: "sales-catelogue.firebaseapp.com",
+        projectId: "sales-catelogue",
+        storageBucket: "sales-catelogue.firebasestorage.app",
+        messagingSenderId: "595821344222",
+        appId: "1:595821344222:web:91fac7c9ddcff9bc7cd94f",
+        measurementId: "G-DN7RZKN313",
+      };
+
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+
+      const form = document.getElementById("form");
+      const out = document.getElementById("out");
+      const status = document.getElementById("status");
+      const submit = document.getElementById("submit");
+
+      const googleLoginBtn = document.getElementById("googleLoginBtn");
+      const fetchTokenBtn = document.getElementById("fetchTokenBtn");
+      const logoutBtn = document.getElementById("logoutBtn");
+      const loginStatus = document.getElementById("loginStatus");
+      const loginDebug = document.getElementById("loginDebug");
+      const testingSecretInput = document.getElementById("testing_secret");
+      const tokenInput = document.getElementById("token");
+
+      function log(line) {
+        const ts = new Date().toISOString();
+        const prev = loginDebug.textContent === "(login debug)" ? "" : loginDebug.textContent;
+        loginDebug.textContent = `${prev}${prev ? "\n" : ""}[${ts}] ${line}`;
+      }
+
+      window.addEventListener("error", (e) => {
+        try {
+          log(`Window error: ${e.message || e.type}`);
+        } catch (_) {}
+      });
+      window.addEventListener("unhandledrejection", (e) => {
+        try {
+          log(`Unhandled rejection: ${String(e.reason && e.reason.message ? e.reason.message : e.reason)}`);
+        } catch (_) {}
+      });
+
+      log(`Loaded at: ${location.href}`);
+
+      async function setBearerFromUser(user, { forceRefresh = false } = {}) {
+        if (!user) {
+          tokenInput.value = "";
+          return;
+        }
+        const idToken = await user.getIdToken(forceRefresh);
+        tokenInput.value = `Bearer ${idToken}`;
+        loginStatus.textContent = `Logged in: ${user.email || user.uid} (token updated)`;
+        log("Token updated");
+      }
+
+      // If popup is blocked and we fall back to redirect, this ensures we finalize the auth flow.
+      (async () => {
+        try {
+          const result = await getRedirectResult(auth);
+          if (result && result.user) {
+            log(`Redirect result user: ${result.user.email || result.user.uid}`);
+            await setBearerFromUser(result.user, { forceRefresh: true });
+          } else {
+            log("No redirect result");
+          }
+        } catch (e) {
+          // Non-fatal; auth state listener will still show status if user is logged in.
+          loginStatus.textContent = String(e && e.message ? e.message : e);
+          log(`Redirect error: ${String(e && e.code ? e.code : e)}`);
+        }
+      })();
+
+      onAuthStateChanged(auth, async (user) => {
+        try {
+          if (!user) {
+            loginStatus.textContent = "Not logged in";
+            log("Auth state: not logged in");
+            return;
+          }
+          loginStatus.textContent = `Logged in: ${user.email || user.uid} (fetching token...)`;
+          log(`Auth state user: ${user.email || user.uid}`);
+          await setBearerFromUser(user, { forceRefresh: false });
+        } catch (e) {
+          loginStatus.textContent = String(e && e.message ? e.message : e);
+          log(`Auth state error: ${String(e && e.code ? e.code : e)}`);
+        }
+      });
+
+      googleLoginBtn.addEventListener("click", async () => {
+        loginStatus.textContent = "Starting Google login (redirect)...";
+        googleLoginBtn.disabled = true;
+        try {
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: "select_account" });
+          log("Calling signInWithRedirect...");
+          await signInWithRedirect(auth, provider);
+        } catch (err) {
+          loginStatus.textContent = String(err && err.message ? err.message : err);
+          log(`Login error: ${String(err && err.code ? err.code : err)}`);
+        } finally {
+          googleLoginBtn.disabled = false;
+        }
+      });
+
+      fetchTokenBtn.addEventListener("click", async () => {
+        try {
+          const user = auth.currentUser;
+          if (!user) {
+            loginStatus.textContent = "Not logged in";
+            tokenInput.value = "";
+            log("Get token: no currentUser");
+            return;
+          }
+          loginStatus.textContent = "Fetching token...";
+          log("Get token: refreshing...");
+          await setBearerFromUser(user, { forceRefresh: true });
+        } catch (err) {
+          loginStatus.textContent = String(err && err.message ? err.message : err);
+          log(`Get token error: ${String(err && err.code ? err.code : err)}`);
+        }
+      });
+
+      logoutBtn.addEventListener("click", async () => {
+        loginStatus.textContent = "Logging out...";
+        try {
+          await signOut(auth);
+          tokenInput.value = "";
+          loginStatus.textContent = "Not logged in";
+        } catch (err) {
+          loginStatus.textContent = String(err && err.message ? err.message : err);
+        }
+      });
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        out.textContent = "";
+        status.textContent = "Sending...";
+        submit.disabled = true;
+
+        try {
+          const token = (document.getElementById("token").value || "").trim();
+          const testingSecret = (testingSecretInput.value || "").trim();
+          const fd = new FormData(form);
+          fd.delete("token");
+          fd.delete("testing_secret");
+
+          const headers = {};
+          if (token) headers["Authorization"] = token;
+          if (testingSecret) headers["X-Testing-Secret"] = testingSecret;
+
+          const res = await fetch("/api/testing/schools", {
+            method: "POST",
+            headers,
+            body: fd,
+          });
+
+          const text = await res.text();
+          let parsed = text;
+          try { parsed = JSON.parse(text); } catch (_) {}
+          out.textContent = typeof parsed === "string" ? parsed : JSON.stringify(parsed, null, 2);
+          status.textContent = res.ok ? "OK" : `Error (${res.status})`;
+        } catch (err) {
+          status.textContent = "Failed";
+          out.textContent = String(err && err.stack ? err.stack : err);
+        } finally {
+          submit.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

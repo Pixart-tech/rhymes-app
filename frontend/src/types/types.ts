@@ -5,9 +5,6 @@ export type SchoolServiceType =
    'id_cards'
   | 'report_cards'
   | 'certificates'
-  | 'Pre-Written Nursery Set'
-  | 'Pre-Written LKG Set'
-  | 'Pre-Written UKG Set'
   | 'Birthday  card'
   | 'Independence Day activity card'
   | "Children's Day Gifting Book"
@@ -37,6 +34,7 @@ export interface SchoolProfile {
   state?: string | null;
   pin?: string | null;
   branch_parent_id?: string | null;
+  branch_ids?: string[] | null;
   tagline?: string | null;
   principal_name?: string | null;
   principal_email?: string | null;

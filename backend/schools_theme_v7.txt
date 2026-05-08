@@ -1,0 +1,6 @@
+Schools with theme_id='v7'
+Generated: 2026-05-02 13:29:37 UTC
+Count: 1
+
+school_id	school_name	email	sales_representative
+20178	MAGIZH GLOBAL KIDZ	mgkdpm@gmail.com	Pavitra

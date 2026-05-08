@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
+import re
 from datetime import datetime
 from io import BytesIO
 
@@ -13,7 +15,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import math
 from tempfile import NamedTemporaryFile
 from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response,RedirectResponse
+
 
 import pymupdf as fitz
 from PIL import Image, UnidentifiedImageError, PngImagePlugin
@@ -21,6 +24,7 @@ from PIL import Image, UnidentifiedImageError, PngImagePlugin
 PngImagePlugin.MAX_TEXT_CHUNK = None
 
 from .. import school_profiles
+from ..models import School
 from pydantic import BaseModel, field_validator
 
 
@@ -85,6 +89,8 @@ from ..firebase_service import (
 )
 from ..schemas import (
     BranchStatusUpdatePayload,
+    AdminSchoolRow,
+    PaginatedAdminSchoolResponse,
     PaginatedSchoolResponse,
     SchoolWithSelections,
 )
@@ -346,7 +352,7 @@ async def _read_upload_file_preserve_original(
     if not upload_file:
         return None, None, None, None, None
     contents = await upload_file.read()
-    print(len(contents))
+    
     if not contents:
         return None, None, None, None, None
     try:
@@ -572,8 +578,16 @@ async def create_school_profile(
     facebook_image: Optional[UploadFile] = File(None),
     instagram_image: Optional[UploadFile] = File(None),
     authorization: Optional[str] = Header(None),
+    
 ):
-    decoded_token = verify_and_decode_token(authorization)
+    
+
+    if authorization:
+        decoded_token = verify_and_decode_token(authorization)
+
+    else:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
     user_record = ensure_user_document(decoded_token)
     logo_blob, _, logo_original, logo_original_name, logo_original_type = await _read_upload_file_preserve_original(
         logo_file
@@ -591,7 +605,7 @@ async def create_school_profile(
         raise HTTPException(status_code=400, detail="Total school images must be 2MB or less")
     facebook_blob, facebook_mime = await _read_upload_file(facebook_image)
     instagram_blob, instagram_mime = await _read_upload_file(instagram_image)
-    if len(logo_blob)>1048576:
+    if logo_blob is not None and len(logo_blob) > 1048576:
         
         smaller_logo_blob = _shrink_png_bytes_until_under(
                     logo_blob , max_bytes=TARGET_LOGO_BYTES_ON_FIRESTORE_ERROR
@@ -606,6 +620,7 @@ async def create_school_profile(
             facebook_image_mime=facebook_mime,
             instagram_image_blob=instagram_blob,
             instagram_image_mime=instagram_mime,
+            
         )
     else:
         try:
@@ -619,6 +634,7 @@ async def create_school_profile(
                 facebook_image_mime=facebook_mime,
                 instagram_image_blob=instagram_blob,
                 instagram_image_mime=instagram_mime,
+                
             )
         except Exception as exc:
             print(exc)
@@ -649,7 +665,17 @@ async def create_school_profile(
         if decoded_token.get("email"):
             status_payload["status_updated_by_email"] = decoded_token.get("email")
     cover_doc.set(status_payload,merge=True)
+    try:
+        invalidate_schools_count_cache()
+    except Exception:
+        logger.exception("Failed to invalidate schools count cache after creating school")
     return created 
+
+
+
+
+
+
 
 @router.get("/schools/email-availability")
 async def check_school_email_availability(
@@ -676,20 +702,77 @@ def create_branch_profile(
 
 async def get_school_profile(
     school_id: str,
-    authorization: Optional[str] = Header(None)
+    include_zoho: bool = False,
+    authorization: Optional[str] = Header(None),
 ):
     decoded_token = verify_and_decode_token(authorization)
+    
     user_record = ensure_user_document(decoded_token)
     if not user_record:
         raise HTTPException(status_code=404,detail="user doesnt exist ")
     doc_ref = db.collection("schools").document(school_id)
-    snapshot = doc_ref.get()
+
+    snapshot = doc_ref.get(
+        field_paths=[
+            "id",
+            "email",
+            "phone",
+            "address",
+            "city",
+            "state",
+            "pin",
+            "website",
+            "facebook_link",
+            "instagram_link",
+            "tagline",
+            "principal_phone",
+            "principal_email",
+            "principal_name",
+            "school_name",
+            "grades",
+            "sales_representative",
+            "service_type",
+            "service_status",
+            "id_card_fields",
+            "branch_parent_id",
+            "branch_ids",
+            "selection_status",
+            "selections_approved",
+            "updated_at",
+            "timestamp",
+        ]
+    )
+
     if not snapshot.exists:
         raise HTTPException(status_code=404, detail="School not found")
-    existing=snapshot.to_dict() 
-    existing.setdefault("id", snapshot.id)
-    existing.setdefault("school_id", snapshot.id)
-    return  school_profiles.build_school_from_record(existing)
+    record=snapshot.to_dict() 
+    schools: List[School] = []
+
+    record.setdefault("id", snapshot.id)
+    record.setdefault("school_id", snapshot.id)
+    
+        
+   
+       
+    # Zoho customer id + grade labels are stored in a separate document and are only
+    # needed for the add-ons dialog. Skip by default to keep this endpoint fast.
+    if include_zoho:
+        main_school_id = record.get("branch_parent_id") or record.get("school_id") or snapshot.id
+        zoho_doc = school_profiles._zoho_details_doc_ref(db, main_school_id).get()
+        zoho_details = zoho_doc.to_dict() if zoho_doc.exists else {}
+        record["zoho_customer_id"] = zoho_details.get("customer_id")
+        record["grade_default_labels"] = zoho_details.get("grade_labels")
+        record["grade_unique_values"] = zoho_details.get("grade_unique_values")
+
+    schools.append(school_profiles.build_school_from_record(record))
+    
+   
+    
+    
+    
+    
+    
+    return {"schools":schools}
     
     
     
@@ -1186,7 +1269,7 @@ def approve_school_selections(
 @router.get("/schools/{school_id}/logo")
 def get_school_logo(school_id: str):
     doc_ref = db.collection("schools").document(school_id)
-    snapshot = doc_ref.get()
+    snapshot = doc_ref.get(field_paths=["logo_blob"])
     if not snapshot.exists:
         raise HTTPException(status_code=404, detail="School not found")
 
@@ -1204,8 +1287,11 @@ def get_school_logo(school_id: str):
         raise HTTPException(status_code=404, detail="Logo not found")
 
     headers = {
-        "Cache-Control": "no-store",
-        "Content-Disposition": f'inline; filename="{school_id}.png"',
+        # The frontend uses a versioned logo URL (`?v=<updated_at>`), so we can safely
+        # cache these aggressively in the browser.
+        # "Cache-Control": "public, max-age=31536000, immutable",
+        "Cache-Control":"no-Cache",
+        "Content-Disposition": f'inline; filename="{school_id}.png',
     }
     return Response(content=logo_blob, media_type="image/png", headers=headers)
 
@@ -1304,11 +1390,12 @@ def get_school_instagram_image(school_id: str):
     return Response(content=bytes(blob_value), media_type=media_type, headers=headers)
 
 
-@router.get("/admin/school/{query}", response_model=PaginatedSchoolResponse)
+@router.get("/admin/school/{query}", response_model=PaginatedAdminSchoolResponse)
 def get_school(
     query: str,
     page: int = 1,
     limit: int = 10,
+    include_branches: bool = False,
     authorization: Optional[str] = Header(None),
 ):  
     """Search schools by school_name (case-insensitive substring match).
@@ -1316,280 +1403,351 @@ def get_school(
     Note: Firestore doesn't support arbitrary case-insensitive "contains" queries on strings,
     so we fetch and filter in memory.
     """
-    decoded_token = verify_and_decode_token(authorization)
+    
+   
+    decoded_token= verify_and_decode_token(authorization)
+    t=time.perf_counter()
     user_record = ensure_user_document(decoded_token)
+    t1=time.perf_counter()
+    print(t1-t)
+   
+    
     if user_record.get("role") != "super-admin":
         raise HTTPException(status_code=403, detail="Admin privileges required")
-
     cleaned_query = (query or "").strip()
     if not cleaned_query:
-        return PaginatedSchoolResponse(schools=[], total_count=0)
-
+        return PaginatedAdminSchoolResponse(schools=[], total_count=0)
+ 
     normalized_query = cleaned_query.casefold()
-    school_docs_query = db.collection("schools").order_by("timestamp", direction=firestore.Query.DESCENDING)
-    all_school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
+
+    fields = [
+        "school_name",
+        "school_id",
+        "email",
+        "sales_representative",
+        "branch_parent_id",
+        "branch_ids",
+        "grades",
+        "service_status",
+        "service_type",
+        "id_card_fields",
+        "selection_status",
+        "selections_approved",
+        "timestamp",
+        "updated_at",
+    ]
+
+    def _coerce_snapshot(snapshot: Any) -> Dict[str, Any]:
+        doc = snapshot.to_dict() or {}
+        doc.setdefault("school_id", snapshot.id)
+        doc.setdefault("id", doc.get("school_id") or snapshot.id)
+        return doc
+
+    def _prefix_query(field: str, prefix: str) -> List[Dict[str, Any]]:
+        if not prefix:
+            return []
+        snapshots = (
+            db.collection("schools")
+            .select(fields)
+            .where(field, ">=", prefix)
+            .where(field, "<", f"{prefix}\uf8ff")
+            .order_by(field)
+            .get()
+        )
+        return [_coerce_snapshot(s) for s in snapshots]
 
     matching_docs: List[Dict[str, Any]] = []
-    for doc in all_school_docs:
-        school_name = (doc.get("school_name") or "").strip()
-        school_id = (doc.get("school_id") or doc.get("id") or "").strip()
-        school_email = (doc.get("email") or "").strip()
-        sales_representative=(doc.get("sales_representative") or "").strip()
-        
-        if (
-            normalized_query in school_name.casefold() or normalized_query.upper() in school_name.casefold()
-            or normalized_query in school_id.casefold()
-            or normalized_query in school_email.casefold()
-            or normalized_query in sales_representative.casefold()
-        ):
-            if not doc.get("id") and doc.get("school_id"):
-                doc["id"] = doc["school_id"]
+    seen_ids: Set[str] = set()
+
+    # Optimized path: prefix match against normalized fields (if present on docs).
+    # For now, if nothing matches we fall back to the original scan + substring
+    # match so existing docs still show up.
+    for doc in _prefix_query("school_name_norm", normalized_query):
+        sid = str(doc.get("school_id") or "").strip()
+        if sid and sid not in seen_ids:
+            seen_ids.add(sid)
             matching_docs.append(doc)
+
+    for doc in _prefix_query("sales_representative_norm", normalized_query):
+        sid = str(doc.get("school_id") or "").strip()
+        if sid and sid not in seen_ids:
+            seen_ids.add(sid)
+            matching_docs.append(doc)
+
+    if not matching_docs:
+        print("Iam running")
+        # Fallback: scan and substring match (case-insensitive).
+        school_docs_query = db.collection("schools").select(fields)
+        for snapshot in school_docs_query.get():
+            doc = _coerce_snapshot(snapshot)
+            school_name = (doc.get("school_name") or "").strip()
+            school_id = (doc.get("school_id") or "").strip()
+            school_email = (doc.get("email") or "").strip()
+            sales_representative = (doc.get("sales_representative") or "").strip()
+
+            if (
+                normalized_query in school_name.casefold()
+                or normalized_query in school_id.casefold()
+                or normalized_query in school_email.casefold()
+                or normalized_query in sales_representative.casefold()
+            ):
+                matching_docs.append(doc)
+
+    matching_docs.sort(key=lambda entry: (str(entry.get("school_name") or "").casefold(), str(entry.get("school_id") or "")))
 
     total_count = len(matching_docs)
     if total_count == 0:
-        return PaginatedSchoolResponse(schools=[], total_count=0)
+        return PaginatedAdminSchoolResponse(schools=[], total_count=0)
 
     offset = max((page - 1) * limit, 0)
     page_docs = matching_docs[offset : offset + limit]
     if not page_docs:
-        return PaginatedSchoolResponse(schools=[], total_count=total_count)
-
-    expanded_docs: List[Dict[str, Any]] = []
-    for doc in page_docs:
-        if not doc.get("id") and doc.get("school_id"):
-            doc["id"] = doc["school_id"]
-        expanded_docs.append(doc)
-
-        branches = doc.get("branches") or {}
-        parent_id = doc.get("school_id") or doc.get("id")
-        for branch_id, branch_entry in branches.items():
-            if not isinstance(branch_entry, dict):
-                continue
-            branch_record = dict(branch_entry)
-            branch_record.setdefault("id", branch_id)
-            branch_record.setdefault("school_id", branch_id)
-            branch_record.setdefault("branch_parent_id", parent_id)
-            expanded_docs.append(branch_record)
-
-    # school_ids = [doc.get("school_id") for doc in expanded_docs if doc.get("school_id")]
-    # selections_count: Dict[str, int] = {}
-    latest_selection_timestamp: Dict[str, datetime] = {}
-
-    # if school_ids:
-    #     chunk_size = 30
-    #     for i in range(0, len(school_ids), chunk_size):
-    #         chunk = school_ids[i : i + chunk_size]
-    #         selection_docs_query = (
-    #             db.collection("rhyme_selections")
-    #             .where("school_id", "in", chunk)
-    #             .select(["school_id", "timestamp"])
-    #         )
-    #         for selection_doc in selection_docs_query.stream():
-    #             selection = selection_doc.to_dict() or {}
-    #             school_id = selection.get("school_id")
-    #             if not school_id:
-    #                 continue
-    #             selections_count[school_id] = selections_count.get(school_id, 0) + 1
-    #             timestamp = selection.get("timestamp")
-    #             if timestamp:
-    #                 existing_ts = latest_selection_timestamp.get(school_id)
-    #                 if not existing_ts or timestamp > existing_ts:
-    #                     latest_selection_timestamp[school_id] = timestamp
-
-    zoho_ids: Set[str] = set()
-    for doc in expanded_docs:
-        zoho_id = doc.get("branch_parent_id") or doc.get("school_id")
-        if zoho_id:
-            zoho_ids.add(zoho_id)
-    zoho_refs = [school_profiles._zoho_details_doc_ref(db, zoho_id) for zoho_id in zoho_ids]
-    zoho_snapshot_map: Dict[str, Dict[str, Any]] = {}
-    if zoho_refs:
-        for snapshot in db.get_all(zoho_refs):
-            zoho_snapshot_map[snapshot.id] = snapshot.to_dict() or {}
+        return PaginatedAdminSchoolResponse(schools=[], total_count=total_count)
 
     schools_with_details: List[SchoolWithSelections] = []
 
-    for doc in expanded_docs:
+    for doc in page_docs:
         school_id = doc.get("school_id")
         if not school_id:
             continue
-        zoho_main_id = doc.get("branch_parent_id") or school_id
-        zoho_details = zoho_snapshot_map.get(zoho_main_id) or {}
-        doc["zoho_customer_id"] = zoho_details.get("customer_id")
-        doc["grade_default_labels"] = zoho_details.get("grade_labels")
-        doc["grade_unique_values"] = zoho_details.get("grade_unique_values")
 
-        base_school = school_profiles.build_school_from_record(doc)
-        # total_selections = selections_count.get(school_id, 0)
-        last_updated = latest_selection_timestamp.get(school_id) or doc.get("timestamp")
+
+
+
+        timestamp_value = doc.get("timestamp") or doc.get("updated_at")
+        last_updated = doc.get("updated_at") or doc.get("timestamp")
 
         schools_with_details.append(
-            SchoolWithSelections(
-                **base_school.dict(),
-                
-                last_updated=last_updated,
-            )
+        AdminSchoolRow(
+            school_id=school_id,
+            school_name=(doc.get("school_name") or "").strip() or "School",
+            logo_url=school_profiles.build_school_logo_url(school_id, last_updated),
+            sales_representative=doc.get("sales_representative"),
+            branch_parent_id=doc.get("branch_parent_id"),
+            branch_ids=doc.get("branch_ids"),
+            grades=doc.get("grades"),
+            service_status=doc.get("service_status"),
+            service_type=doc.get("service_type"),
+            id_card_fields=doc.get("id_card_fields"),
+            selection_status=doc.get("selection_status"),
+            selections_approved=bool(doc.get("selections_approved")),
+            timestamp=timestamp_value,
+            last_updated=last_updated,
         )
-
-    return PaginatedSchoolResponse(schools=schools_with_details, total_count=total_count)
+        )
+    
+    return PaginatedAdminSchoolResponse(schools=schools_with_details, total_count=total_count)
 
 
 
 import time
-@router.get("/admin/schools", response_model=PaginatedSchoolResponse)
+import threading
+
+_SCHOOLS_COUNT_CACHE_LOCK = threading.Lock()
+_SCHOOLS_COUNT_CACHE: Dict[str, Dict[str, Any]] = {}
+_SCHOOLS_COUNT_CACHE_TTL_S = 60.0
+
+
+def peek_schools_count_cached(*, cache_key: str = "all") -> Optional[int]:
+    key = f"schools::{cache_key}"
+    now = time.monotonic()
+    with _SCHOOLS_COUNT_CACHE_LOCK:
+        cached = _SCHOOLS_COUNT_CACHE.get(key)
+        if cached and (now - float(cached.get("ts", 0.0))) < _SCHOOLS_COUNT_CACHE_TTL_S:
+            return int(cached.get("value", 0))
+    return None
+
+
+def get_schools_count_cached(*, cache_key: str = "all") -> int:
+    key = f"schools::{cache_key}"
+    now = time.monotonic()
+    with _SCHOOLS_COUNT_CACHE_LOCK:
+        cached = _SCHOOLS_COUNT_CACHE.get(key)
+        if cached and (now - float(cached.get("ts", 0.0))) < _SCHOOLS_COUNT_CACHE_TTL_S:
+            return int(cached.get("value", 0))
+
+    snap = db.collection("schools").count().get()
+    value = int(snap[0][0].value) if snap else 0
+
+    with _SCHOOLS_COUNT_CACHE_LOCK:
+        _SCHOOLS_COUNT_CACHE[key] = {"value": value, "ts": now}
+
+    return value
+
+
+def invalidate_schools_count_cache() -> None:
+    with _SCHOOLS_COUNT_CACHE_LOCK:
+        _SCHOOLS_COUNT_CACHE.clear()
+
+
+_ZOHO_DETAILS_CACHE_LOCK = threading.Lock()
+_ZOHO_DETAILS_CACHE: Dict[str, Dict[str, Any]] = {}
+_ZOHO_DETAILS_CACHE_TTL_S = 120.0
+
+
+def _get_zoho_details_cached(zoho_ids: Set[str]) -> Dict[str, Dict[str, Any]]:
+    if not zoho_ids:
+        return {}
+
+    now = time.monotonic()
+    snapshot_map: Dict[str, Dict[str, Any]] = {}
+    missing: List[str] = []
+
+    with _ZOHO_DETAILS_CACHE_LOCK:
+        for zoho_id in zoho_ids:
+            cached = _ZOHO_DETAILS_CACHE.get(zoho_id)
+            if cached and (now - float(cached.get("ts", 0.0))) < _ZOHO_DETAILS_CACHE_TTL_S:
+                snapshot_map[zoho_id] = dict(cached.get("value") or {})
+            else:
+                missing.append(zoho_id)
+
+    if missing:
+        refs = [school_profiles._zoho_details_doc_ref(db, zoho_id) for zoho_id in missing]
+        fetched: Dict[str, Dict[str, Any]] = {}
+        try:
+            for snapshot in db.get_all(refs):
+                fetched[snapshot.id] = snapshot.to_dict() or {}
+        except Exception:
+            logger.exception("Failed to fetch Zoho details for schools list")
+            fetched = {}
+
+        with _ZOHO_DETAILS_CACHE_LOCK:
+            for zoho_id in missing:
+                value = fetched.get(zoho_id) or {}
+                _ZOHO_DETAILS_CACHE[zoho_id] = {"value": value, "ts": now}
+                snapshot_map[zoho_id] = dict(value)
+
+    return snapshot_map
+
+
+@router.get("/admin/schools", response_model=PaginatedAdminSchoolResponse)
 def get_all_schools_with_selections(
-    page: int = 1, limit: int = 10, authorization: Optional[str] = Header(None)
+    page: int = 1,
+    limit: int = 10,
+    
+    
+    authorization: Optional[str] = Header(None),
 ):
-   
+    decoded_token = verify_and_decode_token(authorization)
+    user_record = ensure_user_document(decoded_token)
+    if user_record.get("role") != "super-admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    
+
+    # Avoid accidental huge payloads that make response validation/serialization expensive.
+    limit = max(1, min(int(limit), 100))
+
+    
+    offset = max((page - 1) * limit, 0)
+
+ 
+    school_docs_query = (
+        db.collection("schools")
+        .order_by("timestamp", direction=firestore.Query.DESCENDING)
+        .select(
+            [
+                
+                "school_id",
+                
+                "school_name",
+                "sales_representative",
+                "branch_parent_id",
+                "branch_ids",
+                "grades",
+                "selection_status",
+                "selections_approved",
+                "timestamp",
+                "updated_at",
+                "status",
+                "service_type",
+                "service_status",
+                "id_card_fields",
+            ]
+        )
+        .offset(offset)
+        .limit(limit)
+    )
+
+    school_docs = [doc.to_dict() for doc in school_docs_query.get()]
+    if not school_docs:
+        return PaginatedAdminSchoolResponse(schools=[])
+
+    schools_with_details: List[AdminSchoolRow] = []
+    for doc in school_docs:
+        school_id = doc.get("school_id") or doc.get("id")
+        if not school_id:
+            continue
+
+        timestamp_value = doc.get("timestamp") or doc.get("updated_at")
+        last_updated = doc.get("updated_at") or doc.get("timestamp")
+
+        schools_with_details.append(
+            AdminSchoolRow(
+                school_id=school_id,
+                school_name=(doc.get("school_name") or "").strip() or "School",
+                logo_url=school_profiles.build_school_logo_url(school_id, last_updated),
+                sales_representative=doc.get("sales_representative"),
+                branch_parent_id=doc.get("branch_parent_id"),
+                branch_ids=doc.get("branch_ids"),
+                grades=doc.get("grades"),
+                service_status=doc.get("service_status"),
+                service_type=doc.get("service_type"),
+                id_card_fields=doc.get("id_card_fields"),
+                selection_status=doc.get("selection_status"),
+                selections_approved=bool(doc.get("selections_approved")),
+                timestamp=timestamp_value,
+                last_updated=last_updated,
+            )
+        )
+
+    return PaginatedAdminSchoolResponse(schools=schools_with_details)
+
+
+@router.get("/admin/schools/count")
+def get_admin_schools_count(authorization: Optional[str] = Header(None)):
+    decoded_token = verify_and_decode_token(authorization)
+    user_record = ensure_user_document(decoded_token)
+    if user_record.get("role") != "super-admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    return {"total_count": get_schools_count_cached(cache_key="all")}
+
+
+@router.get("/admin/schools/{school_id}/branches", response_model=List[School])
+def get_admin_school_branches(
+    school_id: str,
+    authorization: Optional[str] = Header(None),
+):
     decoded_token = verify_and_decode_token(authorization)
     user_record = ensure_user_document(decoded_token)
     if user_record.get("role") != "super-admin":
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
-    count_snapshot = (db.collection("schools").count()).get()
-   
-    if not count_snapshot:
-        count_value = 0
-    else:
-        count_value = int(count_snapshot[0][0].value)
-    offset = max((page - 1) * limit, 0)
+    doc_ref = db.collection("schools").document(school_id)
+    snapshot = doc_ref.get(field_paths=["school_id", "branches", "zoho_customer_id"])
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="School not found")
 
-    # school_docs_query = (
-    #     db.collection("schools")
-    #     .order_by("timestamp", direction=firestore.Query.DESCENDING)
-    #     .offset(offset)
-    #     .limit(limit)
-    # )
-    
-    school_docs_query = (
-    db.collection("schools")
-    .order_by("timestamp", direction=firestore.Query.DESCENDING)
-    .select([
-        "school_id",
-        "school_name",
-        "email",
-        "phone",
-        "website",
-        "address",
-        "facebook_link",
-        "instagram_link",
-        "city",
-        "state",
-        "pin",
-        "principal_name",
-        "principal_email",
-        "principal_phone",
-        "sales_representative",
-        "branches",
-        "branch_ids",  
-        "service_status",
-        "service_type",
-        "website",
-        "tagline",
-        "grades",
-        "zoho_customer_id",
-        "grade_selections",     
-        "selection_status",
-        "selections_approved",
-        "selection_locked_at",
-        "timestamp",
-        "updated_at",
-        "status",
-    ])
-    .offset(offset)
-    .limit(limit)
-)
+    record = snapshot.to_dict() or {}
+    raw_branches = record.get("branches") or {}
+    if not isinstance(raw_branches, dict) or not raw_branches:
+        return []
 
-    
-    
-    
-    school_docs = [doc.to_dict() for doc in school_docs_query.stream()]
-   
-    
-    if not school_docs:
-        return PaginatedSchoolResponse(schools=[], total_count=count_value)
-    
-    expanded_docs: List[Dict[str, Any]] = []
-  
-    for doc in school_docs:
-        if not doc.get("id") and doc.get("school_id"):
-            doc["id"] = doc["school_id"]
-        expanded_docs.append(doc)
+    parent_id = record.get("school_id") or school_id
+    zoho_customer_id = record.get("zoho_customer_id")
 
-        branches = doc.get("branches") or {}
-        parent_id = doc.get("school_id") or doc.get("id")
-        for branch_id, branch_entry in branches.items():
-            if not isinstance(branch_entry, dict):
-                continue
-            branch_record = dict(branch_entry)
-            branch_record.setdefault("id", branch_id)
-            branch_record.setdefault("school_id", branch_id)
-            branch_record.setdefault("branch_parent_id", parent_id)
-            expanded_docs.append(branch_record)
-    
-    # school_ids = [doc.get("school_id") for doc in expanded_docs if doc.get("school_id")]
-    # selections_count: Dict[str, int] = {}
-    latest_selection_timestamp: Dict[str, datetime] = {}
-
-    # if school_ids:
-    #     selection_docs_query = (
-    #         db.collection("rhyme_selections")
-    #         .where("school_id", "in", school_ids)
-    #         .select(["school_id", "timestamp"])
-    #     )
-    #     for selection_doc in selection_docs_query.stream():
-    #         selection = selection_doc.to_dict() or {}
-    #         school_id = selection.get("school_id")
-    #         if not school_id:
-    #             continue
-    #         selections_count[school_id] = selections_count.get(school_id, 0) + 1
-    #         timestamp = selection.get("timestamp")
-    #         if timestamp:
-    #             existing_ts = latest_selection_timestamp.get(school_id)
-    #             if not existing_ts or timestamp > existing_ts:
-    #                 latest_selection_timestamp[school_id] = timestamp
-
-    zoho_ids: Set[str] = set()
-    
-    for doc in expanded_docs:
-        zoho_id = doc.get("branch_parent_id") or doc.get("school_id")
-        if zoho_id:
-            zoho_ids.add(zoho_id)
-    zoho_refs = [school_profiles._zoho_details_doc_ref(db, zoho_id) for zoho_id in zoho_ids]
-    zoho_snapshot_map: Dict[str, Dict[str, Any]] = {}
-    if zoho_refs:
-        for snapshot in db.get_all(zoho_refs):
-            zoho_snapshot_map[snapshot.id] = snapshot.to_dict() or {}
-
-    schools_with_details: List[SchoolWithSelections] = []
-
-    for doc in expanded_docs:
-        school_id = doc.get("school_id")
-        if not school_id:
+    branches: List[School] = []
+    for branch_id, branch_entry in raw_branches.items():
+        if not isinstance(branch_entry, dict):
             continue
-        zoho_main_id = doc.get("branch_parent_id") or school_id
-        zoho_details = zoho_snapshot_map.get(zoho_main_id) or {}
-        doc["zoho_customer_id"] = zoho_details.get("customer_id")
-        doc["grade_default_labels"] = zoho_details.get("grade_labels")
-        doc["grade_unique_values"] = zoho_details.get("grade_unique_values")
+        branch_record = dict(branch_entry)
+        branch_record.setdefault("id", branch_id)
+        branch_record.setdefault("school_id", branch_id)
+        branch_record.setdefault("branch_parent_id", parent_id)
+        if zoho_customer_id and not branch_record.get("zoho_customer_id"):
+            branch_record["zoho_customer_id"] = zoho_customer_id
+        branches.append(school_profiles.build_school_from_record(branch_record))
 
-        base_school = school_profiles.build_school_from_record(doc)
-        # total_selections = selections_count.get(school_id, 0)
-        last_updated = latest_selection_timestamp.get(school_id) or doc.get("timestamp")
-
-        schools_with_details.append(
-            SchoolWithSelections(
-                **base_school.dict(),
-                # total_selections=total_selections,
-                last_updated=last_updated,
-            )
-        )
-    
-    
-    return PaginatedSchoolResponse(schools=schools_with_details, total_count=
-                                   
-                                count_value)
+    return branches
 
 
 @router.delete("/admin/schools/{school_id}")

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin Testing Mode</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      input { width: 420px; max-width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; }
+      button { padding: 10px 14px; border: 0; border-radius: 10px; background: #111827; color: white; cursor:pointer; }
+      button.secondary { background: #374151; }
+      pre { background: #0b1020; color: #d1e7ff; padding: 12px; border-radius: 10px; overflow:auto; }
+      .note { font-size: 12px; color: #555; margin-top: 6px; }
+      .row { display:flex; gap:10px; align-items:center; flex-wrap: wrap; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <h2>Admin Testing Mode</h2>
+    <div class="note">
+      Enables a cookie so the normal admin UI can create schools without incrementing the production school counter.
+      Requires backend started with <code>ENABLE_TESTING_INTERFACE=true</code>.
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="secret" class="note">Testing secret (only if server sets TESTING_INTERFACE_SECRET)</label>
+        <input id="secret" placeholder="X-Testing-Secret" />
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="on">Enable testing mode</button>
+      <button id="off" class="secondary">Disable</button>
+      <button id="status" class="secondary">Check status</button>
+    </div>
+
+    <div class="row">
+      <a href="/" id="adminLink">Open admin</a>
+      <span class="note">(opens your frontend; if it’s on another port, change the link)</span>
+    </div>
+
+    <h3 style="margin-top:16px;">Result</h3>
+    <pre id="out">-</pre>
+
+    <script>
+      const out = document.getElementById("out");
+      const secret = document.getElementById("secret");
+
+      async function call(path) {
+        const headers = {};
+        const value = (secret.value || "").trim();
+        if (value) headers["X-Testing-Secret"] = value;
+        const res = await fetch(path, { method: "GET", headers, redirect: "follow" });
+        out.textContent = `${res.status} ${res.statusText}\n${path}\n`;
+        try {
+          const ct = res.headers.get("content-type") || "";
+          if (ct.includes("application/json")) {
+            out.textContent += JSON.stringify(await res.json(), null, 2);
+          } else {
+            out.textContent += await res.text();
+          }
+        } catch (e) {
+          out.textContent += String(e);
+        }
+      }
+
+      document.getElementById("on").addEventListener("click", () => call("/api/testing-mode/on?next=/media/testing-mode.html"));
+      document.getElementById("off").addEventListener("click", () => call("/api/testing-mode/off?next=/media/testing-mode.html"));
+      document.getElementById("status").addEventListener("click", () => call("/api/testing-mode/status"));
+    </script>
+  </body>
+</html>
+

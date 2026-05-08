@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -44,6 +46,36 @@ def _initialize_firestore_client() -> firestore.Client:
 db = _initialize_firestore_client()
 
 
+# _USER_DOC_CACHE_LOCK = threading.Lock()
+# _USER_DOC_CACHE: Dict[str, Dict[str, Any]] = {}
+# _USER_DOC_CACHE_TTL_S = float(os.environ.get("USER_DOC_CACHE_TTL_S", "120"))
+
+
+# def _peek_user_doc_cache(uid: str) -> Optional[Dict[str, Any]]:
+#     now = time.monotonic()
+#     with _USER_DOC_CACHE_LOCK:
+#         cached = _USER_DOC_CACHE.get(uid)
+#         if cached and (now - float(cached.get("ts", 0.0))) < _USER_DOC_CACHE_TTL_S:
+#             value = cached.get("value")
+#             if isinstance(value, dict):
+#                 return dict(value)
+#     return None
+
+
+# def _store_user_doc_cache(uid: str, record: Dict[str, Any]) -> None:
+#     now = time.monotonic()
+#     with _USER_DOC_CACHE_LOCK:
+#         _USER_DOC_CACHE[uid] = {"value": dict(record), "ts": now}
+
+
+# def invalidate_user_doc_cache(uid: Optional[str] = None) -> None:
+#     with _USER_DOC_CACHE_LOCK:
+#         if uid:
+#             _USER_DOC_CACHE.pop(uid, None)
+#         else:
+#             _USER_DOC_CACHE.clear()
+
+
 
 def verify_and_decode_token(authorization: Optional[str]) -> Dict[str, Any]:
     if not authorization:
@@ -59,10 +91,20 @@ def verify_and_decode_token(authorization: Optional[str]) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid or expired Firebase token") from exc
 
 
-def ensure_user_document(decoded_token: Dict[str, Any]) -> Dict[str, Any]:
+def ensure_user_document(
+    decoded_token: Dict[str, Any]
+    # *,
+    # allow_update: bool = True,
+    # use_cache: bool = True,
+) -> Dict[str, Any]:
     uid = decoded_token.get("uid")
     if not uid:
         raise HTTPException(status_code=400, detail="Firebase token is missing a user id")
+
+    # if use_cache:
+    #     cached = _peek_user_doc_cache(uid)
+    #     if cached:
+    #         return cached
 
     doc_ref = db.collection("users").document(uid)
     snapshot = doc_ref.get()
@@ -74,11 +116,15 @@ def ensure_user_document(decoded_token: Dict[str, Any]) -> Dict[str, Any]:
         data = snapshot.to_dict() or {}
         updates: Dict[str, Any] = {}
 
+        # if allow_update:
+        #     if email and not data.get("email"):
+        #         updates["email"] = email
+        #     if display_name and not data.get("display_name"):
+        #         updates["display_name"] = display_name
         if email and not data.get("email"):
             updates["email"] = email
         if display_name and not data.get("display_name"):
             updates["display_name"] = display_name
-
         if updates:
             updates["updated_at"] = now
             doc_ref.update(updates)
@@ -89,6 +135,8 @@ def ensure_user_document(decoded_token: Dict[str, Any]) -> Dict[str, Any]:
         data.setdefault("role", data.get("role") or DEFAULT_USER_ROLE)
         data.setdefault("created_at", data.get("created_at") or now)
         data.setdefault("updated_at", data.get("updated_at") or now)
+        # if use_cache:
+        #     _store_user_doc_cache(uid, data)
         return data
 
     default_payload = {
@@ -101,5 +149,7 @@ def ensure_user_document(decoded_token: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": now,
     }
     doc_ref.set(default_payload)
+    # if use_cache:
+    #     _store_user_doc_cache(uid, default_payload)
     return default_payload
 

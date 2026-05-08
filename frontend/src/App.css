@@ -137,6 +137,9 @@ body {
   width: clamp(240px, 75vw, 560px);
   height: auto;
   max-height: min(calc(100vh - 120px), 900px);
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
   background: #fff;
   border-radius: 0;
   
@@ -172,6 +175,7 @@ body {
   aspect-ratio: 210 / 297;
   width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
   align-self: center;
   background: #ffffff;
   border-radius: 0;
@@ -237,6 +241,7 @@ body {
   width: 100%;
   min-height: 0;
   padding: clamp(14px, 2.2vw, 24px);
+  box-sizing: border-box;
   
   background: linear-gradient(145deg, #f8fafc, #e2e8f0);
   border: 1px solid rgba(148, 163, 184, 0.25);
@@ -247,7 +252,9 @@ body {
   align-items: center;
 }
 
-.rhyme-slot-container.has-svg {
+.rhyme-slot-container.has-svg,
+.rhyme-slot-container.has-img {
+  position: relative;
   padding: 0;
   border-radius: 0;
   border: none;
@@ -256,9 +263,15 @@ body {
   align-items: stretch;
   justify-content: center;
   min-height: 0;
-  height: 100%;
+  height: auto;
+  max-height: 100%;
   display: flex;
-  flex: 1 1 auto;
+  /* Let `aspect-ratio` compute height from width (avoid flex stretching overriding it). */
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  margin-inline: auto;
+  overflow: hidden;
 }
 
 .rhyme-slot-container.double-page {
@@ -297,6 +310,22 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.rhyme-img-content {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.rhyme-slot-container.has-img .rhyme-img-content {
+  position: absolute;
+  inset: 0;
+  object-fit: contain;
+  object-position: center;
+  image-rendering: -webkit-optimize-contrast;
 }
 
 .double-page-container {

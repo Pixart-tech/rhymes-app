@@ -51,7 +51,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   const canMutate = !readOnly;
   const [expandedPdf, setExpandedPdf] = useState<string | null>(null);
   const [isAddingManual, setIsAddingManual] = useState(false);
-  const [manualForm, setManualForm] = useState({ subject: '', coreCode: '', coreCover: '', coreSpine: '' });
+  const [manualForm, setManualForm] = useState({ subject: '', coreCode: '', coreCover: '', coreSpine: '',bookCode:''});
   const resolveBookLink = (book: PhysicalBookItem) => book.link || book.link1 || book.link2 || book.link3 || '';
   
   const gradeCodeForClass = (name: string): { id: string; letter: string } => {
@@ -108,7 +108,8 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
     setExpandedPdf(prev => prev === id ? null : id);
   };
 
-  const classSelections = selections.filter(s => s.className === classData.name);
+  const classSelections = selections;
+ 
   const theme = CLASS_THEMES[classData.name] || DEFAULT_THEME;
   const lowerClassName = normalize(classData.name);
   const inferredAssessmentVariant: AssessmentVariant | null = useMemo(() => {
@@ -370,7 +371,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
       if (readOnly) return;
       if (manualForm.subject && manualForm.coreCode) {
           onAddManualSubject(classData.name, manualForm.subject, manualForm.coreCode, manualForm.coreCover, manualForm.coreSpine);
-          setManualForm({ subject: '', coreCode: '', coreCover: '', coreSpine: '' });
+          setManualForm({ subject: '', coreCode: '', coreCover: '', coreSpine: '', bookCode: '' });
           setIsAddingManual(false);
       }
   };
@@ -572,6 +573,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
   }, [selections, classData, excludedAssessments, currentAssessmentVariant, readOnly, hasActiveCoreSubjects, lowerClassName]);
 
   const visibleBooks = books.filter((b) => !b.isExcluded);
+  
   const displayBooks = readOnly ? visibleBooks : books;
   const hasActiveClassSelections = classSelections.some((s) => hasActiveBook(s));
   const hasAssessmentBook = visibleBooks.some((b) => isAssessmentBook(b));
@@ -639,6 +641,7 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
 
                  {displayBooks.map((book, idx) => {
                      if (book.isExcluded) {
+                      console.log(book.isExcluded)
                          // Render Dropped/Excluded State
                          return (
                             <div key={`${book.id}-${idx}`} className="bg-white border border-slate-200 border-dashed rounded-lg p-3 md:p-4 flex items-center justify-between opacity-75">
@@ -818,8 +821,14 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                                     type="text" 
                                     placeholder="e.g. 999001"
                                     className="w-full text-sm p-2 rounded border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono !bg-white !text-slate-900 !border-slate-300"
-                                    value={manualForm.coreCode}
-                                    onChange={e => setManualForm({...manualForm, coreCode: e.target.value})}
+                                    value={manualForm.bookCode}
+                                    onChange={e =>
+                                      setManualForm((prev) => ({
+                                        ...prev,
+                                        bookCode: e.target.value,
+                                        coreCode: e.target.value
+                                      }))
+                                    }
                                 />
                             </div>
                             <div>
@@ -852,15 +861,18 @@ const ClassSummary: React.FC<ClassSummaryProps> = ({
                               const { id: gradeId, letter } = gradeCodeForClass(classData.name);
                               const suffix = computeNextSuffix();
                               const schoolDigits = (schoolId || '').replace(/\D/g, '').padStart(5, '0').slice(-5);
-                              const coverCode = `${schoolDigits}${gradeId}${suffix}`;
+                              const bookCode=`${schoolDigits}${gradeId}${suffix}`
+                              const coverCode = `${gradeId}${suffix}`;
                               const numericId = schoolId ? parseInt(schoolId, 10) : NaN;
                               const prefix = numTo3Caps(numericId) || '';
                               const spineCode = `${prefix ? prefix + '-' : ''}${letter}${suffix}`;
                               setManualForm((prev) => ({
                                 ...prev,
-                                coreCode: coverCode,
+                                bookCode:bookCode,
+                                coreCode: bookCode,
                                 coreCover: coverCode,
                                 coreSpine: spineCode,
+
                               }));
                             }}
                             title="Generate book/cover/spine codes"

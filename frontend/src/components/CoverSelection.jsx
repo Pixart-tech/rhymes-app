@@ -15,12 +15,14 @@ import { useAuth } from '../hooks/useAuth';
 const COVER_SELECTION_STORAGE_KEY = 'cover-selection-preferences';
 const themeCatalogueFallback = COVER_THEME_CATALOGUE;
 const DEFAULT_GRADE_OPTIONS = [
+
   { id: 'P', label: 'Playgroup', gradeKey: 'playgroup' },
   { id: 'N', label: 'Nursery', gradeKey: 'nursery' },
   { id: 'L', label: 'LKG', gradeKey: 'lkg' },
   { id: 'U', label: 'UKG', gradeKey: 'ukg' }
 ];
 const GRADE_CODE_MAP = {
+ 
   playgroup: 'P',
   pg: 'P',
   nursery: 'N',
@@ -28,6 +30,7 @@ const GRADE_CODE_MAP = {
   ukg: 'U'
 };
 const GRADE_KEY_BY_CODE = {
+ 
   P: 'playgroup',
   N: 'nursery',
   L: 'lkg',

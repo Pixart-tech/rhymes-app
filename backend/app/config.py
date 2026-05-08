@@ -39,9 +39,9 @@ ET.register_namespace("xlink", XLINK_NS)
 IMAGE_CACHE_DIR = ROOT_DIR / "images"
 
 # Default asset directories used when no explicit environment overrides are
-# supplied.  The network locations are preserved so deployments that have the
+# supplied. The network locations are preserved so deployments that have the
 # directories mounted continue to function without additional configuration.
-RHYME_SVG_BASE_PATH = Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs")
+DEFAULT_RHYME_SVG_BASE_PATH = Path(r"\\pixartnas\home\RHYMES & STORIES\NEW\Rhymes\SVGs")
 DEFAULT_COVER_SVG_BASE_PATH = Path(
     r"\\pixartnas\home\Project ABC\Project ABC Cover\background\Sample"
 )
@@ -49,6 +49,28 @@ NETWORK_COVER_SVG_BASE_PATH = Path(
     r"pixartnas\home\Project ABC\Project ABC Cover\background\Sample\1 Theme\Theme 1 Test\SVGs"
 )
 PACKAGED_COVER_SVG_BASE_PATH = ROOT_DIR / "sample_cover_assets"
+PACKAGED_RHYME_SVG_BASE_PATH = ROOT_DIR / "sample_rhyme_assets"
+
+
+def resolve_rhyme_svg_base_path(explicit_path: Optional[str] = None) -> Path:
+    """Return the configured directory that stores rhyme SVG assets.
+
+    This mirrors the cover configuration pattern, but intentionally does not
+    require the directory to be reachable at import time (UNC paths can fail
+    transiently depending on credentials/network state).
+    """
+
+    base_path = (explicit_path or os.environ.get("RHYME_SVG_BASE_PATH") or "").strip()
+    if base_path:
+        try:
+            return Path(base_path).expanduser()
+        except (OSError, RuntimeError) as exc:
+            logger.warning("Invalid RHYME_SVG_BASE_PATH '%s': %s", base_path, exc)
+
+    return DEFAULT_RHYME_SVG_BASE_PATH
+
+
+RHYME_SVG_BASE_PATH = resolve_rhyme_svg_base_path()
 
 
 def resolve_cover_svg_base_path(explicit_path: Optional[str] = None) -> Optional[Path]:
@@ -195,6 +217,7 @@ __all__ = [
     "IMAGE_CACHE_DIR",
     "NETWORK_COVER_SVG_BASE_PATH",
     "PACKAGED_COVER_SVG_BASE_PATH",
+    "PACKAGED_RHYME_SVG_BASE_PATH",
     "RHYME_SVG_BASE_PATH",
     "SELECTION_KEY_PATTERN",
     "SVG_NS",
@@ -204,6 +227,7 @@ __all__ = [
     "get_cover_unc_base_path",
     "parse_cover_selection_key",
     "resolve_cover_svg_base_path",
+    "resolve_rhyme_svg_base_path",
     "_normalize_cors_origin",
     "_parse_csv",
 ]

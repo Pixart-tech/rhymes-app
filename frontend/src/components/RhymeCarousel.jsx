@@ -108,18 +108,21 @@ const RhymeCarousel = ({ schoolId, grade, apiBaseUrl = API }) => {
         return '';
       }
 
-      if (svgCacheRef.current.has(code)) {
-        return svgCacheRef.current.get(code);
+      const cacheKey = `${schoolId || ''}::${grade || ''}::${code}`;
+
+      if (svgCacheRef.current.has(cacheKey)) {
+        return svgCacheRef.current.get(cacheKey);
       }
 
-      if (inFlightRequestsRef.current.has(code)) {
-        return inFlightRequestsRef.current.get(code);
+      if (inFlightRequestsRef.current.has(cacheKey)) {
+        return inFlightRequestsRef.current.get(cacheKey);
       }
 
       const fetchPromise = (async () => {
         try {
-          const response = await axios.get(`${resolvedApi}/rhymes/svg/${code}`, {
-            responseType: 'arraybuffer'
+          const response = await axios.get(`${resolvedApi}/rhymes/svg/${schoolId}/${code}`, {
+            responseType: 'arraybuffer',
+            params: { grade }
           });
           const decoded = decodeSvgPayload(response.data, response.headers);
           const rawPages = decoded && typeof decoded === 'object' && Array.isArray(decoded.pages)
@@ -127,20 +130,20 @@ const RhymeCarousel = ({ schoolId, grade, apiBaseUrl = API }) => {
             : decoded;
           const preparedPages = await prepareRhymeSvgPages(rawPages, code, resolvedApi);
           const svgContent = Array.isArray(preparedPages) && preparedPages.length > 0 ? preparedPages[0] : '';
-          svgCacheRef.current.set(code, svgContent);
+          svgCacheRef.current.set(cacheKey, svgContent);
           return svgContent;
         } catch (fetchError) {
           console.error('Error fetching rhyme SVG:', fetchError);
           throw fetchError;
         } finally {
-          inFlightRequestsRef.current.delete(code);
+          inFlightRequestsRef.current.delete(cacheKey);
         }
       })();
 
-      inFlightRequestsRef.current.set(code, fetchPromise);
+      inFlightRequestsRef.current.set(cacheKey, fetchPromise);
       return fetchPromise;
     },
-    [resolvedApi]
+    [grade, resolvedApi, schoolId]
   );
 
 const updateSlotState = useCallback((pageIndex, slot, updater) => {

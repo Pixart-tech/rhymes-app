@@ -5,7 +5,7 @@ import { SCHOOL_DATA, getAssessmentForClass, getAllAssessmentClass, CLASS_THEMES
 import { BookOption, SelectionRecord, AssessmentVariant, FinalOutputItem } from '../types/types';
 import ClassSummary from '../components/ClassSummary';
 import TitleCustomization from '../components/TitleCustomization';
-import { Check, Book, Home, ChevronLeft, Info, Square, CheckSquare, Star } from 'lucide-react';
+import { Check, Book, Home, ChevronLeft, Info, Square, CheckSquare, Star, Download } from 'lucide-react';
 import { buildFinalBookSelections } from '../lib/bookSelectionUtils';
 import { Toaster } from '../components/ui/sonner';
 import { useAuth } from '../hooks/useAuth';
@@ -31,10 +31,7 @@ const SIGNATURE_FIELDS = [
   'addon_cover',
   'addon_cover_title',
   'addon_spine',
-  // 'cover_theme_id',
-  // 'cover_theme_label',
-  // 'cover_colour_id',
-  // 'cover_colour_label',
+  
   'cover_status',
 ];
 
@@ -62,6 +59,7 @@ const normalizeItemForSignature = (item: any) => {
   }
   const normalized: Record<string, any> = {};
   SIGNATURE_FIELDS.forEach((key) => {
+    
     if (item[key] !== undefined) {
       normalized[key] = item[key];
     }
@@ -93,7 +91,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       if (!enabled) return;
       const key = rawKey.toLowerCase().trim();
       const label = typeof value?.label === 'string' ? value.label.trim() : '';
-      merged[key] = label || key;
+      merged[key] = label;
     });
     return merged;
   };
@@ -155,6 +153,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   };
   const persistedWorkspaceRole = persistedState?.workspaceUser?.role;
   const isPersistedAdmin = persistedWorkspaceRole === 'super-admin';
+
   const initialGradeNames = deriveGradeLabelsFromSchool(persistedState?.school?.grades);
   const enabledGrades = useMemo(() => {
     const base: Record<string, boolean> = {
@@ -207,8 +206,6 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       if (norm === 'playgroup') {
         map.pg = resolved;
       }
-      const labelKey = resolved.toLowerCase();
-      map[labelKey] = resolved;
     });
     return map;
   }, [gradeNames]);
@@ -228,6 +225,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     }
   });
   const [showTermsModal, setShowTermsModal] = useState(false);
+  const [summaryPdfStatus, setSummaryPdfStatus] = useState<'idle' | 'loading'>('idle');
   const [completedClasses, setCompletedClasses] = useState<Set<string>>(() => {
     if (typeof window === 'undefined') {
       return new Set<string>();
@@ -258,6 +256,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     return combined;
   }, [selections, completedClasses]);
   const normalizeClassKey = useCallback((value: string) => (value || '').trim().toLowerCase(), []);
+  
   const normalizeGradeKey = useCallback(
     (value: string) => {
       const lower = normalizeClassKey(value);
@@ -294,12 +293,15 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     [normalizeClassKey]
   );
   const orderedClasses = useMemo(() => {
-    const orderIndex = (name: string) => {
-      const key = normalizeGradeKey(name);
+    const orderIndex = (name: unknown) => {
+      const safeName = typeof name === 'string' ? name : '';
+      const key = normalizeGradeKey(safeName);
       const idx = DASHBOARD_CLASS_ORDER.indexOf(key);
       return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
     };
-    return [...SCHOOL_DATA].sort((a, b) => orderIndex(a.name) - orderIndex(b.name));
+    return [...SCHOOL_DATA]
+      .filter((cls) => cls && typeof (cls as any).name === 'string' && Boolean((cls as any).name.trim()))
+      .sort((a, b) => orderIndex(a.name) - orderIndex(b.name));
   }, [normalizeGradeKey]);
 
   const isClassReadOnly = useCallback(
@@ -327,7 +329,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const needsTermsAcceptance = !isFinalized && hasPendingSelections && !hasAcceptedTerms;
   const canFinish = !isFinalized && hasPendingSelections && finishStatus !== 'success'; //&& hasAcceptedTerms;
   
-  
+  console.log(canFinish)
   
 
   useEffect(() => {
@@ -432,8 +434,9 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   };
 
   const calculateBookCount = (className: string) => {
-    const classSelections = selections.filter(s => s.className === className);
-
+    const targetKey = normalizeGradeKey(className);
+  
+    const classSelections = selections.filter((s) => normalizeGradeKey(s.className) === targetKey);
 
     const normalizedClass = normalizeClassKey(className);
     const normalizedClassOrPlaygroup = normalizeGradeKey(className);
@@ -553,13 +556,27 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     let subjectAwareLabelMatch: { option: BookOption; subjectName: string } | null = null;
     let labelMatch: { option: BookOption; subjectName: string } | null = null;
 
-    const normalizedSavedSubject = typeof item?.subject === 'string' ? item.subject.toLowerCase() : null;
+    const normalizedSavedType = typeof item?.type === 'string' ? item.type.toString().trim().toLowerCase() : '';
+    const savedGradeSubject = typeof item?.grade_subject === 'string' ? item.grade_subject.toString().trim() : '';
+    const savedSubject = typeof item?.subject === 'string' ? item.subject.toString().trim() : '';
+    const normalizedSavedSubject =
+      normalizedSavedType === 'custom'
+        ? (savedGradeSubject || savedSubject || '').toLowerCase() || null
+        : (savedGradeSubject && savedGradeSubject.includes(':') ? savedGradeSubject : savedSubject).toLowerCase() ||
+          null;
+
+    // Backend "Custom" rows should not be mapped onto catalog options.
+    // Otherwise they can accidentally match because undefined work/addon IDs compare equal.
+    if (normalizedSavedType === 'custom') {
+      return null;
+    }
 
     for (const subject of classData.subjects) {
       for (const opt of subject.options) {
+        const serverAddOn = item?.addOn || item?.add_on || item?.addon;
         const matchesCore = opt.coreId === item.core;
         const matchesWork =  opt.workId === item.work;
-        const matchesAddon =  opt.addOnId === item.addOn;
+        const matchesAddon =  opt.addOnId === serverAddOn;
         
         if (matchesCore && matchesWork && matchesAddon) {
           return { option: opt, subjectName: subject.name };
@@ -586,7 +603,18 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const buildSelectionFromSavedItem = useCallback((className: string, item: any): SelectionRecord | null => {
     
     const match = findOptionForSavedItem(className, item);
+    const normalizedSavedType = typeof item?.type === 'string' ? item.type.toString().trim().toLowerCase() : '';
+    const serverAddOn = item?.addOn || item?.add_on || item?.addon;
 
+    const gradeSubjectRaw =
+      typeof item?.grade_subject === 'string'
+        ? item.grade_subject
+        : typeof item?.gradeSubject === 'string'
+          ? item.gradeSubject
+          : typeof item?.jsonSubject === 'string'
+            ? item.jsonSubject
+            : null;
+    const gradeSubject = typeof gradeSubjectRaw === 'string' ? gradeSubjectRaw.trim() : '';
 
     const baseOption: BookOption =
       match?.option || {
@@ -594,18 +622,25 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         label: item.type || item.subject || 'Selection',
         coreId: item.core,
         workId: item.work,
-        addOnId: item.addOn,
+        addOnId: serverAddOn,
         coreCover: item.core_cover,
         workCover: item.work_cover,
         addOnCover: item.addon_cover,
         isRecommended: false
       };
-
+    
     const option: BookOption = {
       ...baseOption,
-      coreId: baseOption.coreId || item.core,
-      workId: baseOption.workId || item.work,
-      addOnId: baseOption.addOnId || item.addOn,
+      // Prefer server-saved IDs when hydrating selections, even if the catalog option has drifted.
+      coreId: item.core || baseOption.coreId,
+      workId: item.work || baseOption.workId,
+      addOnId: serverAddOn || baseOption.addOnId,
+      // Only force a subject override for Custom rows; for catalog rows, keep the catalog jsonSubject.
+      jsonSubject:
+        baseOption.jsonSubject ||
+        (normalizedSavedType === 'custom'
+          ? (gradeSubject || (typeof item?.subject === 'string' ? item.subject.trim() : '') || undefined)
+          : undefined),
       defaultCoreCoverTitle: baseOption.defaultCoreCoverTitle || item.core_cover_title,
       defaultWorkCoverTitle: baseOption.defaultWorkCoverTitle || item.work_cover_title,
       defaultAddonCoverTitle: baseOption.defaultAddonCoverTitle || item.addon_cover_title
@@ -619,8 +654,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       'Subject';
 
     const skipCore = !item.core;
+    
+    
     const skipWork = !item.work;
-    const skipAddon = !item.addOn;
+    
+    const skipAddon = !serverAddOn;
 
     return {
       className,
@@ -795,7 +833,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     setSkipWorkMap({});
     advanceStep(newSelections);
   };
-
+  //advining selections
   const advanceStep = (newSelectedRecord: SelectionRecord[] | null = null) => {
       if (!currentClassData) return;
       if (currentSubjectIndex < currentClassData.subjects.length - 1) {
@@ -828,7 +866,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       return;
     }
 
-    console.log(updatedSelections); 
+    
 
     const targetKey = normalizeClassKey(currentClassData.name);
     
@@ -861,7 +899,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         return Array.from(next);
       });
   };
-
+  //restoring assesment
   const handleRestoreAssessment = (className: string) => {
     if (isPlaygroupClass(className)) {
       return;
@@ -962,7 +1000,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
   const handleUpdateAssessmentTitle = (className: string, title: string) => {
       setCustomAssessmentTitles(prev => ({ ...prev, [className]: title }));
   };
-
+  //adding custom subject
   const handleAddManualSubject = (
     className: string,
     subject: string,
@@ -1022,6 +1060,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     // }
 
     setFinishStatus('saving');
+  
     
     const saved = await persistFinalSelections();
    
@@ -1157,17 +1196,13 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     const latestGradeNames = resolveLatestGradeNames();
     setGradeNames(latestGradeNames);
 
-    // Build a lookup from any known grade key/label to the canonical enabled key (no hooks inside save).
+    // Build a lookup from known canonical grade keys only (labels are display-only and can be swapped).
     const gradeKeyLookup: Record<string, string> = {};
-    Object.entries(latestGradeNames || {}).forEach(([key, label]) => {
+    Object.entries(latestGradeNames || {}).forEach(([key]) => {
       const canon = key.toLowerCase();
       gradeKeyLookup[canon] = canon;
       if (canon === 'playgroup') {
         gradeKeyLookup.pg = canon;
-      }
-      const labelKey = (label || '').toString().trim().toLowerCase();
-      if (labelKey) {
-        gradeKeyLookup[labelKey] = canon;
       }
     });
 
@@ -1209,16 +1244,37 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       const errors: string[] = [];
       const isNineDigit = (val: any) =>
         val !== undefined && val !== null && /^\d{9}$/.test(val.toString().trim());
+     
+      const isNotAlphanumeric = (val: any) =>
+  !/[A-Za-z]/.test(String(val).trim());
       const isNonBlank = (val: any) => val !== undefined && val !== null && val.toString().trim().length > 0;
-
+      const length=(val:any)=>val !== undefined && val !== null&&  String(val).trim().length
       items.forEach((item) => {
         const cls = (item as any).class_name || item.class_label || item.class || 'Unknown class';
         const subj = item.subject || 'Unknown subject';
+       
 
         if (item.component === 'core') {
-          if (!isNineDigit(item.core)) {
+          
+          
+          if (!isNineDigit(item.core) ) {
             errors.push(`${cls} / ${subj}: core cover must be numeric and 9 digits`);
           }
+          
+          if (item.type==='Custom'){
+            if ( !isNotAlphanumeric(item.core_cover)){
+            
+            
+             errors.push(`${cls} / ${subj}: cover code must be numeric digits`)}
+   
+            if (length(item.core_cover)!=4){
+              errors.push(`${cls} / ${subj}: cover code cant  be more than 4 digits`)}
+            
+          
+
+          }
+          
+          
           if (!isNonBlank(item.core_cover_title)) {
             errors.push(`${cls} / ${subj}: core cover title is required`);
           }
@@ -1361,6 +1417,111 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
       return false;
     }
   }, [API, assessmentVariants, bookSelectionSchoolId, buildPayloadClassSignatures, customAssessmentTitles, explicitExcludedAssessments, getIdToken, personalisationByGrade, resolveLatestGradeNames, savedClassSignatures, selectionSignature, selections, user?.schoolId]);
+
+  const handleDownloadSummaryPdf = useCallback(async () => {
+    try {
+      setSummaryPdfStatus('loading');
+
+      const latestGradeNames = resolveLatestGradeNames();
+
+      const gradeKeyLookup: Record<string, string> = {};
+      Object.entries(latestGradeNames || {}).forEach(([key]) => {
+        const canon = key.toLowerCase();
+        gradeKeyLookup[canon] = canon;
+        if (canon === 'playgroup') {
+          gradeKeyLookup.pg = canon;
+        }
+      });
+
+      const normalizeClassNameToEnabled = (value: string): string => {
+        const key = (value || '').toString().trim().toLowerCase();
+        return gradeKeyLookup[key] || key;
+      };
+      const normalizeClassId = (value: string): string =>
+        normalizeClassKey(normalizeClassNameToEnabled(value));
+
+      const cleanedSelections = selections
+        .map((s) => ({ ...s, className: normalizeClassNameToEnabled(s.className) }))
+        .filter((s) => {
+          if (!s.selectedOption) return false;
+          const hasActiveCore = !!s.selectedOption.coreId && !s.skipCore;
+          const hasActiveWork = !!s.selectedOption.workId && !s.skipWork;
+          const hasActiveAddon = !!s.selectedOption.addOnId && !s.skipAddon;
+          const isAssessment = (s.subjectName || '').toString().trim().toLowerCase() === 'assessment';
+          return (hasActiveCore || hasActiveWork || hasActiveAddon) && (!isAssessment || hasActiveCore);
+        });
+
+      if (cleanedSelections.length === 0) {
+        toast.info('No selections available to export.');
+        return;
+      }
+
+      const classesWithActive = new Set(
+        cleanedSelections.map((s) => normalizeClassId(s.className)).filter(Boolean)
+      );
+      const normalizedExcluded = explicitExcludedAssessments
+        .map(normalizeClassId)
+        .filter((c) => c && classesWithActive.has(c));
+
+      const finalSelections = buildFinalBookSelections(
+        cleanedSelections,
+        normalizedExcluded,
+        assessmentVariants,
+        customAssessmentTitles,
+        latestGradeNames
+      );
+
+      if (!finalSelections.length) {
+        toast.info('No selections available to export.');
+        return;
+      }
+
+      const token = await getIdToken();
+      if (!token) {
+        toast.error('Please sign in again to download.');
+        return;
+      }
+
+      const response = await axios.post(
+        `${API}/book-selection-summary-pdf`,
+        {
+          items: finalSelections,
+          title: 'Book Selection Summary',
+          school_id: bookSelectionSchoolId || undefined,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob',
+        }
+      );
+
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      
+      a.download = `${persistedState?.school?.school_name}_book_selection_summary.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.warn('Unable to download summary PDF', error);
+      toast.error('Unable to download PDF. Please try again.');
+    } finally {
+      setSummaryPdfStatus('idle');
+    }
+  }, [
+    API,
+    assessmentVariants,
+    bookSelectionSchoolId,
+    customAssessmentTitles,
+    explicitExcludedAssessments,
+    getIdToken,
+    normalizeClassKey,
+    resolveLatestGradeNames,
+    selections,
+  ]);
   
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1421,14 +1582,6 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           if (key === 'ukg') return 'UKG';
           return key;
         };
-        // Try label -> key mapping first
-        const labelMatch = Object.entries(gradeNames).find(
-          ([, label]) => (label || '').toString().trim().toLowerCase() === lower
-        );
-        if (labelMatch) {
-          const key = labelMatch[0].toLowerCase();
-          return mapToCanonical(key);
-        }
         if (lower === 'playgroup' || lower === 'pg') return 'PG';
         if (lower === 'nursery') return 'Nursery';
         if (lower === 'lkg') return 'LKG';
@@ -1461,7 +1614,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         lkg: 'yes',
         ukg: 'yes',
       };
-
+        
         classes.forEach((entry: any) => {
           const rawClass = entry.doc_id || entry.class_label || entry.class || entry.class_name || '';
           if (!rawClass) {
@@ -1519,8 +1672,12 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           // Merge separate component rows (core/work/addon) back into a single selection per subject/type.
           const grouped: Record<string, any> = {};
           sanitizedItems.forEach((item: any) => {
-            const subjectKey = (item.subject || '').toString().trim().toLowerCase();
-            const typeKey = (item.type || '').toString().trim().toLowerCase();
+            const normalizedType = (item.type || '').toString().trim().toLowerCase();
+            const subjectKey =
+              normalizedType === 'custom'
+                ? (item.grade_subject || item.subject || '').toString().trim().toLowerCase()
+                : (item.subject || '').toString().trim().toLowerCase();
+            const typeKey = normalizedType === 'custom' ? 'custom' : normalizedType;
             const key = [subjectKey, typeKey].join('||');
             if (!grouped[key]) {
               grouped[key] = { ...item };
@@ -1566,6 +1723,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
                 selection.selectedOption?.workId || '',
                 selection.selectedOption?.addOnId || '',
               ].join('::');
+              
 
               if (seenSelections.has(dedupeKey)) {
                 return;
@@ -1591,8 +1749,11 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
           : false;
 
       // Hard-reset working state to the latest saved snapshot
-      
+     
       setSelections(nextSelections);
+
+
+      
       setExplicitExcludedAssessments(Array.from(nextExcluded));
       // Infer assessment variant from assessment selections when not provided by server
       nextSelections.forEach((s) => {
@@ -1730,6 +1891,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     const readOnlySummary = isFinalized;
 
     const baseSelections = selections;
+
     const baseExcluded = explicitExcludedAssessments;
     const baseAssessmentVariants = assessmentVariants;
     const baseCustomAssessmentTitles = customAssessmentTitles;
@@ -1752,6 +1914,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
     //   baseCustomAssessmentTitles,
     //   latestGradeNames
     // );
+    
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
         <Toaster position="top-right" />
@@ -1768,6 +1931,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             onAccept={handleAcceptTerms}
             onClose={handleDismissTerms}
           /> */}
+         
           <ClassSummary 
             classData={currentClassData}
             selections={summaryClassSelections}
@@ -1862,7 +2026,7 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
                 {currentSubject.options.map((option, index) => {
                     const isSelected = isOptionSelected(option.typeId);
                     const isPopularVariant = index === 0;
-
+                    
                     return (
                         <div 
                             key={option.typeId} 
@@ -1891,8 +2055,9 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
                                     <div className="flex-1">
                                         <div className="flex items-center gap-x-2 mb-1">
                                             <span className={`font-semibold text-sm ${isSelected ? theme.textMain : 'text-slate-800'}`}>
-                                                {option.jsonSubject && <span className="mr-1 text-slate-500">{option.jsonSubject}:</span>}
-                                                {option.label}
+                                                {option.jsonSubject?(<span className="font-semibold text-sm text-sky-900">{option.label}</span>)
+                                                :(<span className="font-semibold text-sm text-sky-900 ">{option.label}</span>)}
+                                                
                                             </span>
                                         </div>
 
@@ -2059,9 +2224,12 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {orderedClasses.filter((cls) => isGradeEnabled(cls.name)).map((cls, index) => {
+          {orderedClasses
+            .filter((cls) => Boolean(cls?.name) && isGradeEnabled(cls.name))
+            .map((cls, index) => {
             const isConfigured = configuredOrCompletedClasses.has(cls.name);
-            const classHasSelections = selections.some((s) => s.className === cls.name);
+            const classKey = normalizeGradeKey(cls.name);
+            const classHasSelections = selections.some((s) => normalizeGradeKey(s.className) === classKey);
             const bookCount = classHasSelections ? calculateBookCount(cls.name) : 0;
             const theme = getTheme(cls.name);
             const gradeLabel = getGradeLabelForClass(cls.name);
@@ -2069,7 +2237,6 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             const gradeTitleClass = isLongGradeLabel ? 'text-lg leading-tight sm:text-xl' : 'text-xl sm:text-2xl';
             const readOnlyForClass = isClassReadOnly(cls.name);
             const isCompleted = completedClasses.has(cls.name);
-            
             return (
                 <div
                     key={cls.name}
@@ -2154,6 +2321,24 @@ const WizardApp: React.FC<WizardAppProps> = ({ initialView = 'LANDING' }) => {
             >
               <Check size={16} />
               {finishStatus === 'saving' ? 'Saving...' : 'Finish'}
+            </button>
+          </div>
+        )}
+
+        {viewState === 'LANDING' && selections.length > 0 && (
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={handleDownloadSummaryPdf}
+              disabled={summaryPdfStatus === 'loading'}
+              className={`inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold shadow transition ${
+                summaryPdfStatus === 'loading'
+                  ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <Download size={16} />
+              {summaryPdfStatus === 'loading' ? 'Preparing PDF...' : 'Download Summary'}
             </button>
           </div>
         )}

@@ -149,7 +149,7 @@ export const buildFinalBookSelections = (
         selection.selectedOption.defaultAddonCoverTitle ||
         selection.selectedOption.label;
 
-     
+      console.log(selection.subjectName)
       const isLanguageSubject =
         (selection.subjectName || '').toString().trim().toLowerCase() === 'languages';
       const gradeSubjectValue = (title: string) =>
@@ -167,6 +167,7 @@ export const buildFinalBookSelections = (
         cover_colour_label: coverMeta?.colourLabel ?? null,
         cover_status: coverMeta?.status ?? null
       };
+      
 
       if (hasActiveCore) {
         finalData.push({

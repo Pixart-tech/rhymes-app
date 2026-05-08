@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { doc, onSnapshot } from 'firebase/firestore';
 import '../App.css';
 import { useAuth } from '../hooks/useAuth';
 import AuthPage, { type WorkspaceUserProfile } from '../components/AuthPage';
@@ -17,16 +18,25 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../componen
 import { toast } from 'sonner';
 import { Toaster } from '../components/ui/sonner';
 import CoverPageWorkflow from '../components/CoverPageWorkflow';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '../components/ui/alert-dialog';
 
-import InlineSvg from '../components/InlineSvg';
 import {
   SchoolForm,
   type SchoolFormSubmitPayload,
   buildSchoolFormValuesFromProfile,
   buildSchoolFormData
 } from '../components/SchoolProfileForm';
-import { API_BASE_URL } from '../lib/utils';
-import { decodeSvgPayload, prepareRhymeSvgPages, sanitizeRhymeSvgContent } from '../lib/svgUtils';
+import { API_BASE_URL, PUBLIC_URL_PREFIX, normalizeAssetUrl } from '../lib/utils';
+import { db } from '../lib/firebase';
 import { readFileAsDataUrl } from '../lib/fileUtils';
 import {
   clearPersistedAppState,
@@ -45,52 +55,64 @@ import {
   ChevronDown,
   ChevronRight,
   Replace,
+  Trash2,
   BookOpen,
   Music,
   ChevronLeft,
+  ChevronsLeft,
   Eye,
   Download,
   LayoutTemplate,
   BookMarked,
   Clock,
   Loader2,
-  UserRoundPen
+  UserRoundPen,
+  Bold,
 } from 'lucide-react';
 import type { SchoolProfile } from '../types/types';
+import { boolean } from 'zod';
 
 
 const API = API_BASE_URL || '/api';
 
-const buildBinderDownloadUrl = (apiBase, schoolId, gradeId) => {
-  if (!apiBase || !schoolId || !gradeId) {
-    return '';
-  }
+// const buildBinderDownloadUrl = (apiBase, schoolId, gradeId) => {
+//   if (!apiBase || !schoolId || !gradeId) {
+//     return '';
+//   }
 
-  const basePath = `${apiBase}/rhymes/binder/${schoolId}/${gradeId}`;
-  const timestamp = Date.now().toString();
+//   const basePath = `${apiBase}/rhymes/binder/${schoolId}/${gradeId}`;
+//   const timestamp = Date.now().toString();
 
-  if (typeof window !== 'undefined' && window.location) {
-    try {
-      const resolved = new URL(basePath, window.location.origin);
-      resolved.searchParams.set('_t', timestamp);
-      return resolved.toString();
-    } catch (error) {
-      console.error('Error constructing binder download URL:', error);
-    }
-  }
+//   if (typeof window !== 'undefined' && window.location) {
+//     try {
+//       const resolved = new URL(basePath, window.location.origin);
+//       resolved.searchParams.set('_t', timestamp);
+//       return resolved.toString();
+//     } catch (error) {
+//       console.error('Error constructing binder download URL:', error);
+//     }
+//   }
 
-  const separator = basePath.includes('?') ? '&' : '?';
-  return `${basePath}${separator}_t=${timestamp}`;
-};
+//   const separator = basePath.includes('?') ? '&' : '?';
+//   return `${basePath}${separator}_t=${timestamp}`;
+// };
 
 const GRADE_OPTIONS = [
+    { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' },
   { id: 'nursery', name: 'Nursery', color: 'from-pink-400 to-rose-400', icon: '🌸' },
   { id: 'lkg', name: 'LKG', color: 'from-blue-400 to-cyan-400', icon: '🎈' },
   { id: 'ukg', name: 'UKG', color: 'from-green-400 to-emerald-400', icon: '🌟' },
-  { id: 'playgroup', name: 'Playgroup', color: 'from-purple-400 to-indigo-400', icon: '🎨' }
+
 ];
 
 const MAX_RHYME_PAGES = 44;
+
+
+// Incoming rhyme preview images are 595x822px. Keep the slot stable and avoid stretching.
+// Aspect ratio = width / height = 595 / 822 ≈ 0.723844.
+const IMG_PREVIEW_ASPECT_RATIO = 595 / 822;
+
+
 
 const createDefaultGradeNames = () =>
   GRADE_OPTIONS.reduce((acc, grade) => {
@@ -130,43 +152,49 @@ const resolveDefaultGradeLabel = (gradeId) => {
   return option ? option.name : 'Grade';
 };
 
-const buildCoverGradeNames = (source) =>
-  GRADE_OPTIONS.reduce((acc, grade) => {
-    const rawValue = source?.gradeNames?.[grade.id];
-    if (typeof rawValue === 'string' && rawValue.trim().length > 0) {
-      acc[grade.id] = rawValue.trim();
-    } else {
-      acc[grade.id] = resolveDefaultGradeLabel(grade.id);
-    }
-    return acc;
-  }, (source?.gradeNames?.pg ? { pg: source.gradeNames.pg } : {}));
+// const buildCoverGradeNames = (source) =>
+//   GRADE_OPTIONS.reduce((acc, grade) => {
+//     const rawValue = source?.gradeNames?.[grade.id];
+//     if (typeof rawValue === 'string' && rawValue.trim().length > 0) {
+//       acc[grade.id] = rawValue.trim();
+//     } else {
+//       acc[grade.id] = resolveDefaultGradeLabel(grade.id);
+//     }
+//     return acc;
+//   }, (source?.gradeNames?.pg ? { pg: source.gradeNames.pg } : {}));
 
 const buildGradeNamesFromSchool = (school?: SchoolProfile | null) => {
   const base = createDefaultGradeNames();
   const mapKey: Record<string, string> = {
-    toddler: 'playgroup',
+    
     playgroup: 'playgroup',
     nursery: 'nursery',
     lkg: 'lkg',
     ukg: 'ukg'
   };
   const grades = school?.grades;
+  console.log(grades)
   if (!grades) {
     return base;
   }
   Object.entries(grades).forEach(([rawKey, value]) => {
     const mapped = mapKey[rawKey.toLowerCase()] || rawKey.toLowerCase();
-    const label = typeof value?.label === 'string' ? value.label.trim() : '';
+    const labelFromValue = typeof value?.label === 'string' ? value.label.trim() : '';
+    const labelFromKey = typeof rawKey === 'string' ? rawKey.trim() : '';
+    const label = labelFromValue || labelFromKey;
     if (mapped && label) {
+
       base[mapped] = label;
-      if (mapped === 'playgroup') {
-        base.pg = label;
-      }
+      
+      // if (mapped === 'playgroup') {
+      //   base.pg = label;
+      // }
     }
   });
-  if (!base.pg && base.playgroup) {
-    base.pg = base.playgroup;
-  }
+  // if (!base.pg && base.playgroup) {
+  //   base.pg = base.playgroup;
+  // }
+  
   return base;
 };
 
@@ -179,6 +207,19 @@ const areGradeNamesEqual = (a: Record<string, string> = {}, b: Record<string, st
   }
   return true;
 };
+type ModeSelectionPageProps = {
+  school: SchoolProfile | null; // replace with your real School type
+  onModeSelect: (mode: string) => void; // replace with your mode union
+  isSuperAdmin?: boolean;
+  isFrozen?: boolean;
+  onBackToWorkspace?: () => void;
+  onBackToDashboard?: () => void;
+  coverstatus: string;
+  onEditProfile?: () => void;
+  modePending?: boolean;
+  hasBookSelections?: boolean | null;
+};
+  
 
 const ModeSelectionPage = ({
   school,
@@ -187,15 +228,23 @@ const ModeSelectionPage = ({
   isFrozen = false,
   onBackToWorkspace,
   onBackToDashboard,
+  coverstatus,
   onEditProfile,
   modePending,
   hasBookSelections
-}) => {
+  // gateRhymesOption = false
+}:ModeSelectionPageProps) => {
   const coverStatus = useMemo(() => {
     const rank: Record<string, number> = { '1': 1, '2': 2, '3': 3, '4': 4 };
-    let status = (school?.cover_status || '1').toString();
+    let status = ( coverstatus).toString();
     const schoolId = school?.school_id;
     if (schoolId) {
+      // Root cover status (from server / admin update) is the source of truth.
+      // When an admin resets status back to "1", do not let older per-grade cached
+      // states (which may still hold "2"/"3") override the menu.
+      if (status === '1') {
+        return status;
+      }
       let best = status;
       GRADE_OPTIONS.forEach((grade) => {
         const state = loadCoverWorkflowState(schoolId, grade.id);
@@ -204,17 +253,19 @@ const ModeSelectionPage = ({
           best = s;
         }
       });
-      status = best || status || '1';
+      status = best || status  || '1';
     }
     return status;
-  }, [school?.cover_status, school?.school_id]);
+  }, [coverstatus, school?.school_id]);
+  
   const coverStatusDescription =
     {
       '1': 'Explore the cover pages to begin selection.',
       '2': 'Cover pages are being prepared. Please wait.',
       '3': 'View uploaded cover pages and approve.',
       '4': 'Selections are frozen. Contact admin for changes.'
-    }[coverStatus] || 'Explore the cover pages to begin selection.';
+    }[coverStatus];
+  
   const options = [
     {
       id: 'cover',
@@ -237,7 +288,11 @@ const ModeSelectionPage = ({
       gradient: 'from-orange-400 to-red-400',
       icon: Music
     }
-  ].filter((option) => isSuperAdmin || option.id !== 'books');
+  ].filter((option) => {
+  if (!isSuperAdmin && (option.id === 'books')) return false;
+  return true;
+})
+
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
@@ -257,11 +312,11 @@ const ModeSelectionPage = ({
           )}
         </div>
 
-        {isFrozen && coverStatus === '4' && (
+        {/* {isFrozen && coverStatus === '4' && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-sm">
             Selections are approved and frozen. You can only view existing books, covers, and rhymes.
           </div>
-        )}
+        )} */}
 
         <Card className="border-0 bg-white/80 backdrop-blur-md shadow-xl">
           <CardHeader>
@@ -274,22 +329,62 @@ const ModeSelectionPage = ({
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+              
               {options.map((option) => {
                 
                 const IconComponent = option.icon;
                 const showCoverButton = !(option.id === 'cover' && coverStatus !== '1');
                 const isBooksOption = option.id === 'books';
-                const buttonLabel = isBooksOption && hasBookSelections ? 'View book selections' : `Explore ${option.title}`;
+                const isRhymesOption = option.id === 'rhymes';
+                // const isRhymesGated = isRhymesOption && gateRhymesOption;
+                const isBooksChecking = isBooksOption && hasBookSelections === null;
+                const isRhymesChecking = isRhymesOption && hasBookSelections === null;
+                const isRhymesBlocked = isRhymesOption && hasBookSelections === false;
+
+                const buttonLabel = isBooksOption && hasBookSelections === true
+                  ? 'View book selections'
+                 
+                    : `Explore ${option.title}`;
+                
                 return (
                   
                   <Card
                     key={option.id}
-                    className="group h-full min-h-[220px] sm:min-h-[240px] flex flex-col cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg border border-slate-200 bg-white"
-                    onClick={() => onModeSelect(option.id)}
+                    className={`group h-full min-h-[220px] sm:min-h-[240px] flex flex-col transition-all duration-300 border border-slate-200 bg-white ${
+                      isBooksChecking || isRhymesChecking
+                        ? 'opacity-70 cursor-not-allowed'
+                        : 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lg'
+                    }`}
+                    
+                    role="button"
+                    tabIndex={0}
+                    aria-disabled={Boolean(isBooksChecking || isRhymesChecking)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      event.preventDefault();
+                      if (isBooksChecking || isRhymesChecking) return;
+                      if (isRhymesBlocked) {
+                        toast.warning("complete book selections before moving to rhymes ");
+                        return;
+                      }
+                      onModeSelect(option.id);
+                    }}
+                    onClick={() => {
+                      if (isBooksChecking || isRhymesChecking) {
+                        return;
+                      }
+                      if (isRhymesBlocked) {
+                        toast.warning("complete book selections before moving to rhymes ");
+                        return;
+                      }
+                      onModeSelect(option.id);
+                    }}
+                  
                   >
                     <CardContent className="flex-1 flex flex-col justify-between p-3 sm:p-4 text-center gap-2">
                       
                       <div className="space-y-2">
+                        
                         
                         <div className={`w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-xl bg-gradient-to-r ${option.gradient} text-white flex items-center justify-center text-lg sm:text-xl shadow`}>
                           <IconComponent className="h-6 w-6 sm:h-7 sm:w-7" />
@@ -298,17 +393,36 @@ const ModeSelectionPage = ({
                         <p className="text-[12px] sm:text-sm text-gray-600 leading-snug line-clamp-3">
                           {option.description}
                         </p>
+                        {isRhymesChecking && (
+                          <p className="text-[11px] sm:text-xs text-gray-500">Checking book selections…</p>
+                        )}
                       </div>
                       {showCoverButton && (
+               
                         <Button
                           type="button"
-                          onClick={() => onModeSelect(option.id)}
-                          disabled={modePending && option.id === 'books'}
-                          className={`w-full min-h-[44px] px-3 py-2 text-xs sm:text-sm whitespace-normal leading-snug flex items-center justify-center bg-gradient-to-r from-orange-400 to-red-400 text-white shadow hover:from-orange-500 hover:to-red-500 ${
-                            modePending && option.id === 'books' ? 'opacity-50 pointer-events-none' : ''
-                          }`}
+                          onClick={() => {
+                            if (isBooksChecking || isRhymesChecking) {
+                              return;
+                            }
+                            if (isRhymesBlocked) {
+                              toast.warning("complete book selections before moving to rhymes ");
+                            return}
+                               
+                            onModeSelect(option.id);
+                          }}
+                          disabled={Boolean(isBooksChecking || isRhymesChecking)}
+                          className="w-full min-h-[44px] px-3 py-2 text-xs sm:text-sm whitespace-normal leading-snug flex items-center justify-center bg-gradient-to-r from-orange-400 to-red-400 text-white shadow hover:from-orange-500 hover:to-red-500"
+                          
                         >
-                          {buttonLabel}
+                          {isBooksChecking ? (
+                            <span className="inline-flex items-center gap-2">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Checking status...
+                            </span>
+                          ) : (
+                            buttonLabel
+                          )}
                         </Button>
                       )}
                     </CardContent>
@@ -321,6 +435,12 @@ const ModeSelectionPage = ({
       </div>
     </div>
   );
+};
+
+const getImageAspectRatio = (img: HTMLImageElement) => {
+  const { naturalWidth, naturalHeight } = img;
+  if (!naturalWidth || !naturalHeight) return null;
+  return naturalWidth / naturalHeight;
 };
 // const Header: React.FC = ({onBackToMode}) => {
 //   const { user, signIn, signOut } = useAuth();
@@ -400,372 +520,387 @@ const ModeSelectionPage = ({
 //   );
 // };
 // Cover Details Page
-const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout }) => {
-  const navigate = useNavigate();
-  const [formState, setFormState] = useState(() => ({
-    schoolLogo: coverDetails?.schoolLogo || '',
-    schoolLogoFileName: coverDetails?.schoolLogoFileName || '',
-    contactNumber: coverDetails?.contactNumber || '',
-    website: coverDetails?.website || '',
-    email: coverDetails?.email || '',
-    addressLine1: coverDetails?.addressLine1 || '',
-    addressLine2: coverDetails?.addressLine2 || '',
-    addressLine3: coverDetails?.addressLine3 || '',
-    tagLine1: coverDetails?.tagLine1 || '',
-    tagLine2: coverDetails?.tagLine2 || '',
-    tagLine3: coverDetails?.tagLine3 || '',
-    gradeNames: buildCoverGradeNames(coverDetails)
-  }));
-  const [formError, setFormError] = useState('');
-  const [logoError, setLogoError] = useState('');
+// const CoverDetailsPage = ({ school, coverDetails, onSave, onBackToMenu, onLogout }) => {
+//   const navigate = useNavigate();
+//   const [formState, setFormState] = useState(() => ({
+//     schoolLogo: coverDetails?.schoolLogo || '',
+//     schoolLogoFileName: coverDetails?.schoolLogoFileName || '',
+//     contactNumber: coverDetails?.contactNumber || '',
+//     website: coverDetails?.website || '',
+//     email: coverDetails?.email || '',
+//     addressLine1: coverDetails?.addressLine1 || '',
+//     addressLine2: coverDetails?.addressLine2 || '',
+//     addressLine3: coverDetails?.addressLine3 || '',
+//     tagLine1: coverDetails?.tagLine1 || '',
+//     tagLine2: coverDetails?.tagLine2 || '',
+//     tagLine3: coverDetails?.tagLine3 || '',
+//     gradeNames: buildCoverGradeNames(coverDetails)
+//   }));
+//   const [formError, setFormError] = useState('');
+//   const [logoError, setLogoError] = useState('');
 
-  useEffect(() => {
-    setFormState({
-      schoolLogo: coverDetails?.schoolLogo || '',
-      schoolLogoFileName: coverDetails?.schoolLogoFileName || '',
-      contactNumber: coverDetails?.contactNumber || '',
-      website: coverDetails?.website || '',
-      email: coverDetails?.email || '',
-      addressLine1: coverDetails?.addressLine1 || '',
-      addressLine2: coverDetails?.addressLine2 || '',
-      addressLine3: coverDetails?.addressLine3 || '',
-      tagLine1: coverDetails?.tagLine1 || '',
-      tagLine2: coverDetails?.tagLine2 || '',
-      tagLine3: coverDetails?.tagLine3 || '',
-      gradeNames: buildCoverGradeNames(coverDetails)
-    });
-  }, [coverDetails]);
+//   useEffect(() => {
+//     setFormState({
+//       schoolLogo: coverDetails?.schoolLogo || '',
+//       schoolLogoFileName: coverDetails?.schoolLogoFileName || '',
+//       contactNumber: coverDetails?.contactNumber || '',
+//       website: coverDetails?.website || '',
+//       email: coverDetails?.email || '',
+//       addressLine1: coverDetails?.addressLine1 || '',
+//       addressLine2: coverDetails?.addressLine2 || '',
+//       addressLine3: coverDetails?.addressLine3 || '',
+//       tagLine1: coverDetails?.tagLine1 || '',
+//       tagLine2: coverDetails?.tagLine2 || '',
+//       tagLine3: coverDetails?.tagLine3 || '',
+//       gradeNames: buildCoverGradeNames(coverDetails)
+//     });
+//   }, [coverDetails]);
 
-  const handleChange = useCallback(
-    (field) => (event) => {
-      const value = event?.target?.value ?? '';
-      setFormState((current) => ({
-        ...current,
-        [field]: value
-      }));
-      setFormError('');
-    },
-    []
-  );
+//   const handleChange = useCallback(
+//     (field) => (event) => {
+//       const value = event?.target?.value ?? '';
+//       setFormState((current) => ({
+//         ...current,
+//         [field]: value
+//       }));
+//       setFormError('');
+//     },
+//     []
+//   );
 
-  const handleGradeNameChange = useCallback((gradeId) => (event) => {
-    const value = event?.target?.value ?? '';
-    setFormState((current) => ({
-      ...current,
-      gradeNames: {
-        ...(current.gradeNames || {}),
-        [gradeId]: value
-      }
-    }));
-    setFormError('');
-  }, []);
+//   const handleGradeNameChange = useCallback((gradeId) => (event) => {
+//     const value = event?.target?.value ?? '';
+//     setFormState((current) => ({
+//       ...current,
+//       gradeNames: {
+//         ...(current.gradeNames || {}),
+//         [gradeId]: value
+//       }
+//     }));
+//     setFormError('');
+//   }, []);
 
-  const handleLogoUpload = useCallback(async (event) => {
-    const input = event?.target;
-    const file = input?.files?.[0] || null;
+//   const handleLogoUpload = useCallback(async (event) => {
+//     const input = event?.target;
+//     const file = input?.files?.[0] || null;
 
-    if (!file) {
-      setFormState((current) => ({ ...current, schoolLogo: '', schoolLogoFileName: '' }));
-      setLogoError('');
-    } else if (file.type && !file.type.startsWith('image/')) {
-      setFormState((current) => ({ ...current, schoolLogo: '', schoolLogoFileName: '' }));
-      setLogoError('Please upload an image file for the school logo.');
-    } else {
-      try {
-        const dataUrl = await readFileAsDataUrl(file);
-        setFormState((current) => ({
-          ...current,
-          schoolLogo: dataUrl.trim(),
-          schoolLogoFileName: file.name
-        }));
-        setLogoError('');
-      } catch (error) {
-        setFormState((current) => ({ ...current, schoolLogo: '', schoolLogoFileName: '' }));
-        setLogoError('We could not read that image. Please try a different file.');
-      }
-    }
+//     if (!file) {
+//       setFormState((current) => ({ ...current, schoolLogo: '', schoolLogoFileName: '' }));
+//       setLogoError('');
+//     } else if (file.type && !file.type.startsWith('image/')) {
+//       setFormState((current) => ({ ...current, schoolLogo: '', schoolLogoFileName: '' }));
+//       setLogoError('Please upload an image file for the school logo.');
+//     } else {
+//       try {
+//         const dataUrl = await readFileAsDataUrl(file);
+//         setFormState((current) => ({
+//           ...current,
+//           schoolLogo: dataUrl.trim(),
+//           schoolLogoFileName: file.name
+//         }));
+//         setLogoError('');
+//       } catch (error) {
+//         setFormState((current) => ({ ...current, schoolLogo: '', schoolLogoFileName: '' }));
+//         setLogoError('We could not read that image. Please try a different file.');
+//       }
+//     }
 
-    if (input) {
-      input.value = '';
-    }
-  }, []);
+//     if (input) {
+//       input.value = '';
+//     }
+//   }, []);
 
-  const handleBackToMenuClick = useCallback(() => {
-    if (typeof onBackToMenu === 'function') {
-      onBackToMenu();
-    }
-    navigate('/');
-  }, [navigate, onBackToMenu]);
+//   const handleBackToMenuClick = useCallback(() => {
+//     if (typeof onBackToMenu === 'function') {
+//       onBackToMenu();
+//     }
+//     navigate('/');
+//   }, [navigate, onBackToMenu]);
 
-  const handleLogoutClick = useCallback(() => {
-    if (typeof onLogout === 'function') {
-      onLogout();
-    }
-    navigate('/');
-  }, [navigate, onLogout]);
+//   const handleLogoutClick = useCallback(() => {
+//     if (typeof onLogout === 'function') {
+//       onLogout();
+//     }
+//     navigate('/');
+//   }, [navigate, onLogout]);
 
-  const handleSubmit = useCallback(
-    (event) => {
-      event.preventDefault();
+//   const handleSubmit = useCallback(
+//     (event) => {
+//       event.preventDefault();
 
-      const requiredFields = [
-        'schoolLogo',
-        'contactNumber',
-        'website',
-        'email',
-        'addressLine1',
-        'addressLine2',
-        'addressLine3',
-        'tagLine1',
-        'tagLine2',
-        'tagLine3'
-      ];
+//       const requiredFields = [
+//         'schoolLogo',
+//         'contactNumber',
+//         'website',
+//         'email',
+//         'addressLine1',
+//         'addressLine2',
+//         'addressLine3',
+//         'tagLine1',
+//         'tagLine2',
+//         'tagLine3'
+//       ];
 
-      const missingField = requiredFields.find((field) => {
-        const value = formState[field];
-        return typeof value !== 'string' || value.trim().length === 0;
-      });
+//       const missingField = requiredFields.find((field) => {
+//         const value = formState[field];
+//         return typeof value !== 'string' || value.trim().length === 0;
+//       });
 
-      if (missingField) {
-        setFormError('Please complete every field before continuing.');
-        return;
-      }
+//       if (missingField) {
+//         setFormError('Please complete every field before continuing.');
+//         return;
+//       }
 
-      const trimmedGradeNames = GRADE_OPTIONS.reduce((acc, grade) => {
-        const value = formState.gradeNames?.[grade.id] ?? '';
-        acc[grade.id] = value.trim();
-        return acc;
-      }, {});
+//       const trimmedGradeNames = GRADE_OPTIONS.reduce((acc, grade) => {
+//         const value = formState.gradeNames?.[grade.id] ?? '';
+//         acc[grade.id] = value.trim();
+//         return acc;
+//       }, {});
 
-      const missingGradeName = GRADE_OPTIONS.find((grade) => trimmedGradeNames[grade.id].length === 0);
+//       const missingGradeName = GRADE_OPTIONS.find((grade) => trimmedGradeNames[grade.id].length === 0);
 
-      if (missingGradeName) {
-        setFormError('Please provide a grade name for every grade.');
-        return;
-      }
+//       if (missingGradeName) {
+//         setFormError('Please provide a grade name for every grade.');
+//         return;
+//       }
 
-      if (typeof onSave === 'function') {
-        onSave({
-          ...formState,
-          contactNumber: formState.contactNumber.trim(),
-          website: formState.website.trim(),
-          email: formState.email.trim(),
-          addressLine1: formState.addressLine1.trim(),
-          addressLine2: formState.addressLine2.trim(),
-          addressLine3: formState.addressLine3.trim(),
-          tagLine1: formState.tagLine1.trim(),
-          tagLine2: formState.tagLine2.trim(),
-          tagLine3: formState.tagLine3.trim(),
-          gradeNames: trimmedGradeNames
-        });
-      }
+//       if (typeof onSave === 'function') {
+//         onSave({
+//           ...formState,
+//           contactNumber: formState.contactNumber.trim(),
+//           website: formState.website.trim(),
+//           email: formState.email.trim(),
+//           addressLine1: formState.addressLine1.trim(),
+//           addressLine2: formState.addressLine2.trim(),
+//           addressLine3: formState.addressLine3.trim(),
+//           tagLine1: formState.tagLine1.trim(),
+//           tagLine2: formState.tagLine2.trim(),
+//           tagLine3: formState.tagLine3.trim(),
+//           gradeNames: trimmedGradeNames
+//         });
+//       }
 
-      toast.success('Cover details saved');
-      setFormError('');
-      navigate('/');
-    },
-    [formState, navigate, onSave]
-  );
+//       toast.success('Cover details saved');
+//       setFormError('');
+//       navigate('/');
+//     },
+//     [formState, navigate, onSave]
+//   );
 
-  return (
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-4xl mx-auto space-y-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between text-center md:text-left">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">{school.school_name}</h1>
-            <p className="text-gray-600">School ID: {school.school_id}</p>
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <Button onClick={handleBackToMenuClick} variant="outline" className="bg-white/80 hover:bg-white border-gray-200">
-              Back to Menu
-            </Button>
-            <Button onClick={handleLogoutClick} variant="outline" className="bg-white/80 hover:bg-white border-gray-200">
-              Logout
-            </Button>
-          </div>
-        </div>
+//   return (
+//     <div className="min-h-screen bg-slate-50 p-6">
+//       <div className="max-w-4xl mx-auto space-y-8">
+//         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between text-center md:text-left">
+//           <div>
+//             <h1 className="text-3xl font-bold text-gray-800">{school.school_name}</h1>
+//             <p className="text-gray-600">School ID: {school.school_id}</p>
+//           </div>
+//           <div className="flex flex-wrap items-center justify-center gap-3">
+//             <Button onClick={handleBackToMenuClick} variant="outline" className="bg-white/80 hover:bg-white border-gray-200">
+//               Back to Menu
+//             </Button>
+//             <Button onClick={handleLogoutClick} variant="outline" className="bg-white/80 hover:bg-white border-gray-200">
+//               Logout
+//             </Button>
+//           </div>
+//         </div>
 
-        <Card className="border-0 bg-white/85 backdrop-blur">
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold text-gray-800">Enter cover personalisation details</CardTitle>
-            <p className="text-sm text-gray-600">
-              Provide the school information that will be applied to every grade before selecting a class.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="cover-details-contact">School contact number</Label>
-                  <Input
-                    id="cover-details-contact"
-                    type="tel"
-                    inputMode="tel"
-                    placeholder="Contact number"
-                    value={formState.contactNumber}
-                    onChange={handleChange('contactNumber')}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="cover-details-website">Website</Label>
-                  <Input
-                    id="cover-details-website"
-                    placeholder="e.g. www.edplore.com"
-                    value={formState.website}
-                    onChange={handleChange('website')}
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="cover-details-email">Email</Label>
-                  <Input
-                    id="cover-details-email"
-                    type="email"
-                    placeholder="e.g. hello@school.com"
-                    value={formState.email}
-                    onChange={handleChange('email')}
-                  />
-                </div>
-                <div className="space-y-3 md:col-span-2">
-                  <p className="text-sm font-semibold text-gray-700">Grade names</p>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {GRADE_OPTIONS.map((grade) => (
-                      <div key={`grade-name-field-${grade.id}`} className="space-y-2">
-                        <Label htmlFor={`cover-details-grade-${grade.id}`}>
-                          {grade.name} grade name
-                        </Label>
-                        <Input
-                          id={`cover-details-grade-${grade.id}`}
-                          placeholder={`Enter ${grade.name.toLowerCase()} grade name`}
-                          value={formState.gradeNames?.[grade.id] || ''}
-                          onChange={handleGradeNameChange(grade.id)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="cover-details-logo">Upload school logo</Label>
-                  <Input
-                    id="cover-details-logo"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleLogoUpload}
-                  />
-                  {formState.schoolLogoFileName && !logoError && (
-                    <p className="text-xs text-gray-500">Selected file: {formState.schoolLogoFileName}</p>
-                  )}
-                  {logoError && <p className="text-xs text-red-600">{logoError}</p>}
-                  {formState.schoolLogo && (
-                    <img
-                      src={formState.schoolLogo}
-                      alt="Selected school logo"
-                      className="mt-3 h-16 w-16 rounded-md border border-gray-200 bg-white object-contain"
-                    />
-                  )}
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="cover-details-address-line-1">Address</Label>
-                  <Input
-                    id="cover-details-address-line-1"
-                    placeholder="Address"
-                    value={formState.addressLine1}
-                    onChange={handleChange('addressLine1')}
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="cover-details-address-line-2">Address line 2</Label>
-                  <Input
-                    id="cover-details-address-line-2"
-                    placeholder="Address line 2"
-                    value={formState.addressLine2}
-                    onChange={handleChange('addressLine2')}
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="cover-details-address-line-3">Address line 3</Label>
-                  <Input
-                    id="cover-details-address-line-3"
-                    placeholder="Address line 3"
-                    value={formState.addressLine3}
-                    onChange={handleChange('addressLine3')}
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="cover-details-tag-line-1">Tag line 1</Label>
-                  <Input
-                    id="cover-details-tag-line-1"
-                    placeholder="Enter tag line 1"
-                    value={formState.tagLine1}
-                    onChange={handleChange('tagLine1')}
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="cover-details-tag-line-2">Tag line 2</Label>
-                  <Input
-                    id="cover-details-tag-line-2"
-                    placeholder="Enter tag line 2"
-                    value={formState.tagLine2}
-                    onChange={handleChange('tagLine2')}
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="cover-details-tag-line-3">Tag line 3</Label>
-                  <Input
-                    id="cover-details-tag-line-3"
-                    placeholder="e.g. Playgroup | Nursery | LKG | UKG | Daycare"
-                    value={formState.tagLine3}
-                    onChange={handleChange('tagLine3')}
-                  />
-                </div>
-              </div>
-              {formError && <p className="text-sm text-red-600">{formError}</p>}
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <Button type="submit" className="bg-gradient-to-r from-orange-400 to-red-400 text-white">
-                  Save & Continue
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setFormState({
-                      schoolLogo: '',
-                      schoolLogoFileName: '',
-                      contactNumber: '',
-                      website: '',
-                      email: '',
-                      addressLine1: '',
-                      addressLine2: '',
-                      addressLine3: '',
-                      tagLine1: '',
-                      tagLine2: '',
-                      tagLine3: ''
-                    });
-                    setFormError('');
-                    setLogoError('');
-                  }}
-                  className="border-orange-300 text-orange-500 hover:bg-orange-50"
-                >
-                  Clear
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-};
+//         <Card className="border-0 bg-white/85 backdrop-blur">
+//           <CardHeader>
+//             <CardTitle className="text-xl font-semibold text-gray-800">Enter cover personalisation details</CardTitle>
+//             <p className="text-sm text-gray-600">
+//               Provide the school information that will be applied to every grade before selecting a class.
+//             </p>
+//           </CardHeader>
+//           <CardContent>
+//             <form onSubmit={handleSubmit} className="space-y-6">
+//               <div className="grid gap-4 md:grid-cols-2">
+//                 <div className="space-y-2">
+//                   <Label htmlFor="cover-details-contact">School contact number</Label>
+//                   <Input
+//                     id="cover-details-contact"
+//                     type="tel"
+//                     inputMode="tel"
+//                     placeholder="Contact number"
+//                     value={formState.contactNumber}
+//                     onChange={handleChange('contactNumber')}
+//                   />
+//                 </div>
+//                 <div className="space-y-2">
+//                   <Label htmlFor="cover-details-website">Website</Label>
+//                   <Input
+//                     id="cover-details-website"
+//                     placeholder="e.g. www.edplore.com"
+//                     value={formState.website}
+//                     onChange={handleChange('website')}
+//                   />
+//                 </div>
+//                 <div className="space-y-2 md:col-span-2">
+//                   <Label htmlFor="cover-details-email">Email</Label>
+//                   <Input
+//                     id="cover-details-email"
+//                     type="email"
+//                     placeholder="e.g. hello@school.com"
+//                     value={formState.email}
+//                     onChange={handleChange('email')}
+//                   />
+//                 </div>
+//                 <div className="space-y-3 md:col-span-2">
+//                   <p className="text-sm font-semibold text-gray-700">Grade names</p>
+//                   <div className="grid gap-4 md:grid-cols-2">
+//                     {GRADE_OPTIONS.map((grade) => (
+//                       <div key={`grade-name-field-${grade.id}`} className="space-y-2">
+//                         <Label htmlFor={`cover-details-grade-${grade.id}`}>
+//                           {grade.name} grade name
+//                         </Label>
+//                         <Input
+//                           id={`cover-details-grade-${grade.id}`}
+//                           placeholder={`Enter ${grade.name.toLowerCase()} grade name`}
+//                           value={formState.gradeNames?.[grade.id] || ''}
+//                           onChange={handleGradeNameChange(grade.id)}
+//                         />
+//                       </div>
+//                     ))}
+//                   </div>
+//                 </div>
+//                 <div className="space-y-2 md:col-span-2">
+//                   <Label htmlFor="cover-details-logo">Upload school logo</Label>
+//                   <Input
+//                     id="cover-details-logo"
+//                     type="file"
+//                     accept="image/*"
+//                     onChange={handleLogoUpload}
+//                   />
+//                   {formState.schoolLogoFileName && !logoError && (
+//                     <p className="text-xs text-gray-500">Selected file: {formState.schoolLogoFileName}</p>
+//                   )}
+//                   {logoError && <p className="text-xs text-red-600">{logoError}</p>}
+//                   {formState.schoolLogo && (
+//                     <img
+//                       src={formState.schoolLogo}
+//                       alt="Selected school logo"
+//                       className="mt-3 h-16 w-16 rounded-md border border-gray-200 bg-white object-contain"
+//                     />
+//                   )}
+//                 </div>
+//                 <div className="space-y-2 md:col-span-2">
+//                   <Label htmlFor="cover-details-address-line-1">Address</Label>
+//                   <Input
+//                     id="cover-details-address-line-1"
+//                     placeholder="Address"
+//                     value={formState.addressLine1}
+//                     onChange={handleChange('addressLine1')}
+//                   />
+//                 </div>
+//                 <div className="space-y-2 md:col-span-2">
+//                   <Label htmlFor="cover-details-address-line-2">Address line 2</Label>
+//                   <Input
+//                     id="cover-details-address-line-2"
+//                     placeholder="Address line 2"
+//                     value={formState.addressLine2}
+//                     onChange={handleChange('addressLine2')}
+//                   />
+//                 </div>
+//                 <div className="space-y-2 md:col-span-2">
+//                   <Label htmlFor="cover-details-address-line-3">Address line 3</Label>
+//                   <Input
+//                     id="cover-details-address-line-3"
+//                     placeholder="Address line 3"
+//                     value={formState.addressLine3}
+//                     onChange={handleChange('addressLine3')}
+//                   />
+//                 </div>
+//                 <div className="space-y-2 md:col-span-2">
+//                   <Label htmlFor="cover-details-tag-line-1">Tag line 1</Label>
+//                   <Input
+//                     id="cover-details-tag-line-1"
+//                     placeholder="Enter tag line 1"
+//                     value={formState.tagLine1}
+//                     onChange={handleChange('tagLine1')}
+//                   />
+//                 </div>
+//                 <div className="space-y-2 md:col-span-2">
+//                   <Label htmlFor="cover-details-tag-line-2">Tag line 2</Label>
+//                   <Input
+//                     id="cover-details-tag-line-2"
+//                     placeholder="Enter tag line 2"
+//                     value={formState.tagLine2}
+//                     onChange={handleChange('tagLine2')}
+//                   />
+//                 </div>
+//                 <div className="space-y-2 md:col-span-2">
+//                   <Label htmlFor="cover-details-tag-line-3">Tag line 3</Label>
+//                   <Input
+//                     id="cover-details-tag-line-3"
+//                     placeholder="e.g. Playgroup | Nursery | LKG | UKG | Daycare"
+//                     value={formState.tagLine3}
+//                     onChange={handleChange('tagLine3')}
+//                   />
+//                 </div>
+//               </div>
+//               {formError && <p className="text-sm text-red-600">{formError}</p>}
+//               <div className="flex flex-wrap items-center justify-between gap-3">
+//                 <Button type="submit" className="bg-gradient-to-r from-orange-400 to-red-400 text-white">
+//                   Save & Continue
+//                 </Button>
+//                 <Button
+//                   type="button"
+//                   variant="outline"
+//                   onClick={() => {
+//                     setFormState({
+//                       schoolLogo: '',
+//                       schoolLogoFileName: '',
+//                       contactNumber: '',
+//                       website: '',
+//                       email: '',
+//                       addressLine1: '',
+//                       addressLine2: '',
+//                       addressLine3: '',
+//                       tagLine1: '',
+//                       tagLine2: '',
+//                       tagLine3: ''
+//                     });
+//                     setFormError('');
+//                     setLogoError('');
+//                   }}
+//                   className="border-orange-300 text-orange-500 hover:bg-orange-50"
+//                 >
+//                   Clear
+//                 </Button>
+//               </div>
+//             </form>
+//           </CardContent>
+//         </Card>
+//       </div>
+//     </div>
+//   );
+// };
 
 // Grade Selection Page
+
+type GradeSelectionPageprops={
+  school:SchoolProfile,
+  mode:string|null,
+ 
+  onBackToMode?:()=>void,
+
+  onCoverIntentChange:React.Dispatch<React.SetStateAction<"edit" | "view">>,
+  bookselections: { classes: unknown[] }|null;
+
+}
+
+
 const GradeSelectionPage = ({
   school,
   mode,
   onGradeSelect,
   onBackToMode,
-  coverDefaults,
-  onEditCoverDetails,
-  onCoverIntentChange
-}) => {
+  
+  onCoverIntentChange,
+  bookselections
+  
+  
+}:GradeSelectionPageprops) => {
   const [gradeStatus, setGradeStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const [downloadingGradeId, setDownloadingGradeId] = useState(null);
@@ -777,8 +912,15 @@ const GradeSelectionPage = ({
   const isRhymeMode = mode === 'rhymes';
   const isBookMode = mode === 'books';
   const downloadResetTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const grade=school?.grades
+  console.log(grade)
 
+
+
+  
+ 
   const modeConfig = {
+  
     rhymes: {
       title: 'Select a Grade to Manage Rhymes',
       subtitle: 'Review progress and curate the perfect rhyme list for each class.',
@@ -795,6 +937,95 @@ const GradeSelectionPage = ({
       buttonText: 'Select Grade'
     }
   };
+  
+
+  const normalizeClassDocId = (value: unknown) =>
+    (typeof value === 'string' ? value : String(value ?? ''))
+      .trim()
+      .toLowerCase()
+      .replace(/ /g, '_');
+
+  const isRhymeSelection = (entry: any) => {
+    const subject = typeof entry?.subject === 'string' ? entry.subject.trim().toLowerCase() : '';
+    if (!subject) {
+      return false;
+    }
+    return subject.includes('rhyme');
+  };
+
+  const extractCoreId = (entry: any) => {
+    const value =
+      entry?.core ??
+      entry?.work ??
+      entry?.addOn ??
+      entry?.add_on ??
+      entry?.type ??
+      '';
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    return '';
+  };
+
+  const rhymeCoreIdByGrade = useMemo(() => {
+    const map: Record<string, string> = {};
+    const classes = Array.isArray(bookselections?.classes) ? bookselections.classes : [];
+    
+    for (const classDoc of classes) {
+      if (!classDoc || typeof classDoc !== 'object') {
+        continue;
+      }
+      const classKeyRaw = classDoc.class ?? classDoc.doc_id ?? classDoc.class_label ?? '';
+     
+      const classKey = normalizeClassDocId(classKeyRaw);
+      const gradeId = classKey === 'pg' ? 'playgroup' : classKey;
+      const items = Array.isArray(classDoc.items) ? classDoc.items : [];
+      const rhymeEntry = items.find(isRhymeSelection);
+      const coreId = extractCoreId(rhymeEntry);
+      
+      if (coreId) {
+        map[gradeId] = coreId;
+      }
+    }
+    
+    return map;
+  }, [bookselections]);
+
+  const rhymeCustomisableByGrade = useMemo(() => {
+    const result: Record<string, boolean> = {};
+    if (!isRhymeMode) {
+      return result;
+    }
+    const seenCoreIds = new Set<string>();
+    
+
+
+
+    for (const grade of GRADE_OPTIONS) {
+      const coreId = rhymeCoreIdByGrade[grade.id] || '';
+      if (!coreId) {
+        result[grade.id] = false;
+        continue;
+      }
+      if (seenCoreIds.has(coreId) && !(coreId.startsWith(school.school_id)) ) {
+        result[grade.id] = false;
+        continue;
+      }
+      if (coreId.startsWith(school.school_id)){
+          result[grade.id] = true;
+      }
+
+      seenCoreIds.add(coreId);
+      
+    }
+    
+    return result;
+  }, [isRhymeMode, rhymeCoreIdByGrade]);
+
+  
 
   useEffect(() => {
     if (!isRhymeMode) {
@@ -805,6 +1036,11 @@ const GradeSelectionPage = ({
 
     setLoading(true);
     fetchGradeStatus();
+    
+    
+    
+    
+    
   }, [isRhymeMode]);
 
   useEffect(() => {
@@ -865,8 +1101,9 @@ const GradeSelectionPage = ({
   }, [isCoverMode, school?.school_id]);
 
   const fetchGradeStatus = async () => {
-    try {
+    try { 
       const response = await axios.get(`${API}/rhymes/status/${school.school_id}`);
+      
       setGradeStatus(response.data);
     } catch (error) {
       console.error('Error fetching grade status:', error);
@@ -875,13 +1112,13 @@ const GradeSelectionPage = ({
       setLoading(false);
     }
   };
-
+  
   const getGradeStatusInfo = (gradeId) => {
     const status = gradeStatus.find((s) => s.grade === gradeId);
     const rawSelectedPages =
       status?.selected_pages ??
-      status?.selected_page_count ??
-      status?.selected_count ??
+      
+      
       0;
     const rawMaxPages = status?.max_pages ?? MAX_RHYME_PAGES;
     const selectedPages = Number.isFinite(Number(rawSelectedPages))
@@ -907,73 +1144,73 @@ const GradeSelectionPage = ({
     []
   );
 
-  const handleDownloadBinder = useCallback(
-    async (gradeId, event) => {
-      event?.stopPropagation();
-      event?.preventDefault();
+  // const handleDownloadBinder = useCallback(
+  //   async (gradeId, event) => {
+  //     event?.stopPropagation();
+  //     event?.preventDefault();
 
-      if (!school?.school_id) {
-        toast.error('Missing school information for download');
-        return;
-      }
+  //     if (!school?.school_id) {
+  //       toast.error('Missing school information for download');
+  //       return;
+  //     }
 
-      const downloadUrl = buildBinderDownloadUrl(API, school.school_id, gradeId);
-      if (!downloadUrl) {
-        toast.error('Unable to prepare binder download');
-        return;
-      }
+  //     const downloadUrl = buildBinderDownloadUrl(API, school.school_id, gradeId);
+  //     if (!downloadUrl) {
+  //       toast.error('Unable to prepare binder download');
+  //       return;
+  //     }
 
-      try {
-        setDownloadingGradeId(gradeId);
+  //     try {
+  //       setDownloadingGradeId(gradeId);
 
-        const response = await axios.get(downloadUrl, {
-          responseType: 'blob',
-          validateStatus: () => true
-        });
+  //       const response = await axios.get(downloadUrl, {
+  //         responseType: 'blob',
+  //         validateStatus: () => true
+  //       });
 
-        if (response.status >= 400) {
-          let message = 'Please select at least one rhyme page before downloading the binder.';
-          try {
-            if (response.data instanceof Blob) {
-              message = (await response.data.text()) || message;
-            } else if (typeof response.data === 'string') {
-              message = response.data || message;
-            }
-          } catch (error) {
-            // swallow parse error and keep default message
-          }
-          toast.error(message);
-          return;
-        }
+  //       if (response.status >= 400) {
+  //         let message = 'Please select at least one rhyme page before downloading the binder.';
+  //         try {
+  //           if (response.data instanceof Blob) {
+  //             message = (await response.data.text()) || message;
+  //           } else if (typeof response.data === 'string') {
+  //             message = response.data || message;
+  //           }
+  //         } catch (error) {
+  //           // swallow parse error and keep default message
+  //         }
+  //         toast.error(message);
+  //         return;
+  //       }
 
-        const blob = response.data;
-        const href = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = href;
-        anchor.setAttribute('download', `${gradeId}-rhyme-binder.pdf`);
-        anchor.style.display = 'none';
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(href);
+  //       const blob = response.data;
+  //       const href = URL.createObjectURL(blob);
+  //       const anchor = document.createElement('a');
+  //       anchor.href = href;
+  //       anchor.setAttribute('download', `${gradeId}-rhyme-binder.pdf`);
+  //       anchor.style.display = 'none';
+  //       document.body.appendChild(anchor);
+  //       anchor.click();
+  //       document.body.removeChild(anchor);
+  //       URL.revokeObjectURL(href);
 
-        toast.success('Binder download started');
-      } catch (error) {
-        console.error('Error initiating binder download:', error);
-        toast.error('Failed to download binder');
-      } finally {
-        if (downloadResetTimerRef.current) {
-          clearTimeout(downloadResetTimerRef.current);
-        }
+  //       toast.success('Binder download started');
+  //     } catch (error) {
+  //       console.error('Error initiating binder download:', error);
+  //       toast.error('Failed to download binder');
+  //     } finally {
+  //       if (downloadResetTimerRef.current) {
+  //         clearTimeout(downloadResetTimerRef.current);
+  //       }
 
-        downloadResetTimerRef.current = setTimeout(() => {
-          setDownloadingGradeId((current) => (current === gradeId ? null : current));
-          downloadResetTimerRef.current = null;
-        }, 800);
-      }
-    },
-    [school?.school_id]
-  );
+  //       downloadResetTimerRef.current = setTimeout(() => {
+  //         setDownloadingGradeId((current) => (current === gradeId ? null : current));
+  //         downloadResetTimerRef.current = null;
+  //       }, 800);
+  //     }
+  //   },
+  //   [school?.school_id]
+  // );
 
   const handleBackToMenu = () => {
     if (typeof onBackToMode === 'function') {
@@ -994,25 +1231,25 @@ const GradeSelectionPage = ({
     [isCoverMode, mode, onCoverIntentChange, onGradeSelect]
   );
 
-  const handleEditDetailsClick = useCallback(() => {
-    if (typeof onEditCoverDetails === 'function') {
-      onEditCoverDetails();
-    }
-  }, [onEditCoverDetails]);
+  // const handleEditDetailsClick = useCallback(() => {
+  //   if (typeof onEditCoverDetails === 'function') {
+  //     onEditCoverDetails();
+  //   }
+  // }, [onEditCoverDetails]);
 
-  const addressLines = [
-    coverDefaults?.addressLine1,
-    coverDefaults?.addressLine2,
-    coverDefaults?.addressLine3
-  ].filter((line) => typeof line === 'string' && line.trim().length > 0);
+  // const addressLines = [
+  //   coverDefaults?.addressLine1,
+  //   coverDefaults?.addressLine2,
+  //   coverDefaults?.addressLine3
+  // ].filter((line) => typeof line === 'string' && line.trim().length > 0);
 
-  const tagLines = [
-    coverDefaults?.tagLine1,
-    coverDefaults?.tagLine2,
-    coverDefaults?.tagLine3
-  ].filter((line) => typeof line === 'string' && line.trim().length > 0);
+  // const tagLines = [
+  //   coverDefaults?.tagLine1,
+  //   coverDefaults?.tagLine2,
+  //   coverDefaults?.tagLine3
+  // ].filter((line) => typeof line === 'string' && line.trim().length > 0);
 
-  const gradeNameOverrides = buildCoverGradeNames(coverDefaults);
+  // const gradeNameOverrides = buildCoverGradeNames(coverDefaults);
 
   if (loading) {
     return (
@@ -1042,12 +1279,15 @@ const GradeSelectionPage = ({
           <div className="mb-8 space-y-2 text-center md:text-left">
             <h2 className="text-xl sm:text-2xl font-semibold text-gray-800">{currentMode.title}</h2>
             <p className="text-sm sm:text-base text-gray-600">{currentMode.subtitle}</p>
+            <p className="text-sm sm:text-sm   font-semibold text-gray-800"><span style={{color:"red"}}>Disclaimer</span> : you can select rhymes for a  minimum of  24 pages and maximum of 44 pages  per  grade ,make sure your select pages as a multiple of 4 for binding purpose</p>
           </div>
-
+          
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
             {GRADE_OPTIONS.filter((grade) => enabledGradeMap[grade.id] !== false).map((grade) => {
-              const resolvedGradeName = gradeNameOverrides[grade.id] || grade.name;
+              const resolvedGradeName =  school.grades?.[grade.id].label!="" ? school.grades?.[grade.id].label :school.grades?.[grade.id]
+              
               const { selectedPages, maxPages } = getGradeStatusInfo(grade.id);
+            
               const formattedSelectedPages = Number.isInteger(selectedPages)
                 ? selectedPages
                 : selectedPages.toFixed(1);
@@ -1056,51 +1296,50 @@ const GradeSelectionPage = ({
                 : maxPages.toFixed(1);
               const coverState = coverSelections[grade.id];
               const coverStatusCode = (coverState?.status || '1').toString();
-              const coverStatusText =
-                {
-                  '1': 'Explore cover pages',
-                  '2': 'Cover pages are being prepared',
-                  '3': 'View cover pages',
-                  '4': 'Selections are frozen',
-                  finished: 'Selections are frozen',
-                }[coverStatusCode] || 'Explore cover pages';
-              const isCoverFinished = coverStatusCode === '4' || coverStatusCode === 'finished';
-              const coverThemeLabel = coverState?.selectedThemeLabel || coverState?.selectedThemeId;
-              const coverColourLabel = coverState?.selectedColourLabel || coverState?.selectedColourId;
-
+              // const coverStatusText =
+              //   {
+              //     '1': 'Explore cover pages',
+              //     '2': 'Cover pages are being prepared',
+              //     '3': 'View cover pages',
+              //     '4': 'Selections are frozen',
+              //     finished: 'Selections are frozen',
+              //   }[coverStatusCode] || 'Explore cover pages';
+              // const isCoverFinished = coverStatusCode === '4' || coverStatusCode === 'finished';
+              
               return (
                 <Card
                   key={grade.id}
                   className="group aspect-square flex flex-col cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg border border-slate-200 bg-white"
-                  onClick={() => handleGradeCardSelect(grade.id)}
+                  
+                  onClick={
+                     () => 
+                      rhymeCustomisableByGrade[grade.id]
+                    ? handleGradeCardSelect(grade.id):toast.info("grade is not customisable")
+                   
+                  }
+
                 >
                   <CardContent className="flex-1 flex flex-col justify-between p-4 text-center">
                     <div className="space-y-1">
                       <h3 className="text-base sm:text-lg font-bold text-gray-800">{resolvedGradeName}</h3>
-                      {isCoverMode ? (
-                        <div className="space-y-1">
-                          <span
-                            className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
-                              isCoverFinished
-                                ? 'bg-green-50 text-green-700 border border-green-200'
-                                : 'bg-slate-100 text-slate-700'
-                            }`}
-                          >
-                            {coverStatusText}
-                          </span>
-                          <p className="text-sm text-gray-600">
-                            {coverStatusCode === '1' ? 'Explore cover pages' : coverStatusCode === '2' ? 'Cover pages are being prepared' : coverStatusCode === '3' ? 'View uploaded pages' : 'Selections are frozen'}
-                          </p>
-                        </div>
-                      ) : (
-                        <>
-                          {!isBookMode ? (
+                  
+                          {isRhymeMode &&(
                             <span className="inline-block rounded-full bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1">
-                              {formattedSelectedPages} / {formattedMaxPages} pages
+                              {formattedSelectedPages}pages
                             </span>
-                          ) : (
-                            <span className="inline-block rounded-full bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1">
-                              {(bookSelectionCounts[grade.id] ?? 0)} book{(bookSelectionCounts[grade.id] ?? 0) === 1 ? '' : 's'}
+                          )
+                          }
+                          {isRhymeMode && (
+                            
+                            <span
+                              className={`inline-block rounded-full text-xs font-semibold px-3 py-1 ${
+                                rhymeCustomisableByGrade[grade.id]
+                                  ? 'bg-green-50 text-green-700 border border-green-200'
+                                  : 'bg-slate-100 text-slate-700 border border-slate-200'
+                              }`}
+                            >
+                              
+                              {rhymeCustomisableByGrade[grade.id] ? 'Customisable' : 'Not customisable'}
                             </span>
                           )}
                           <p className="text-sm text-gray-600">
@@ -1108,10 +1347,19 @@ const GradeSelectionPage = ({
                               ? `Curate books for ${resolvedGradeName}.`
                               : `Manage rhymes for ${resolvedGradeName}.`}
                           </p>
-                        </>
-                      )}
+                         
+
+                         
+
+
+
+                        
+                          
+                        
+                      
                     </div>
-                    {!isCoverMode && (
+                    
+                    {/* {!isCoverMode && (
                       <Button
                         variant="outline"
                         type="button"
@@ -1128,7 +1376,7 @@ const GradeSelectionPage = ({
                           <Download className="w-4 h-4" />
                         )}
                       </Button>
-                    )}
+                    )} */}
                     {isBookMode && (
                       <div className="flex flex-col gap-2">
                         {bookSelectionCounts[grade.id] > 0 ? (
@@ -1205,7 +1453,8 @@ const GradeSelectionPage = ({
   );
 };
 const FeaturePlaceholderPage = ({ school, mode, grade, onBackToGrades, onBackToMode, onLogout }: { school: SchoolProfile; mode: string; grade: string; onBackToGrades: () => void; onBackToMode: () => void; onLogout: () => void }) => {
-  const navigate = useNavigate();
+  const navigate 
+  = useNavigate();
 
   const placeholderConfig = {
     cover: {
@@ -1306,18 +1555,169 @@ type TreeMenuRhyme = {
   pages: number;
   subject?: string;
   personalized?: string | boolean;
-  requires_cartoon_head?: boolean;
   used_in_grades?: string[];
 };
 
+const isPersonalizedValue = (value: unknown) => {
+  if (value === true) return true;
+  if (typeof value === 'string') {
+    return value.trim().toLowerCase() === 'yes';
+  }
+  return false;
+};
+
+const normalizeGradePersonalisationValue = (value: unknown): 'yes' | 'no' | null => {
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'yes' || normalized === 'no') return normalized;
+  }
+  if (value === true) return 'yes';
+  if (value === false) return 'no';
+  return null;
+};
+
+const resolvePreviewBucket = (value: unknown): 'personalized' | 'nonPersonalized' | null => {
+  if (value === 'personalized' || value === 'nonPersonalized') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'personalised' || normalized === 'personalized') return 'personalized';
+    if (normalized === 'non_personalised' || normalized === 'non_personalized') return 'nonPersonalized';
+  }
+  return null;
+};
+
 type TreeMenuGroups = Record<string, TreeMenuRhyme[]>;
+
+type TreeMenuDivisionKey = 'rhymes' | 'stories';
+
+const resolveTreeMenuItemCode = (item: any): string => {
+  const raw = (item?.code ?? item?.rhyme_code ?? '').toString();
+ 
+  return raw.trim();
+};
+
+const isStoryTreeMenuItem = (item: any): boolean => {
+  
+  const code = resolveTreeMenuItemCode(item);
+  
+  if (!code) return false;
+  return code.toUpperCase().startsWith('ST');
+};
+
+type RhymeLanguageConfig = {
+  default?: {
+    groupByLanguage?: boolean;
+    allowedLanguages?: string[];
+  };
+  grades?: Record<
+    string,
+    {
+      groupByLanguage?: boolean;
+      allowedLanguages?: string[];
+    }
+  >;
+  languageOrder?: string[];
+  languageLabels?: Record<string, string>;
+};
+
+const DEFAULT_LANGUAGE_ORDER = ['english', 'hindi', 'tamil', 'kannada', 'other'];
+const DEFAULT_LANGUAGE_LABELS: Record<string, string> = {
+  english: 'English',
+  hindi: 'Hindi',
+  tamil: 'Tamil',
+  kannada: 'Kannada',
+  other: 'Other'
+};
+
+const normalizeLanguageKey = (value: unknown): string => {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!raw) return 'english';
+  if (raw === 'eng' || raw === 'english') return 'english';
+  if (raw === 'hin' || raw === 'hindi') return 'hindi';
+  if (raw === 'tam' || raw === 'tamil') return 'tamil';
+  if (raw === 'kan' || raw === 'kannada') return 'kannada';
+  if (raw === 'other') return 'other';
+
+  const normalized = raw.replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+  return normalized || 'other';
+};
+
+const normalizeGradeKey = (value: unknown): string => {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+ 
+  if (!raw) return '';
+  if (raw === 'pg') return 'playgroup';
+  return raw.replace(/[^a-z0-9]+/g, '');
+};
+
+const toTitleCaseLabel = (key: string): string => {
+  const spaced = key.replace(/[_-]+/g, ' ').trim();
+  if (!spaced) return 'Other';
+  return spaced
+    .split(/\s+/g)
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(' ');
+};
+
+const resolveLanguageUiForGrade = (
+  grade: unknown,
+  config?: RhymeLanguageConfig | null
+) => {
+  const normalizedGrade = normalizeGradeKey(grade);
+  const defaultConfig = config?.default || {};
+
+  const gradesConfig = config?.grades || {};
+  const gradeConfigKey =
+    normalizedGrade &&
+    (gradesConfig[normalizedGrade]
+      ? normalizedGrade
+      : Object.keys(gradesConfig).find((key) => normalizeGradeKey(key) === normalizedGrade));
+  const gradeConfig = (gradeConfigKey && gradesConfig[gradeConfigKey]) || {};
+
+  const groupByLanguage =
+    typeof gradeConfig.groupByLanguage === 'boolean'
+      ? gradeConfig.groupByLanguage
+      : typeof defaultConfig.groupByLanguage === 'boolean'
+        ? defaultConfig.groupByLanguage
+        : true;
+
+  const allowedLanguagesRaw =
+    Array.isArray(gradeConfig.allowedLanguages)
+      ? gradeConfig.allowedLanguages
+      : Array.isArray(defaultConfig.allowedLanguages)
+        ? defaultConfig.allowedLanguages
+        : null;
+ 
+
+  const allowedLanguages = allowedLanguagesRaw
+    ? new Set(allowedLanguagesRaw.map(normalizeLanguageKey).filter(Boolean))
+    : null;
+  allowedLanguages?.add('english');
+
+  const orderRaw = Array.isArray(config?.languageOrder) ? config?.languageOrder : DEFAULT_LANGUAGE_ORDER;
+  const order = orderRaw.map(normalizeLanguageKey).filter(Boolean);
+  const filteredOrder = allowedLanguages ? order.filter((key) => allowedLanguages.has(key)) : order;
+
+  const labels = config?.languageLabels || DEFAULT_LANGUAGE_LABELS;
+
+  return { groupByLanguage, allowedLanguages, order: filteredOrder, labels };
+};
 
 type TreeMenuProps = {
   rhymesData: TreeMenuGroups;
   reusableRhymes: TreeMenuGroups;
   showReusable: boolean;
+  grade?: string | null;
+  languageConfig?: RhymeLanguageConfig | null;
+  currentPageIndex: number;
+  maxPagesPerGrade: number;
   onToggleReusable: () => void;
-  onRhymeSelect: (rhyme: TreeMenuRhyme) => void;
+  onRhymeSelect: (
+    rhyme: TreeMenuRhyme,
+    options?: { bucket?: 'personalized' | 'nonPersonalized' }
+  ) => void;
   hideFullPageRhymes?: boolean;
   selectedRhymeCodes?: Set<string> | string[];
 };
@@ -1330,48 +1730,82 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
     reusableRhymes,
     onToggleReusable,
     hideFullPageRhymes,
-    selectedRhymeCodes
+    selectedRhymeCodes,
+    grade,
+    languageConfig,
+    currentPageIndex,
+    maxPagesPerGrade
   }) => {
+    const [expandedDivisions, setExpandedDivisions] = useState<Record<TreeMenuDivisionKey, boolean>>({
+      rhymes: true,
+      stories: true
+    });
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
     const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
     const [expandedBuckets, setExpandedBuckets] = useState<Record<string, boolean>>({});
-    const subjectOrder = ['english', 'hindi', 'tamil', 'kannada', 'other'];
-    const subjectLabels: Record<string, string> = {
-      english: 'English',
-      hindi: 'Hindi',
-      tamil: 'Tamil',
-      kannada: 'Kannada',
-      other: 'Other'
-    };
-  
-    const toggleGroup = (pageKey: string) => {
-      setExpandedGroups((prev) => ({
+    const languageUi = useMemo(() => resolveLanguageUiForGrade(grade, languageConfig), [grade, languageConfig]);
+
+    const buildGroupKey = useCallback(
+      (division: TreeMenuDivisionKey, pageKey: string) => `${division}::${pageKey}`,
+      []
+    );
+
+    const buildSubjectKey = useCallback(
+      (division: TreeMenuDivisionKey, pageKey: string, subjectKey: string) =>
+        `${division}::${pageKey}::${subjectKey}`,
+      []
+    );
+
+    const buildBucketKey = useCallback(
+      (
+        division: TreeMenuDivisionKey,
+        pageKey: string,
+        subjectKey: string,
+        bucketKey: 'personalized' | 'nonPersonalized'
+      ) => `${division}::${pageKey}::${subjectKey}::${bucketKey}`,
+      []
+    );
+
+    const toggleDivision = (division: TreeMenuDivisionKey) => {
+      setExpandedDivisions((prev) => ({
         ...prev,
-        [pageKey]: !prev[pageKey]
+        [division]: !prev[division]
       }));
     };
-    const toggleSubject = (pageKey: string, subjectKey: string) => {
-      const key = `${pageKey}::${subjectKey}`;
+    
+    const toggleGroup = (division: TreeMenuDivisionKey, pageKey: string) => {
+      const key = buildGroupKey(division, pageKey);
+      setExpandedGroups((prev) => ({
+        ...prev,
+        [key]: !prev[key]
+      }));
+    };
+    const toggleSubject = (division: TreeMenuDivisionKey, pageKey: string, subjectKey: string) => {
+      const key = buildSubjectKey(division, pageKey, subjectKey);
       setExpandedSubjects((prev) => ({
         ...prev,
         [key]: !prev[key]
       }));
     };
-    const toggleBucket = (pageKey: string, subjectKey: string, bucketKey: 'personalized' | 'nonPersonalized') => {
-      const key = `${pageKey}::${subjectKey}::${bucketKey}`;
+    const toggleBucket = (
+      division: TreeMenuDivisionKey,
+      pageKey: string,
+      subjectKey: string,
+      bucketKey: 'personalized' | 'nonPersonalized'
+    ) => {
+      const key = buildBucketKey(division, pageKey, subjectKey, bucketKey);
       setExpandedBuckets((prev) => ({
         ...prev,
         [key]: !prev[key]
       }));
     };
-    const normalizeSubject = (value: unknown) => {
-      const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
-      if (raw === 'eng' || raw === 'english') return 'english';
-      if (raw === 'hin' || raw === 'hindi') return 'hindi';
-      if (raw === 'tam' || raw === 'tamil') return 'tamil';
-      if (raw === 'kan' || raw === 'kannada') return 'kannada';
-      return 'other';
-    };
+    const resolveSubjectLabel = useCallback(
+      (subjectKey: string) => {
+        const normalized = normalizeLanguageKey(subjectKey);
+        return languageUi.labels?.[normalized] || toTitleCaseLabel(normalized);
+      },
+      [languageUi.labels]
+    );
 
     const normalizedSelectedCodes = useMemo(() => {
       if (!selectedRhymeCodes) {
@@ -1414,7 +1848,7 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
 
       return Object.entries(sourceGroups).reduce((acc, [pageKey, rhymes]) => {
         const filteredList = rhymes.filter((rhyme) => {
-          const code = typeof rhyme?.code === 'string' ? rhyme.code.trim().toLowerCase() : '';
+          const code = resolveTreeMenuItemCode(rhyme).toLowerCase();
           if (!code) {
             return true;
           }
@@ -1429,24 +1863,87 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
       }, {} as TreeMenuGroups);
     }, [showReusable, reusableRhymes, rhymesData, normalizedSelectedCodes]);
   
-    const filteredRhymes = hideFullPageRhymes
-      ? Object.fromEntries(
-          Object.entries(currentRhymes || {}).filter(([pageKey]) => parseFloat(pageKey) !== 1.0)
-        )
-    : currentRhymes || {};
+    const filteredRhymes = useMemo(() => {
+      const baseGroups = hideFullPageRhymes
+        ? Object.fromEntries(
+            Object.entries(currentRhymes || {}).filter(([pageKey]) => {
+              const pages = parseFloat(pageKey);
+              // Bottom slot menu: only half-page rhymes are valid.
+              return Number.isFinite(pages) && pages === 0.5;
+            })
+          )
+        : currentRhymes || {};
 
-  if (!filteredRhymes || Object.keys(filteredRhymes).length === 0) {
-    return (
-      <div className="p-4 text-center text-gray-500">
-        <Music className="w-12 h-12 mx-auto mb-2 opacity-50" />
-        <p>{showReusable ? 'No reusable rhymes available' : 'No rhymes available'}</p>
-      </div>
-    );
-  }
+      const normalizedMax = Number(maxPagesPerGrade);
+      const normalizedIndex = Number(currentPageIndex);
+      if (!Number.isFinite(normalizedMax) || !Number.isFinite(normalizedIndex)) {
+        return baseGroups;
+      }
 
-  const entries = Object.entries(filteredRhymes) as [string, TreeMenuRhyme[]][];
-  const sortedEntries = [...entries].sort((first, second) => Number(first[0]) - Number(second[0]));
-  console.log(sortedEntries)
+      const remainingPages = Math.max(0, normalizedMax - normalizedIndex);
+      if (!Number.isFinite(remainingPages) || remainingPages <= 0) {
+        return {};
+      }
+
+      // Prevent selecting multi-page rhymes that would overflow the last pages.
+      // Examples with MAX=44 (0-based index):
+      // - index 41 (page 42 / MAX-2): allow up to 3 pages (fits 42-44)
+      // - index 42 (page 43 / MAX-1): disallow 3 pages; allow <=2
+      // - index 43 (page 44 / MAX): allow <=1 (incl. 0.5)
+      return Object.fromEntries(
+        Object.entries(baseGroups).filter(([pageKey]) => {
+          const pages = parseFloat(pageKey);
+          if (!Number.isFinite(pages)) return true;
+          return pages <= remainingPages;
+        })
+      );
+    }, [currentRhymes, currentPageIndex, hideFullPageRhymes, maxPagesPerGrade]);
+
+  const { rhymesGroups, storiesGroups } = useMemo(() => {
+    const rhymesOutput: TreeMenuGroups = {};
+    const storiesOutput: TreeMenuGroups = {};
+
+    Object.entries(filteredRhymes || {}).forEach(([pageKey, items]) => {
+      const safeList = Array.isArray(items) ? items : [];
+
+      // Apply allowed-languages filtering here so section counts match what is actually renderable.
+      const allowedLanguages = languageUi.allowedLanguages;
+      const visibleList = allowedLanguages
+        ? safeList.filter((entry) => {
+            const subjectKey = normalizeLanguageKey(entry?.subject) || 'english';
+            return allowedLanguages.has(subjectKey);
+          })
+        : safeList;
+
+      const rhymesList = visibleList.filter((entry) => !isStoryTreeMenuItem(entry));
+      const storiesList = visibleList.filter((entry) => isStoryTreeMenuItem(entry));
+
+      if (rhymesList.length > 0) {
+        rhymesOutput[pageKey] = rhymesList;
+      }
+      if (storiesList.length > 0) {
+        storiesOutput[pageKey] = storiesList;
+      }
+    });
+
+    return { rhymesGroups: rhymesOutput, storiesGroups: storiesOutput };
+  }, [filteredRhymes, languageUi.allowedLanguages]);
+
+  const countGroupItems = useCallback((groups: TreeMenuGroups) => {
+    return Object.values(groups).reduce((acc, list) => acc + (Array.isArray(list) ? list.length : 0), 0);
+  }, []);
+
+  const rhymesCount = countGroupItems(rhymesGroups);
+  const storiesCount = countGroupItems(storiesGroups);
+  const isEmpty =
+    (!filteredRhymes || Object.keys(filteredRhymes).length === 0) ||
+    (rhymesCount === 0 && storiesCount === 0);
+
+  const rhymeEntries = Object.entries(rhymesGroups) as [string, TreeMenuRhyme[]][];
+  const sortedRhymeEntries = [...rhymeEntries].sort((first, second) => Number(first[0]) - Number(second[0]));
+  const storyEntries = Object.entries(storiesGroups) as [string, TreeMenuRhyme[]][];
+  const sortedStoryEntries = [...storyEntries].sort((first, second) => Number(first[0]) - Number(second[0]));
+  
   return (
     <div className="flex h-full max-h-[calc(100vh-220px)] flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm">
       <div className="border-b bg-white/80 p-4">
@@ -1463,20 +1960,185 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
-        {sortedEntries.map(([pageKey, rhymes]) => {
+        {isEmpty ? (
+          <div className="p-4 text-center text-gray-500">
+            <Music className="w-12 h-12 mx-auto mb-2 opacity-50" />
+            <p>{showReusable ? 'No reusable rhymes or stories available' : 'No rhymes or stories available'}</p>
+          </div>
+        ) : (
+        <div className="space-y-2">
+          {([
+            {
+              division: 'rhymes' as const,
+              label: showReusable ? 'Reusable Rhymes' : 'Available Rhymes',
+              count: rhymesCount,
+              entries: sortedRhymeEntries,
+              icon: Music,
+              triggerClassName:
+                'flex w-full items-center justify-between rounded-lg bg-orange-50 px-3 py-2 text-left transition-colors duration-200 hover:bg-orange-100',
+              textClassName: 'flex items-center gap-2 text-sm font-semibold text-orange-700',
+              chevronClassName: 'h-4 w-4 text-orange-700'
+            },
+            {
+              division: 'stories' as const,
+              label: showReusable ? 'Reusable Stories' : 'Available Stories',
+              count: storiesCount,
+              entries: sortedStoryEntries,
+              icon: BookMarked,
+              triggerClassName:
+                'flex w-full items-center justify-between rounded-lg bg-indigo-50 px-3 py-2 text-left transition-colors duration-200 hover:bg-indigo-100',
+              textClassName: 'flex items-center gap-2 text-sm font-semibold text-indigo-700',
+              chevronClassName: 'h-4 w-4 text-indigo-700'
+            }
+          ] as const).map((section) => {
+            const Icon = section.icon;
+            return (
+              <Collapsible
+                key={section.division}
+                open={expandedDivisions[section.division]}
+                onOpenChange={() => toggleDivision(section.division)}
+              >
+                <CollapsibleTrigger className={section.triggerClassName}>
+                  <span className={section.textClassName}>
+                    <Icon className="h-4 w-4" />
+                    {section.label} ({section.count})
+                  </span>
+                  {expandedDivisions[section.division] ? (
+                    <ChevronDown className={section.chevronClassName} />
+                  ) : (
+                    <ChevronRight className={section.chevronClassName} />
+                  )}
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-1 pl-1">
+                  <div className="space-y-1">
+                    {section.entries.map(([pageKey, rhymes]) => {
+                      const division = section.division;
+                      const groupStateKey = buildGroupKey(division, pageKey);
           if (!rhymes || rhymes.length === 0) return null;
-          const groupedBySubject = rhymes.reduce((acc, rhyme) => {
-            const subjectKey = normalizeSubject(rhyme?.subject);
+          const visibleRhymes = rhymes;
+
+          if (!visibleRhymes || visibleRhymes.length === 0) {
+            return null;
+          }
+
+          if (!languageUi.groupByLanguage) {
+            const subjectKey = '__all__';
+            const personalizedRhymes = visibleRhymes.filter((rhyme) => isPersonalizedValue(rhyme?.personalized));
+            const nonPersonalizedRhymes = visibleRhymes.filter((rhyme) => !isPersonalizedValue(rhyme?.personalized));
+
+            const renderRhymeRow = (rhyme: TreeMenuRhyme, bucket: 'personalized' | 'nonPersonalized') => {
+              const resolvedCode = resolveTreeMenuItemCode(rhyme);
+              const safeRhyme: TreeMenuRhyme = resolvedCode ? { ...rhyme, code: resolvedCode } : rhyme;
+
+              return (
+                <button
+                  key={resolvedCode || rhyme.code}
+                  type="button"
+                  onClick={() => onRhymeSelect(safeRhyme, { bucket })}
+                  className="group flex w-full items-center justify-between gap-3 rounded-lg border border-transparent bg-white/50 p-3 text-left transition-all duration-200 hover:border-orange-200 hover:bg-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
+                  aria-label={`Select ${rhyme.name}`}
+                >
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-800 transition-colors duration-200 group-hover:text-orange-600">{rhyme.name}</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {rhyme.used_in_grades && rhyme.used_in_grades.length > 0 && (
+                        <span className="ml-2 text-blue-600">(Used in: {rhyme.used_in_grades.join(', ')})</span>
+                      )}
+                    </p>
+                  </div>
+                  <span
+                    className="shrink-0 rounded-full border border-orange-200 bg-white/70 p-2 text-orange-500 transition-colors duration-200 group-hover:border-orange-300 group-hover:text-orange-600"
+                    aria-hidden="true"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </span>
+                </button>
+              );
+            };
+
+            return (
+              <Collapsible key={groupStateKey} open={Boolean(expandedGroups[groupStateKey])} onOpenChange={() => toggleGroup(division, pageKey)}>
+                <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg p-3 text-left transition-colors duration-200 hover:bg-white/50">
+                  <span className="flex items-center gap-2 font-medium text-gray-700">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-xs font-bold text-white">
+                      {pageKey}
+                    </div>
+                    {pageKey} Page{parseFloat(pageKey) !== 1 ? 's' : ''} ({visibleRhymes.length})
+                  </span>
+                  {expandedGroups[groupStateKey] ? (
+                    <ChevronDown className="h-4 w-4 text-gray-500" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-gray-500" />
+                  )}
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pl-4">
+                  <div className="mt-2 space-y-2">
+                    {personalizedRhymes.length > 0 && (
+                      <Collapsible
+                        open={expandedBuckets[buildBucketKey(division, pageKey, subjectKey, 'personalized')] !== false}
+                        onOpenChange={() => toggleBucket(division, pageKey, subjectKey, 'personalized')}
+                      >
+                        <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md bg-emerald-50 px-2 py-1.5 text-left transition-colors duration-200 hover:bg-emerald-100">
+                          <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                            Personalized ({personalizedRhymes.length})
+                          </span>
+                          {expandedBuckets[buildBucketKey(division, pageKey, subjectKey, 'personalized')] !== false ? (
+                            <ChevronDown className="h-3.5 w-3.5 text-emerald-700" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5 text-emerald-700" />
+                          )}
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-1 space-y-1">
+                          {personalizedRhymes.map((rhyme) => renderRhymeRow(rhyme, 'personalized'))}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )}
+                    {nonPersonalizedRhymes.length > 0 && (
+                      <Collapsible
+                        open={expandedBuckets[buildBucketKey(division, pageKey, subjectKey, 'nonPersonalized')] !== false}
+                        onOpenChange={() => toggleBucket(division, pageKey, subjectKey, 'nonPersonalized')}
+                      >
+                        <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md bg-slate-100 px-2 py-1.5 text-left transition-colors duration-200 hover:bg-slate-200">
+                          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                            Non-Personalized ({nonPersonalizedRhymes.length})
+                          </span>
+                          {expandedBuckets[buildBucketKey(division, pageKey, subjectKey, 'nonPersonalized')] !== false ? (
+                            <ChevronDown className="h-3.5 w-3.5 text-slate-600" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5 text-slate-600" />
+                          )}
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-1 space-y-1">
+                          {nonPersonalizedRhymes.map((rhyme) => renderRhymeRow(rhyme, 'nonPersonalized'))}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          }
+
+          const groupedBySubject = visibleRhymes.reduce((acc, rhyme) => {
+            const subjectKey = normalizeLanguageKey(rhyme?.subject) || 'english';
             if (!acc[subjectKey]) {
               acc[subjectKey] = [];
             }
             acc[subjectKey].push(rhyme);
             return acc;
           }, {} as Record<string, TreeMenuRhyme[]>);
-          const orderedSubjects = subjectOrder.filter((subjectKey) => (groupedBySubject[subjectKey] || []).length > 0);
+
+          const subjectsPresent = Object.keys(groupedBySubject);
+          const preferredSubjects = languageUi.order.filter(
+            (subjectKey) => (groupedBySubject[subjectKey] || []).length > 0
+          );
+          const extraSubjects = subjectsPresent
+            .filter((subjectKey) => !preferredSubjects.includes(subjectKey))
+            .sort((a, b) => a.localeCompare(b));
+          const orderedSubjects = [...preferredSubjects, ...extraSubjects];
 
           return (
-            <Collapsible key={pageKey} open={Boolean(expandedGroups[pageKey])} onOpenChange={() => toggleGroup(pageKey)}>
+            <Collapsible key={groupStateKey} open={Boolean(expandedGroups[groupStateKey])} onOpenChange={() => toggleGroup(division, pageKey)}>
               <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg p-3 text-left transition-colors duration-200 hover:bg-white/50">
                 <span className="flex items-center gap-2 font-medium text-gray-700">
                   <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-r from-orange-400 to-red-400 text-xs font-bold text-white">
@@ -1484,61 +2146,62 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
                   </div>
                   {pageKey} Page{parseFloat(pageKey) !== 1 ? 's' : ''} ({rhymes.length})
                 </span>
-                {expandedGroups[pageKey] ? (
+                {expandedGroups[groupStateKey] ? (
                   <ChevronDown className="h-4 w-4 text-gray-500" />
                 ) : (
                   <ChevronRight className="h-4 w-4 text-gray-500" />
                 )}
-              </CollapsibleTrigger>              <CollapsibleContent className="pl-4">
+              </CollapsibleTrigger>              
+              <CollapsibleContent className="pl-4">
                 <div className="mt-2 space-y-2">
                   {orderedSubjects.map((subjectKey) => {
                     const subjectRhymes = groupedBySubject[subjectKey] || [];
-                    const subjectStateKey = `${pageKey}::${subjectKey}`;
-                    const personalizedRhymes = subjectRhymes.filter((rhyme) => {
-                      return (
-                        rhyme?.requires_cartoon_head === true ||
-                        rhyme?.personalized === true ||
-                        rhyme?.personalized === 'Yes'
-                      );
-                    });
+                    const subjectStateKey = buildSubjectKey(division, pageKey, subjectKey);
+                    //filrering non-p and p rhymes
+                    const personalizedRhymes = subjectRhymes.filter(
+                      (rhyme) =>  isPersonalizedValue(rhyme?.personalized)
+                    );
                     const nonPersonalizedRhymes = subjectRhymes.filter(
-                      (rhyme) => !personalizedRhymes.includes(rhyme)
+                      (rhyme) => !isPersonalizedValue(rhyme?.personalized)
                     );
-                    const renderRhymeRow = (rhyme: TreeMenuRhyme) => (
-                      <div
-                        key={rhyme.code}
-                        className="group flex items-center justify-between gap-3 rounded-lg border border-transparent bg-white/50 p-3 transition-all duration-200 hover:border-orange-200 hover:bg-white/80"
-                      >
-                        <div className="flex-1">
-                          <p className="font-medium text-gray-800 transition-colors duration-200 group-hover:text-orange-600">{rhyme.name}</p>
-                          <p className="mt-1 text-xs text-gray-500">
-                            Code: {rhyme.code}
-                            {rhyme.used_in_grades && rhyme.used_in_grades.length > 0 && (
-                              <span className="ml-2 text-blue-600">(Used in: {rhyme.used_in_grades.join(', ')})</span>
-                            )}
-                          </p>
-                        </div>
-                        <Button
+                    const renderRhymeRow = (rhyme: TreeMenuRhyme, bucket: 'personalized' | 'nonPersonalized') => {
+                      const resolvedCode = resolveTreeMenuItemCode(rhyme);
+                      const safeRhyme: TreeMenuRhyme = resolvedCode ? { ...rhyme, code: resolvedCode } : rhyme;
+
+                      return (
+                        <button
+                          key={resolvedCode || rhyme.code}
                           type="button"
-                          size="icon"
-                          variant="outline"
-                          onClick={() => onRhymeSelect(rhyme)}
-                          className="shrink-0 rounded-full border-orange-200 text-orange-500 transition-colors duration-200 hover:border-orange-300 hover:text-orange-600"
-                          aria-label={`Add ${rhyme.name}`}
+                          onClick={() => onRhymeSelect(safeRhyme, { bucket })}
+                          className="group flex w-full items-center justify-between gap-3 rounded-lg border border-transparent bg-white/50 p-3 text-left transition-all duration-200 hover:border-orange-200 hover:bg-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
+                          aria-label={`Select ${rhyme.name}`}
                         >
-                          <Plus className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    );
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-800 transition-colors duration-200 group-hover:text-orange-600">{rhyme.name}</p>
+                            <p className="mt-1 text-xs text-gray-500">
+                              {rhyme.used_in_grades && rhyme.used_in_grades.length > 0 && (
+                                <span className="ml-2 text-blue-600">(Used in: {rhyme.used_in_grades.join(', ')})</span>
+                              )}
+                            </p>
+                          </div>
+                          <span
+                            className="shrink-0 rounded-full border border-orange-200 bg-white/70 p-2 text-orange-500 transition-colors duration-200 group-hover:border-orange-300 group-hover:text-orange-600"
+                            aria-hidden="true"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </span>
+                        </button>
+                      );
+                    };
                     return (
                       <Collapsible
                         key={subjectStateKey}
                         open={expandedSubjects[subjectStateKey] !== false}
-                        onOpenChange={() => toggleSubject(pageKey, subjectKey)}
+                        onOpenChange={() => toggleSubject(division, pageKey, subjectKey)}
                       >
                         <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-left transition-colors duration-200 hover:bg-slate-100">
                           <span className="text-xs font-semibold uppercase tracking-wide text-slate-700">
-                            {subjectLabels[subjectKey] || 'Other'} ({subjectRhymes.length})
+                            {resolveSubjectLabel(subjectKey)} ({subjectRhymes.length})
                           </span>
                           {expandedSubjects[subjectStateKey] !== false ? (
                             <ChevronDown className="h-4 w-4 text-gray-500" />
@@ -1549,41 +2212,41 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
                         <CollapsibleContent className="mt-1 space-y-2">
                           {personalizedRhymes.length > 0 && (
                             <Collapsible
-                              open={expandedBuckets[`${pageKey}::${subjectKey}::personalized`] !== false}
-                              onOpenChange={() => toggleBucket(pageKey, subjectKey, 'personalized')}
+                              open={expandedBuckets[buildBucketKey(division, pageKey, subjectKey, 'personalized')] !== false}
+                              onOpenChange={() => toggleBucket(division, pageKey, subjectKey, 'personalized')}
                             >
                               <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md bg-emerald-50 px-2 py-1.5 text-left transition-colors duration-200 hover:bg-emerald-100">
                                 <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
                                   Personalized ({personalizedRhymes.length})
                                 </span>
-                                {expandedBuckets[`${pageKey}::${subjectKey}::personalized`] !== false ? (
+                                {expandedBuckets[buildBucketKey(division, pageKey, subjectKey, 'personalized')] !== false ? (
                                   <ChevronDown className="h-3.5 w-3.5 text-emerald-700" />
                                 ) : (
                                   <ChevronRight className="h-3.5 w-3.5 text-emerald-700" />
                                 )}
                               </CollapsibleTrigger>
                               <CollapsibleContent className="mt-1 space-y-1">
-                                {personalizedRhymes.map((rhyme) => renderRhymeRow(rhyme))}
+                                {personalizedRhymes.map((rhyme) => renderRhymeRow(rhyme, 'personalized'))}
                               </CollapsibleContent>
                             </Collapsible>
                           )}
                           {nonPersonalizedRhymes.length > 0 && (
                             <Collapsible
-                              open={expandedBuckets[`${pageKey}::${subjectKey}::nonPersonalized`] !== false}
-                              onOpenChange={() => toggleBucket(pageKey, subjectKey, 'nonPersonalized')}
+                              open={expandedBuckets[buildBucketKey(division, pageKey, subjectKey, 'nonPersonalized')] !== false}
+                              onOpenChange={() => toggleBucket(division, pageKey, subjectKey, 'nonPersonalized')}
                             >
                               <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md bg-slate-100 px-2 py-1.5 text-left transition-colors duration-200 hover:bg-slate-200">
                                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
                                   Non-Personalized ({nonPersonalizedRhymes.length})
                                 </span>
-                                {expandedBuckets[`${pageKey}::${subjectKey}::nonPersonalized`] !== false ? (
+                                {expandedBuckets[buildBucketKey(division, pageKey, subjectKey, 'nonPersonalized')] !== false ? (
                                   <ChevronDown className="h-3.5 w-3.5 text-slate-600" />
                                 ) : (
                                   <ChevronRight className="h-3.5 w-3.5 text-slate-600" />
                                 )}
                               </CollapsibleTrigger>
                               <CollapsibleContent className="mt-1 space-y-1">
-                                {nonPersonalizedRhymes.map((rhyme) => renderRhymeRow(rhyme))}
+                                {nonPersonalizedRhymes.map((rhyme) => renderRhymeRow(rhyme, 'nonPersonalized'))}
                               </CollapsibleContent>
                             </Collapsible>
                           )}
@@ -1595,79 +2258,352 @@ const TreeMenu: React.FC<TreeMenuProps> = ({
               </CollapsibleContent>
             </Collapsible>
           );
-        })}
+                    })}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })}
+        </div>
+        )}
       </div>
     </div>
   );
 };
+
+//Rhymeselection page
+type RhymeSelectionPageprops={
+  school:SchoolProfile | null,
+  grade:string|null,
+  customGradeName:string|null,
+  onBack?: () => void,
+  onLogout?:()=>void,
+  isReadOnly:boolean,
+  isFrozen:boolean,
+  isSuperAdmin:boolean,
+  onRhymeFreezeChange: React.Dispatch<React.SetStateAction<boolean>>;
+
+
+
+}
 // Main Rhyme Selection Interface
-const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, isReadOnly = false, isFrozen = false }) => {
+const RhymeSelectionPage = ({
+  school,
+  grade,
+  customGradeName,
+  onBack,
+  onLogout,
+  isReadOnly = false,
+  isFrozen = false,
+  isSuperAdmin = false,
+  onRhymeFreezeChange
+}:RhymeSelectionPageprops) => {
+  
+   
   const [availableRhymes, setAvailableRhymes] = useState({});
   const [reusableRhymes, setReusableRhymes] = useState({});
+  const [rhymeSettings, setRhymeSettings] = useState<any>(null);
   const [selectedRhymes, setSelectedRhymes] = useState([]);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [showTreeMenu, setShowTreeMenu] = useState(false);
   const [showReusable, setShowReusable] = useState(false);
-  const [currentPosition, setCurrentPosition] = useState(null);
+  const [currentPosition, setCurrentPosition] = useState<null | 'top' | 'bottom'>(null);
   const [loading, setLoading] = useState(true);
+  const [freezeActionPending, setFreezeActionPending] = useState<null | 'freeze' | 'unfreeze'>(null);
+  const [removeRhymePending, setRemoveRhymePending] = useState<{ top: boolean; bottom: boolean }>({
+    top: false,
+    bottom: false
+  });
+  const [swapAcrossPagesActive, setSwapAcrossPagesActive] = useState(false);
+  const [swapAcrossPagesSource, setSwapAcrossPagesSource] = useState<null | { pageIndex: number }>(null);
+  const [swapAcrossPagesPending, setSwapAcrossPagesPending] = useState(false);
+  const [submitBlankRedirectActive, setSubmitBlankRedirectActive] = useState(false);
+  const [hasFreezeField, setHasFreezeField] = useState(false);
+  const [gradePersonalisationValue, setGradePersonalisationValue] = useState<'yes' | 'no' | null>(null);
+  const [deletePageDialogOpen, setDeletePageDialogOpen] = useState(false);
+  const [deletePageRequest, setDeletePageRequest] = useState<null | { pageIndex: number; span: number }>(null);
+  const [deletePagePending, setDeletePagePending] = useState(false);
+  const [lastDeletedPageIndex, setLastDeletedPageIndex] = useState<null | number>(null);
+  // Enables a one-time trailing blank page after hitting a submit milestone (24/28/32/…).
+  // This avoids showing an extra navigation page by default (which confuses counts), while
+  // still letting users continue past a milestone when they choose to.
+  const [milestoneContinuePages, setMilestoneContinuePages] = useState<null | number>(null);
   const navigate = useNavigate();
-
-  const svgCacheRef = useRef(new Map());
-  const svgInFlightRef = useRef(new Map());
-  const imageAssetCacheRef = useRef(new Set());
-  const imageInFlightRef = useRef(new Map());
+  const { getIdToken, user } = useAuth();
+  const [useCartoonVariantForGrade, setUseCartoonVariantForGrade] = useState(false);
+  const freezeToastShown = useRef(false); 
+  const submitBlankRedirectToastShown = useRef(false);
+  const gradePersonalisationRef = useRef<'yes' | 'no' | null>(null);
   const selectedRhymesRef = useRef([]);
+  const pendingPositionRef = useRef<null | 'top' | 'bottom'>(null);
+  const rhymeSelectOpRef = useRef(0);
   const pageFetchPromisesRef = useRef(new Map());
 
   const MAX_PAGES_PER_GRADE = MAX_RHYME_PAGES;
 
+  const toggleSwapAcrossPages = () => {
+    if (!ensureEditable()) {
+      return;
+    }
+
+    // First click: arm swap mode and capture the source page.
+    if (!swapAcrossPagesActive) {
+      setSwapAcrossPagesSource({ pageIndex: Number(currentPageIndex) });
+      setSwapAcrossPagesActive(true);
+      toast.info('Swap mode: go to the page you want to swap with and click "Swap pages" again.');
+      return;
+    }
+
+    // Second click: if user is still on the same page, treat as cancel.
+    if (!swapAcrossPagesSource || swapAcrossPagesSource.pageIndex === Number(currentPageIndex)) {
+      setSwapAcrossPagesSource(null);
+      setSwapAcrossPagesActive(false);
+      return;
+    }
+
+    // Second click on a different page: perform a page↔page swap (keeps multi-page rhymes intact).
+    void (async () => {
+      try {
+        setSwapAcrossPagesPending(true);
+        const token = await getIdToken?.();
+        await axios.patch(
+          `${API}/rhymes/swap-pages/${school?.school_id}/${grade}`,
+          {
+            a_page_index: swapAcrossPagesSource.pageIndex,
+            b_page_index: Number(currentPageIndex)
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        toast.success('Swapped pages.');
+        await fetchSelectedRhymes({ preferredPageIndex: Number(currentPageIndex) });
+      } catch (error) {
+        console.error('Error swapping pages:', error);
+        toast.error('Unable to swap pages.');
+      } finally {
+        setSwapAcrossPagesPending(false);
+        setSwapAcrossPagesSource(null);
+        setSwapAcrossPagesActive(false);
+      }
+    })();
+  };
+
+  // Note: "swap across pages" now swaps entire pages (or multi-page blocks),
+  // not half-page slots. The old half-slot swapping code has been removed.
+  
   useEffect(() => {
+   
     selectedRhymesRef.current = Array.isArray(selectedRhymes) ? selectedRhymes : [];
   }, [selectedRhymes]);
-
-  const cartoonHeadCodeSet = useMemo(() => {
-    const codes = new Set<string>();
-    const appendFromGroups = (groups) => {
-      if (!groups || typeof groups !== 'object') {
-        return;
-      }
-      Object.values(groups).forEach((group: any) => {
-        if (!Array.isArray(group)) {
-          return;
-        }
-        group.forEach((item: any) => {
-          if (!item?.requires_cartoon_head) {
-            return;
-          }
-          const normalized = typeof item.code === 'string' ? item.code.trim().toLowerCase() : '';
-          if (normalized) {
-            codes.add(normalized);
-          }
-        });
-      });
-    };
-
-    appendFromGroups(availableRhymes);
-    appendFromGroups(reusableRhymes);
+  
+  const physicalPageMetrics = useMemo(() => {
+    const usageMap = new Map<number, { top: boolean; bottom: boolean }>();
+    let highestIndex = -1;
 
     if (Array.isArray(selectedRhymes)) {
-      selectedRhymes.forEach((item: any) => {
-        if (!item?.requires_cartoon_head) {
+      selectedRhymes.forEach((selection: any) => {
+        if (!selection) return;
+        const startIndex = Number(selection?.page_index);
+        if (!Number.isFinite(startIndex) || startIndex < 0) return;
+
+        const rawPages = selection?.pages;
+        const parsedPages =
+          typeof rawPages === 'number'
+            ? (Number.isFinite(rawPages) ? rawPages : null)
+            : typeof rawPages === 'string'
+              ? (() => {
+                  const trimmed = rawPages.trim();
+                  if (!trimmed) return null;
+                  const value = Number(trimmed);
+                  return Number.isFinite(value) ? value : null;
+                })()
+              : null;
+
+        const pagesValue = parsedPages && parsedPages > 0 ? parsedPages : 1;
+
+        if (pagesValue === 0.5) {
+          const entry = usageMap.get(startIndex) || { top: false, bottom: false };
+          const pos = (selection?.position ?? 'top').toString().trim().toLowerCase();
+          const slot = pos === 'bottom' ? 'bottom' : 'top';
+          entry[slot] = true;
+          usageMap.set(startIndex, entry);
+          highestIndex = Math.max(highestIndex, startIndex);
           return;
         }
-        const normalized = typeof item.code === 'string' ? item.code.trim().toLowerCase() : '';
-        if (normalized) {
-          codes.add(normalized);
+
+        const totalPages = pagesValue > 1 ? Math.max(1, Math.round(pagesValue)) : 1;
+        for (let offset = 0; offset < totalPages && startIndex + offset < MAX_PAGES_PER_GRADE; offset += 1) {
+          const index = startIndex + offset;
+          const entry = usageMap.get(index) || { top: false, bottom: false };
+          entry.top = true;
+          entry.bottom = true;
+          usageMap.set(index, entry);
+          highestIndex = Math.max(highestIndex, index);
         }
       });
     }
 
-    return codes;
-  }, [availableRhymes, reusableRhymes, selectedRhymes]);
+    const physicalPages = highestIndex >= 0 ? Math.min(highestIndex + 1, MAX_PAGES_PER_GRADE) : 0;
 
-  useEffect(() => {
-    svgCacheRef.current.clear();
-  }, [cartoonHeadCodeSet]);
+    let hasBlanks = false;
+    if (highestIndex >= 0) {
+      for (let index = 0; index <= highestIndex; index += 1) {
+        const entry = usageMap.get(index);
+        if (!entry || !entry.top || !entry.bottom) {
+          hasBlanks = true;
+          break;
+        }
+      }
+    }
+
+    let filledPages = 0;
+    if (highestIndex >= 0) {
+      for (let index = 0; index <= highestIndex; index += 1) {
+        const entry = usageMap.get(index);
+        if (!entry) continue;
+        if (entry.top && entry.bottom) {
+          filledPages += 1;
+        } else if (entry.top || entry.bottom) {
+          filledPages += 0.5;
+        }
+      }
+    }
+
+    return { usageMap, highestIndex, physicalPages, filledPages, hasBlanks };
+  }, [MAX_PAGES_PER_GRADE, selectedRhymes]);
+
+  const selectedPages = physicalPageMetrics.physicalPages;
+
+  const isSubmitMilestone =
+    selectedPages >= 24 &&
+    selectedPages % 4 === 0 &&
+    selectedPages <= MAX_PAGES_PER_GRADE;
+
+  const canSaveAndSubmit =
+    selectedPages >= 24 &&
+    selectedPages % 4 === 0 &&
+    selectedPages <= MAX_PAGES_PER_GRADE;
+  //calculating page hint for  prompting user.
+    const pageCountHint = (() => {
+    if (selectedPages <= 0) return null;
+
+    const minPages = 24;
+    const nearMinThreshold = 20;
+    const nearMaxThreshold = 4;
+
+    if (selectedPages < minPages) {
+      if (selectedPages < nearMinThreshold) return null;
+      const needed = Math.ceil(minPages - selectedPages);
+      return `Add ${needed} page${needed === 1 ? '' : 's'} to reach ${minPages} and submit.`;
+    }
+
+    const remaining = Math.max(0, MAX_PAGES_PER_GRADE - selectedPages);
+    if (remaining > 0 && remaining <= nearMaxThreshold) {
+      return `Only ${remaining} page${remaining === 1 ? '' : 's'} left (maximum ${MAX_PAGES_PER_GRADE}).`;
+    }
+
+    return null;
+  })();
+  // console.log(canSaveAndSubmit)
+  const normalizeAssetSubject = useCallback((value: unknown) => {
+    return normalizeLanguageKey(value);
+  }, []);
+  // console.log(selectedPages)
+  const buildRhymePreviewUrls = useCallback(
+    (
+      rhymeLike: any,
+      options?: { bucket?: 'personalized' | 'nonPersonalized'; cartoonVariantForGrade?: boolean }
+    ): string[] => {
+      const code = (rhymeLike?.code || rhymeLike?.rhyme_code || '').toString().trim();
+      if (!code) {
+        return [];
+      }
+
+      const subject = normalizeAssetSubject(rhymeLike?.subject);
+      const rawPages = rhymeLike?.pages;
+      const parsedPages =
+        typeof rawPages === 'number'
+          ? (Number.isFinite(rawPages) ? rawPages : null)
+          : typeof rawPages === 'string'
+            ? (() => {
+                const trimmed = rawPages.trim();
+                if (!trimmed) return null;
+                const value = Number(trimmed);
+                return Number.isFinite(value) ? value : null;
+              })()
+            : null;
+      const normalizedPages =
+        parsedPages && Number.isFinite(parsedPages) && parsedPages > 0 ? parsedPages : 1;
+      const pageCount = normalizedPages > 1 ? Math.max(1, Math.round(normalizedPages)) : 1;
+
+      const isPersonalizedBucket = options?.bucket === 'personalized';
+      const useCartoonVariant =
+        typeof options?.cartoonVariantForGrade === 'boolean'
+          ? options.cartoonVariantForGrade
+          : useCartoonVariantForGrade;
+      const bucketFolder = isPersonalizedBucket ? 'personalised' : 'non_personalised';
+
+      const parts = [PUBLIC_URL_PREFIX,"rhymes", subject, bucketFolder];
+      if (isPersonalizedBucket) {
+        parts.push(useCartoonVariant ? 'cartoon' : 'non_cartoon');
+      }
+
+      const base = parts.join('/').replace(/\/+/g, '/');
+
+      if (pageCount > 1) {
+        return Array.from({ length: pageCount }, (_, idx) =>
+          normalizeAssetUrl(`${base}/${code}/${idx + 1}.png`)
+        );
+      }
+
+      return [normalizeAssetUrl(`${base}/${code}.png`)];
+    },
+    [grade, normalizeAssetSubject, useCartoonVariantForGrade]
+  );
+  
+  const applyGradePersonalisation = useCallback((value: 'yes' | 'no' | null) => {
+    gradePersonalisationRef.current = value;
+    setGradePersonalisationValue(value);
+    setUseCartoonVariantForGrade(value === 'no');
+  }, []);
+
+  const fetchGradePersonalisationValue = useCallback(async () => {
+    if (!school?.school_id || !grade || !user) {
+      applyGradePersonalisation(null);
+      return null;
+    }
+
+    try {
+      const token = await getIdToken?.();
+      if (!token) {
+        return null;
+      }
+      const headers = { Authorization: `Bearer ${token}` };
+      const response = await axios.get(`${API}/book-selections/${school.school_id}`, {
+        headers,
+        validateStatus: () => true,
+      });
+
+      if (response.status >= 400) {
+        return null;
+      }
+      const classes = Array.isArray(response.data?.classes) ? response.data.classes : [];
+      const normalizedGrade = grade.toString().trim().toLowerCase();
+      const match = classes.find((entry: any) => {
+        const raw = (entry?.class || entry?.doc_id || '').toString().trim().toLowerCase();
+        return raw === normalizedGrade;
+      });
+      const value = normalizeGradePersonalisationValue(
+        match?.personalisation ?? match?.personalization
+      );
+      applyGradePersonalisation(value);
+      return value;
+    } catch (error) {
+      console.warn('Unable to load grade personalisation value', error);
+      return null;
+    }
+  }, [API, applyGradePersonalisation, getIdToken, grade, school?.school_id, user]);
+  
 
   const ensureEditable = useCallback(() => {
     if (isReadOnly) {
@@ -1677,272 +2613,92 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     return true;
   }, [isReadOnly, isFrozen]);
 
-  const normalizeSvgPages = useCallback((svgContent) => {
-    if (Array.isArray(svgContent)) {
-      return svgContent.filter((page) => typeof page === 'string' && page.trim().length > 0);
-    }
+  // const applyCartoonHeadToSvg = useCallback((svgMarkup) => {
+  //   if (typeof svgMarkup !== 'string' || svgMarkup.trim().length === 0) {
+  //     return svgMarkup;
+  //   }
 
-    if (typeof svgContent === 'string' && svgContent.trim().length > 0) {
-      return [svgContent];
-    }
+  //   if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
+  //     return svgMarkup;
+  //   }
 
-    return [];
-  }, []);
+  //   try {
+  //     const parser = new window.DOMParser();
+  //     const documentNode = parser.parseFromString(svgMarkup, 'image/svg+xml');
+  //     const svgElement = documentNode.documentElement;
+  //     if (!svgElement) {
+  //       return svgMarkup;
+  //     }
 
-  const shouldUseCartoonHead = useCallback(
-    (rhymeCode, explicitFlag?: boolean) => {
-      if (explicitFlag === true) {
-        return true;
-      }
-      const normalized = typeof rhymeCode === 'string' ? rhymeCode.trim().toLowerCase() : '';
-      if (!normalized) {
-        return false;
-      }
-      return cartoonHeadCodeSet.has(normalized);
-    },
-    [cartoonHeadCodeSet]
-  );
+  //     const cartoonDataUri =
+  //       'data:image/svg+xml;utf8,' +
+  //       encodeURIComponent(
+  //         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">' +
+  //         '<circle cx="40" cy="40" r="34" fill="#FFD166" stroke="#EF476F" stroke-width="4"/>' +
+  //         '<circle cx="28" cy="33" r="4" fill="#073B4C"/>' +
+  //         '<circle cx="52" cy="33" r="4" fill="#073B4C"/>' +
+  //         '<path d="M24 50 Q40 64 56 50" stroke="#073B4C" stroke-width="5" fill="none" stroke-linecap="round"/>' +
+  //         '</svg>'
+  //       );
 
-  const applyCartoonHeadToSvg = useCallback((svgMarkup) => {
-    if (typeof svgMarkup !== 'string' || svgMarkup.trim().length === 0) {
-      return svgMarkup;
-    }
+  //     let replaced = false;
+  //     const selectors = [
+  //       'image[id*="head" i]',
+  //       'image[class*="head" i]',
+  //       'image[id*="face" i]',
+  //       'image[class*="face" i]',
+  //       'image[href*="head" i]',
+  //       'image[href*="face" i]',
+  //       'image[src*="head" i]',
+  //       'image[src*="face" i]',
+  //       'image[xlink\\:href*="head" i]',
+  //       'image[xlink\\:href*="face" i]',
+  //       'img[id*="head" i]',
+  //       'img[class*="head" i]',
+  //       'img[id*="face" i]',
+  //       'img[class*="face" i]',
+  //       'img[src*="head" i]',
+  //       'img[src*="face" i]'
+  //     ];
+  //     const imageNodes = documentNode.querySelectorAll(selectors.join(','));
+  //     imageNodes.forEach((node) => {
+  //       node.setAttribute('href', cartoonDataUri);
+  //       node.setAttribute('xlink:href', cartoonDataUri);
+  //       node.setAttribute('src', cartoonDataUri);
+  //       node.setAttribute('data-href', cartoonDataUri);
+  //       replaced = true;
+  //     });
 
-    if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
-      return svgMarkup;
-    }
+  //     if (!replaced) {
+  //       const badge = documentNode.createElementNS('http://www.w3.org/2000/svg', 'g');
+  //       badge.setAttribute('data-cartoon-head', 'true');
+  //       badge.innerHTML =
+  //         '<circle cx="44" cy="44" r="28" fill="#FFD166" stroke="#EF476F" stroke-width="4"/>' +
+  //         '<circle cx="34" cy="38" r="3.5" fill="#073B4C"/>' +
+  //         '<circle cx="54" cy="38" r="3.5" fill="#073B4C"/>' +
+  //         '<path d="M31 51 Q44 61 57 51" stroke="#073B4C" stroke-width="4" fill="none" stroke-linecap="round"/>';
 
-    try {
-      const parser = new window.DOMParser();
-      const documentNode = parser.parseFromString(svgMarkup, 'image/svg+xml');
-      const svgElement = documentNode.documentElement;
-      if (!svgElement) {
-        return svgMarkup;
-      }
+  //       const viewBox = svgElement.getAttribute('viewBox');
+  //       let x = 12;
+  //       let y = 12;
+  //       if (viewBox) {
+  //         const values = viewBox.split(/[\s,]+/).map((entry) => Number(entry));
+  //         if (values.length >= 4 && values.every((entry) => Number.isFinite(entry))) {
+  //           x = values[0] + 10;
+  //           y = values[1] + 10;
+  //         }
+  //       }
+  //       badge.setAttribute('transform', `translate(${x}, ${y}) scale(0.7)`);
+  //       svgElement.appendChild(badge);
+  //     }
 
-      const cartoonDataUri =
-        'data:image/svg+xml;utf8,' +
-        encodeURIComponent(
-          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">' +
-          '<circle cx="40" cy="40" r="34" fill="#FFD166" stroke="#EF476F" stroke-width="4"/>' +
-          '<circle cx="28" cy="33" r="4" fill="#073B4C"/>' +
-          '<circle cx="52" cy="33" r="4" fill="#073B4C"/>' +
-          '<path d="M24 50 Q40 64 56 50" stroke="#073B4C" stroke-width="5" fill="none" stroke-linecap="round"/>' +
-          '</svg>'
-        );
-
-      let replaced = false;
-      const selectors = [
-        'image[id*="head" i]',
-        'image[class*="head" i]',
-        'image[id*="face" i]',
-        'image[class*="face" i]',
-        'image[href*="head" i]',
-        'image[href*="face" i]',
-        'image[xlink\\:href*="head" i]',
-        'image[xlink\\:href*="face" i]'
-      ];
-      const imageNodes = documentNode.querySelectorAll(selectors.join(','));
-      imageNodes.forEach((node) => {
-        node.setAttribute('href', cartoonDataUri);
-        node.setAttribute('xlink:href', cartoonDataUri);
-        replaced = true;
-      });
-
-      if (!replaced) {
-        const badge = documentNode.createElementNS('http://www.w3.org/2000/svg', 'g');
-        badge.setAttribute('data-cartoon-head', 'true');
-        badge.innerHTML =
-          '<circle cx="44" cy="44" r="28" fill="#FFD166" stroke="#EF476F" stroke-width="4"/>' +
-          '<circle cx="34" cy="38" r="3.5" fill="#073B4C"/>' +
-          '<circle cx="54" cy="38" r="3.5" fill="#073B4C"/>' +
-          '<path d="M31 51 Q44 61 57 51" stroke="#073B4C" stroke-width="4" fill="none" stroke-linecap="round"/>';
-
-        const viewBox = svgElement.getAttribute('viewBox');
-        let x = 12;
-        let y = 12;
-        if (viewBox) {
-          const values = viewBox.split(/[\s,]+/).map((entry) => Number(entry));
-          if (values.length >= 4 && values.every((entry) => Number.isFinite(entry))) {
-            x = values[0] + 10;
-            y = values[1] + 10;
-          }
-        }
-        badge.setAttribute('transform', `translate(${x}, ${y}) scale(0.7)`);
-        svgElement.appendChild(badge);
-      }
-
-      const serialized = new window.XMLSerializer().serializeToString(svgElement);
-      return serialized || svgMarkup;
-    } catch (error) {
-      console.error('Failed to apply cartoon-head transformation:', error);
-      return svgMarkup;
-    }
-  }, []);
-
-  const extractImageUrlsFromSvg = useCallback((svgContent) => {
-    const pages = normalizeSvgPages(svgContent);
-    if (pages.length === 0) {
-      return [];
-    }
-
-    if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
-      return [];
-    }
-
-    try {
-      const parser = new window.DOMParser();
-      const urls = new Set();
-
-      pages.forEach((page) => {
-        const doc = parser.parseFromString(page, 'image/svg+xml');
-        const imageNodes = doc.querySelectorAll('image, img');
-
-        imageNodes.forEach((node) => {
-          if (!node) {
-            return;
-          }
-
-          const candidates = [
-            node.getAttribute('href'),
-            node.getAttribute('xlink:href'),
-            node.getAttribute('data-href'),
-            node.getAttribute('src')
-          ];
-
-          candidates.forEach((candidate) => {
-            if (typeof candidate !== 'string') {
-              return;
-            }
-
-            const trimmed = candidate.trim();
-
-            if (!trimmed || /^data:/i.test(trimmed)) {
-              return;
-            }
-
-            if (trimmed.startsWith('//') && typeof window !== 'undefined' && window.location?.protocol) {
-              urls.add(`${window.location.protocol}${trimmed}`);
-              return;
-            }
-
-            if (/^https?:/i.test(trimmed)) {
-              urls.add(trimmed);
-            }
-          });
-        });
-      });
-
-      return Array.from(urls);
-    } catch (error) {
-      console.error('Error parsing SVG for image asset references:', error);
-      return [];
-    }
-  }, [normalizeSvgPages]);
-
-  const prefetchImageAssets = useCallback(
-    async (svgMarkup) => {
-      const pages = normalizeSvgPages(svgMarkup);
-      if (pages.length === 0) {
-        return;
-      }
-
-      const assetUrls = extractImageUrlsFromSvg(pages);
-      if (!assetUrls.length) {
-        return;
-      }
-
-      const tasks = assetUrls
-        .map((url) => {
-          if (imageAssetCacheRef.current.has(url)) {
-            return null;
-          }
-
-          if (imageInFlightRef.current.has(url)) {
-            return imageInFlightRef.current.get(url);
-          }
-
-          const request = axios
-            .get(url, { responseType: 'blob' })
-            .then(() => {
-              imageAssetCacheRef.current.add(url);
-            })
-            .catch((error) => {
-              console.error('Error prefetching image asset:', url, error);
-            })
-            .finally(() => {
-              imageInFlightRef.current.delete(url);
-            });
-
-          imageInFlightRef.current.set(url, request);
-          return request;
-        })
-        .filter(Boolean);
-
-      if (tasks.length > 0) {
-        await Promise.allSettled(tasks);
-      }
-    },
-    [extractImageUrlsFromSvg]
-  );
-
-  const fetchSvgForRhyme = useCallback(
-    async (rhymeCode) => {
-      const code = typeof rhymeCode === 'string' ? rhymeCode : rhymeCode?.code;
-
-      if (!code) {
-        return null;
-      }
-
-      if (svgCacheRef.current.has(code)) {
-        const cached = svgCacheRef.current.get(code);
-        if (cached) {
-          await prefetchImageAssets(cached);
-        }
-        return cached;
-      }
-
-      if (svgInFlightRef.current.has(code)) {
-        const pending = await svgInFlightRef.current.get(code);
-        if (pending) {
-          await prefetchImageAssets(pending);
-        }
-        return pending;
-      }
-
-      const requestPromise = axios
-        .get(`${API}/rhymes/svg/${code}`, { responseType: 'arraybuffer' })
-        .then(async (response) => {
-          const decoded = decodeSvgPayload(response.data, response.headers);
-          const pages = Array.isArray(decoded?.pages) ? decoded.pages : decoded;
-          const prepared = await prepareRhymeSvgPages(pages, code, API);
-          if (!shouldUseCartoonHead(code)) {
-            return prepared;
-          }
-          return prepared.map((page) => applyCartoonHeadToSvg(page));
-        })
-        .catch((error) => {
-          console.error('Error fetching rhyme SVG:', error);
-          return null;
-        })
-        .finally(() => {
-          svgInFlightRef.current.delete(code);
-        });
-
-      svgInFlightRef.current.set(code, requestPromise);
-
-      const svgContent = await requestPromise;
-      const normalizedPages = normalizeSvgPages(svgContent);
-
-      if (normalizedPages.length > 0) {
-        svgCacheRef.current.set(code, normalizedPages);
-        await prefetchImageAssets(normalizedPages);
-      }
-
-      return normalizedPages;
-    },
-    [applyCartoonHeadToSvg, normalizeSvgPages, prefetchImageAssets, shouldUseCartoonHead]
-  );
+  //     const serialized = new window.XMLSerializer().serializeToString(svgElement);
+  //     return serialized || svgMarkup;
+  //   } catch (error) {
+  //     console.error('Failed to apply cartoon-head transformation:', error);
+  //     return svgMarkup;
+  //   }
+  // }, []);
 
   const ensurePageAssets = useCallback(
     async (pageIndex, baseSelections) => {
@@ -1962,8 +2718,12 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
       );
 
       const missingRhymes = rhymesForPage.filter((rhyme) => {
-        const pages = normalizeSvgPages(rhyme?.svgContent);
-        return pages.length === 0;
+        const urls = Array.isArray(rhyme?.imageUrls) ? rhyme.imageUrls : [];
+        const hasUrls = urls.length > 0;
+        const isLoaded = Boolean(rhyme?.imageLoaded);
+        const isFailed = Boolean(rhyme?.imageLoadFailed);
+        const isPending = Boolean(rhyme?.imageFetchPending);
+        return !isPending && !isLoaded && !isFailed && (hasUrls || typeof rhyme?.code === 'string');
       });
 
       if (missingRhymes.length === 0) {
@@ -1980,58 +2740,88 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
       }
 
       const fetchPromise = (async () => {
-        const results = await Promise.all(
-          missingRhymes.map(async (rhyme) => {
-            const svgContent = await fetchSvgForRhyme(rhyme.code);
-            return { code: rhyme.code, page_index: rhyme.page_index, svgContent };
-          })
-        );
-
-        const successful = results.filter((result) => {
-          const pages = normalizeSvgPages(result.svgContent);
-          return pages.length > 0;
-        });
-        const failed = results.filter((result) => {
-          const pages = normalizeSvgPages(result.svgContent);
-          return pages.length === 0;
-        });
-
-        if (successful.length === 0 && failed.length === 0) {
+        if (typeof window === 'undefined') {
           return;
         }
 
         setSelectedRhymes((prev) => {
           const prevArray = Array.isArray(prev) ? prev : [];
           const updated = prevArray.map((existing) => {
-            if (!existing) {
+            if (!existing) return existing;
+            if (Number(existing.page_index) !== normalizedPageIndex) {
               return existing;
             }
+            const shouldMarkPending = missingRhymes.some(
+              (rhyme) => rhyme?.code && rhyme.code === existing.code
+            );
+            if (!shouldMarkPending) {
+              return existing;
+            }
+            return {
+              ...existing,
+              imageFetchPending: true,
+              imageLoaded: false,
+              imageLoadFailed: false
+            };
+          });
+          selectedRhymesRef.current = updated;
+          return updated;
+        });
 
+        const results = await Promise.all(
+          missingRhymes.map(async (rhyme) => {
+            const gradePersonalisation = gradePersonalisationRef.current ?? gradePersonalisationValue;
+            const rhymeIsPersonalized = isPersonalizedValue(rhyme?.personalized);
+            const bucket = rhymeIsPersonalized ? 'personalized' : 'nonPersonalized';
+            const urls = Array.isArray(rhyme?.imageUrls) && rhyme.imageUrls.length > 0
+              ? rhyme.imageUrls
+              : buildRhymePreviewUrls(rhyme, {
+                  bucket,
+                  cartoonVariantForGrade: gradePersonalisation === 'no'
+                });
+            const firstUrl = urls[0] || '';
+
+            if (!firstUrl) {
+              return { code: rhyme?.code, page_index: rhyme?.page_index, urls, loaded: false, loadedUrl: '' };
+            }
+
+            const loaded = await new Promise<boolean>((resolve) => {
+              const probe = new Image();
+              probe.onload = () => resolve(true);
+              probe.onerror = () => resolve(false);
+              probe.src = firstUrl;
+            });
+
+            return { code: rhyme?.code, page_index: rhyme?.page_index, urls, loaded, loadedUrl: loaded ? firstUrl : '' };
+          })
+        );
+
+        setSelectedRhymes((prev) => {
+          const prevArray = Array.isArray(prev) ? prev : [];
+          const updated = prevArray.map((existing) => {
+            if (!existing) return existing;
             if (Number(existing.page_index) !== normalizedPageIndex) {
               return existing;
             }
 
-            const match = successful.find(
+            const match = results.find(
               (result) =>
                 result.code === existing.code &&
                 Number(result.page_index) === Number(existing.page_index)
             );
 
-            if (match) {
-              return { ...existing, svgContent: match.svgContent, svgFetchFailed: false };
+            if (!match) {
+              return existing;
             }
 
-            const failure = failed.find(
-              (result) =>
-                result.code === existing.code &&
-                Number(result.page_index) === Number(existing.page_index)
-            );
-
-            if (failure) {
-              return { ...existing, svgContent: '', svgFetchFailed: true };
-            }
-
-            return existing;
+            return {
+              ...existing,
+              imageUrls: Array.isArray(match.urls) ? match.urls : existing.imageUrls,
+              imageLoaded: Boolean(match.loaded),
+              imageLoadFailed: !match.loaded,
+              imageFetchPending: false,
+              imageLoadedUrl: match.loadedUrl || ''
+            };
           });
 
           selectedRhymesRef.current = updated;
@@ -2047,7 +2837,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
         pageFetchPromisesRef.current.delete(normalizedPageIndex);
       }
     },
-    [fetchSvgForRhyme]
+    [buildRhymePreviewUrls]
   );
 
   const normalizeSlot = (value, fallback = '') => {
@@ -2145,8 +2935,12 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
   };
 
   const computeNextAvailablePageInfoFromUsage = ({ usageMap, highestIndex }) => {
-    for (let index = 0; index < MAX_PAGES_PER_GRADE; index += 1) {
+    
+    
+    for (let index = 0; index <MAX_PAGES_PER_GRADE; index += 1) {
+      
       const entry = usageMap.get(index);
+    
       if (!entry) {
         return { index, hasCapacity: true, highestIndex };
       }
@@ -2159,62 +2953,189 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     return { index: fallbackIndex, hasCapacity: false, highestIndex };
   };
 
-  const computeNextAvailablePageInfo = (rhymesList = selectedRhymes) => {
-    const usage = computePageUsage(rhymesList);
-    const info = computeNextAvailablePageInfoFromUsage(usage);
-    return {
-      ...info,
-      lowestIndex: usage.lowestIndex
-    };
+  const computeBlankSlotsInSequenceFromUsage = ({ usageMap, highestIndex }) => {
+    
+    const normalizedHighest = Number.isFinite(highestIndex) ? highestIndex : -1;
+    if (normalizedHighest < 0) {
+      return [];
+    }
+
+    const blanks: Array<{ pageIndex: number; missing: Array<'top' | 'bottom'> }> = [];
+
+    for (let index = 0; index <= normalizedHighest; index += 1) {
+      const entry = usageMap.get(index);
+      if (!entry) {
+        blanks.push({ pageIndex: index, missing: ['top', 'bottom'] });
+        continue;
+      }
+
+      const missing: Array<'top' | 'bottom'> = [];
+      if (!entry.top) missing.push('top');
+      if (!entry.bottom) missing.push('bottom');
+      if (missing.length > 0) {
+        blanks.push({ pageIndex: index, missing });
+      }
+    }
+
+    return blanks;
   };
 
+  // const computeNextAvailablePageInfo = (rhymesList = selectedRhymes) => {
+  //   const usage = computePageUsage(rhymesList);
+  //   const info = computeNextAvailablePageInfoFromUsage(usage);
+  //   return {
+  //     ...info,
+  //     lowestIndex: usage.lowestIndex
+  //   };
+  // };
+   const updateFreezeFlag = useCallback(
+    (freeze: boolean) => {
+      if (typeof onRhymeFreezeChange === 'function') {
+        onRhymeFreezeChange(freeze);
+      }
+    },
+    [onRhymeFreezeChange]
+  );
+
+  const freezeStatusRequestKeyRef = useRef<string>('');
+  const freezeStatusInFlightRef = useRef<Promise<void> | null>(null);
+  const fetchfreezestatus = useCallback(async () => {
+    if (!user || !school?.school_id || !grade) {
+
+      return;
+    }
+
+    const requestKey = `${school.school_id}__${grade}`;
+    if (freezeStatusInFlightRef.current && freezeStatusRequestKeyRef.current === requestKey) {
+      await freezeStatusInFlightRef.current;
+      return;
+    }
+
+    freezeStatusRequestKeyRef.current = requestKey;
+
+    const run = (async () => {
+      try {
+        const token = await getIdToken?.();
+        
+        if (!token) {
+          throw new Error('Missing auth token');
+        }
+
+        const res = await axios.get(`${API}/rhymes/freeze/${school.school_id}/${grade}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.status >= 400) {
+          throw new Error(`Freeze status request failed (${res.status})`);
+        }
+
+        const payload = (res.data as any) || {};
+        const rawFreeze = payload?.freeze;
+        
+        
+        if (payload?.has_freeze_field){
+          setHasFreezeField(true)
+        }
+        
+
+        const normalizedFreeze =
+          rawFreeze === true ||
+          rawFreeze === 'true' ||
+          rawFreeze === 1 ||
+          rawFreeze === '1' ||
+          (typeof rawFreeze === 'string' && rawFreeze.trim().toLowerCase() === 'yes');
+
+        updateFreezeFlag(normalizedFreeze);
+      } catch (error) {
+        console.error(error);
+      }
+    })();
+
+    freezeStatusInFlightRef.current = run;
+    try {
+      await run;
+    } finally {
+      if (freezeStatusInFlightRef.current === run) {
+        freezeStatusInFlightRef.current = null;
+      }
+    }
+  }, [API, getIdToken, grade, school?.school_id, updateFreezeFlag, user]);
   const fetchAvailableRhymes = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/available/${school.school_id}/${grade}`);
+      const response = await axios.get(`${API}/rhymes/available/${school?.school_id}/${grade}`);
       setAvailableRhymes(response.data);
     } catch (error) {
       console.error('Error fetching available rhymes:', error);
     }
   };
 
+  const fetchRhymeSettings = async () => {
+    try {
+      const response = await axios.get(`${API}/rhymes/settings`);
+      setRhymeSettings(response.data);
+    } catch (error) {
+      console.error('Error fetching rhyme settings:', error);
+    }
+  };
+
   const fetchReusableRhymes = async () => {
     try {
-      const response = await axios.get(`${API}/rhymes/selected/other-grades/${school.school_id}/${grade}`);
+      const response = await axios.get(`${API}/rhymes/selected/other-grades/${school?.school_id}/${grade}`);
       setReusableRhymes(response.data);
     } catch (error) {
       console.error('Error fetching reusable rhymes:', error);
     }
   };
 
-  const fetchSelectedRhymes = async () => {
+  const fetchSelectedRhymes = async (options?: { preferredPageIndex?: number | null; gradePersonalisation?: 'yes' | 'no' | null }) => {
     try {
-      const response = await axios.get(`${API}/rhymes/selected/${school.school_id}`);
+      const response = await axios.get(`${API}/rhymes/selected/${school?.school_id}/${grade}`);
       const gradeSelections = response.data[grade] || [];
-
       const rhymesWithPlaceholders = gradeSelections.map((rhyme) => {
-        const normalizedPages = normalizeSvgPages(rhyme?.svgContent);
-        const sanitizedPages = normalizedPages
-          .map((page, index) => sanitizeRhymeSvgContent(page, index ? `${rhyme.code}-${index}` : rhyme.code))
-          .filter((page) => typeof page === 'string' && page.trim().length > 0);
-        const shouldCartoonize = shouldUseCartoonHead(rhyme?.code, rhyme?.requires_cartoon_head === true);
-        const finalPages = shouldCartoonize ? sanitizedPages.map((page) => applyCartoonHeadToSvg(page)) : sanitizedPages;
-        const existingContent = finalPages.length > 0 ? finalPages : null;
+        const gradePersonalisation =
+          options?.gradePersonalisation ?? gradePersonalisationRef.current ?? gradePersonalisationValue;
+        const rhymeIsPersonalized = isPersonalizedValue(rhyme?.personalized);
+        const bucket = rhymeIsPersonalized ? 'personalized' : 'nonPersonalized';
+        const cartoonVariantForGrade = gradePersonalisation === 'no';
+        const imageUrls = buildRhymePreviewUrls(rhyme, {
+          bucket,
+          cartoonVariantForGrade
+        });
 
         return {
           ...rhyme,
           position: rhyme.position || null,
-          svgContent: existingContent,
+          bucket,
+          imageUrls,
+          imageLoaded: false,
+          imageLoadedUrl: '',
+          imageFetchPending: false,
+          imageLoadFailed: false,
+          svgContent: null,
           svgFetchFailed: false
         };
       });
+    
 
       const sortedSelections = sortSelections(rhymesWithPlaceholders);
       const usage = computePageUsage(sortedSelections);
       const nextInfo = computeNextAvailablePageInfoFromUsage(usage);
       const hasExistingSelections = Array.isArray(sortedSelections) && sortedSelections.length > 0;
-      const initialIndex = hasExistingSelections && Number.isFinite(usage.lowestIndex) && usage.lowestIndex >= 0
-        ? usage.lowestIndex
-        : (Number.isFinite(nextInfo.index) ? nextInfo.index : 0);
+
+      const preferredIndexRaw =
+        options && Number.isFinite(options.preferredPageIndex) ? Number(options.preferredPageIndex) : null;
+      const highestIndex = Number.isFinite(usage.highestIndex) ? Number(usage.highestIndex) : -1;
+      const initialIndexCandidate =
+        preferredIndexRaw !== null
+          ? preferredIndexRaw
+          : (
+              hasExistingSelections && Number.isFinite(usage.lowestIndex) && usage.lowestIndex >= 0
+                ? usage.lowestIndex
+                : (Number.isFinite(nextInfo.index) ? nextInfo.index : 0)
+            );
+      const maxSelectionIndex = Math.max(0, highestIndex);
+      const initialIndex = preferredIndexRaw !== null
+        ? Math.max(0, Math.min(MAX_PAGES_PER_GRADE - 1, Math.min(initialIndexCandidate, maxSelectionIndex)))
+        : Math.max(0, Math.min(MAX_PAGES_PER_GRADE - 1, initialIndexCandidate));
 
       setSelectedRhymes(sortedSelections);
       selectedRhymesRef.current = sortedSelections;
@@ -2224,25 +3145,48 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
         try {
           await ensurePageAssets(initialIndex, sortedSelections);
         } catch (prefetchError) {
-          console.error('Error preloading initial rhyme SVGs:', prefetchError);
+          console.error('Error preloading initial rhyme images:', prefetchError);
         }
 
         const nextPageIndex = initialIndex + 1;
-        if (nextPageIndex < MAX_PAGES_PER_GRADE) {
+        if (nextPageIndex <= MAX_PAGES_PER_GRADE) {
           ensurePageAssets(nextPageIndex, sortedSelections).catch((prefetchError) => {
-            console.error('Error preloading upcoming rhyme SVGs:', prefetchError);
+            console.error('Error preloading upcoming rhyme images:', prefetchError);
           });
         }
       }
     } catch (error) {
       console.error('Error fetching selected rhymes:', error);
-    } finally {
-      setLoading(false);
+    }
+    finally{
+      setLoading(false)
     }
   };
 
+useEffect(() => {
+  if (loading) return;
+
+  if (!isFrozen) {
+    freezeToastShown.current = false;
+    return;
+  }
+
+  if (freezeToastShown.current) return;
+
+  toast.error('rhyme selections are approved and freezed contact admin for changes');
+  freezeToastShown.current = true;
+}, [isFrozen, loading]);
+
+ useEffect(()=>{
+ fetchfreezestatus()
+  
+
+ },[isFrozen])
   useEffect(() => {
-    if (!school?.school_id || !grade) {
+    // `fetchfreezestatus()` depends on the auth context (user + getIdToken). On a hard refresh,
+    // the first render can run before auth is hydrated; include `user` in deps so we re-run
+    // once auth is available and freeze state is fetched correctly.
+    if (!school?.school_id || !grade || !user) {
       setLoading(false);
       return;
     }
@@ -2251,156 +3195,472 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
 
     const loadRhymeData = async () => {
       try {
+        const gradePersonalisation = await fetchGradePersonalisationValue();
         await Promise.all([
+         fetchfreezestatus(),
+          fetchRhymeSettings(),
           fetchAvailableRhymes(),
           fetchReusableRhymes(),
-          fetchSelectedRhymes()
+          fetchSelectedRhymes({ gradePersonalisation })
+          
         ]);
+          
+        
       } catch (error) {
         console.error('Error loading rhyme data:', error);
         setLoading(false);
+      
       }
+
+      
+      
+      
     };
 
     void loadRhymeData();
-  }, [school?.school_id, grade]);
+  }, [fetchGradePersonalisationValue, grade, school?.school_id, user]);
 
+
+
+  const handleSaveAndSubmit = useCallback(async () => {
+    if (!school?.school_id) {
+      toast.error('School information is missing.');
+      return;
+    }
+    if (freezeActionPending) {
+      return;
+    }
+
+    if (selectedPages < 24) {
+      toast.error('Please select at least 24 pages before submitting.');
+      return;
+    }
+
+    if (selectedPages % 4 !== 0) {
+      const lower = Math.floor(selectedPages / 4) * 4;
+      const higher = Math.min(MAX_PAGES_PER_GRADE, Math.ceil(selectedPages / 4) * 4);
+      const targets = [lower, higher].filter((n) => n >= 24 && n <= MAX_PAGES_PER_GRADE);
+      const uniqueTargets = Array.from(new Set(targets)).sort((a, b) => a - b);
+      const suggestion =
+        uniqueTargets.length === 0
+          ? `Submit at 24/28/…/${MAX_PAGES_PER_GRADE} pages.`
+          : uniqueTargets.length === 1
+            ? `Submit at ${uniqueTargets[0]} pages.`
+            : `Submit at ${uniqueTargets.join(' or ')} pages.`;
+      toast.error(`${suggestion} Remove selections from the last page to reduce, or continue selecting to reach the next multiple of 4.`);
+      return;
+    }
+
+    const usage = computePageUsage(selectedRhymesRef.current);
+    const nextInfo = computeNextAvailablePageInfoFromUsage(usage);
+    const blanks = computeBlankSlotsInSequenceFromUsage(usage);
+
+    if (blanks.length > 0) {
+      submitBlankRedirectToastShown.current = false;
+      setSubmitBlankRedirectActive(true);
+      const formatted = blanks
+        .slice(0, 6)
+        .map((blank) => `${blank.pageIndex + 1}`)
+        .join(', ');
+      const suffix = blanks.length > 6 ? '…' : '';
+      toast.error(`Please select rhymes for page no: ${formatted}${suffix}`);
+
+      const firstBlankIndex = blanks[0].pageIndex;
+      if (Number.isFinite(firstBlankIndex) && firstBlankIndex >= 0) {
+        setCurrentPageIndex(firstBlankIndex);
+        ensurePageAssets(firstBlankIndex, selectedRhymesRef.current).catch((assetError) => {
+          console.error('Error loading rhyme images for page:', assetError);
+        });
+      }
+      return;
+    }
+    
+    if (submitBlankRedirectActive) {
+      setSubmitBlankRedirectActive(false);
+    }
+
+    try {
+      setFreezeActionPending('freeze');
+      const token = await getIdToken?.();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const response = await axios.patch(
+        `${API}/rhymes/freeze/${school.school_id}/${grade}`,
+        {
+          freeze: true,
+          updated_by: user?.uid,
+          updated_by_email: user?.email,
+        },
+        { headers, validateStatus: () => true }
+      );
+
+      if (response.status >= 400) {
+        toast.error('Unable to freeze selections.');
+        return;
+      }
+        
+      updateFreezeFlag(true);
+      // toast.info("selections are approved and freezed. contact admin for further changes")
+    } catch (error) {
+      console.error('Error freezing selections:', error);
+      toast.error('Unable to freeze selections. Please try again.');
+    } finally {
+      setFreezeActionPending(null);
+    }
+  }, [API, MAX_PAGES_PER_GRADE, ensurePageAssets, freezeActionPending, getIdToken, school?.school_id, selectedPages, updateFreezeFlag, user?.email, user?.uid]);
+
+  const handleUnfreeze = useCallback(async () => {
+    if (!school?.school_id) {
+      toast.error('School information is missing.');
+      return;
+    }
+    if (freezeActionPending) {
+      return;
+    }
+
+    try {
+      setFreezeActionPending('unfreeze');
+      const token = await getIdToken?.();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const response = await axios.patch(
+        `${API}/rhymes/freeze/${school.school_id}/${grade}`,
+        {
+          freeze: false,
+          updated_by: user?.uid,
+          updated_by_email: user?.email,
+        },
+        { headers, validateStatus: () => true }
+      );
+
+      if (response.status >= 400) {
+        toast.error('Unable to unfreeze selections.');
+        return;
+      }
+
+      updateFreezeFlag(false);
+    } catch (error) {
+      console.error('Error unfreezing selections:', error);
+      toast.error('Unable to unfreeze selections. Please try again.');
+    } finally {
+      setFreezeActionPending(null);
+    }
+  }, [API, freezeActionPending, getIdToken, school?.school_id, updateFreezeFlag, user?.email, user?.uid]);
+  
+  const handleReplaceRhyme = (rhyme, position) => {
+    if (!ensureEditable()) {
+      return;
+    }
+    if (!rhyme) {
+      return;
+    }
+    const normalized = normalizeSlot(position, '');
+    pendingPositionRef.current = normalized ? (normalized as 'top' | 'bottom') : null;
+    setCurrentPosition(position);
+    setShowTreeMenu(true);
+    setShowReusable(false);
+    
+  };
   const handleAddRhyme = (position) => {
     if (!ensureEditable()) {
       return;
     }
+    const normalized = normalizeSlot(position, '');
+    pendingPositionRef.current = normalized ? (normalized as 'top' | 'bottom') : null;
     setCurrentPosition(position);
     setShowTreeMenu(true);
     setShowReusable(false);
   };
 
-  const computeRemovalsForSelection = ({ selections, pageIndex, normalizedPosition, newPages }) => {
+  const computeRemovalsForSelection = ({ selections, pageIndex, normalizedPosition, newPages, endIndex }) => {
     if (!Array.isArray(selections) || selections.length === 0) {
       return [];
     }
 
+    const startIndex = Number(pageIndex);
+    const lastIndex = Number.isFinite(endIndex) ? Number(endIndex) : startIndex;
+
     return selections.filter(existing => {
       if (!existing) return false;
-      if (Number(existing.page_index) !== Number(pageIndex)) {
-        return false;
-      }
+      const existingStart = Number(existing.page_index);
+      if (!Number.isFinite(existingStart)) return false;
 
       const existingPages = parsePagesValue(existing.pages) ?? 1;
 
       if (newPages > 0.5) {
-        return true;
+        return existingStart >= startIndex && existingStart <= lastIndex;
       }
-    
+
+      if (existingStart !== startIndex) {
+        return false;
+      }
+
       if (existingPages > 0.5) {
         return true;
       }
 
-      const existingPosition = normalizeSlot(existing.position, 'top');
-
-      if (existingPosition) {
-        return existingPosition === normalizedPosition;
-      }
-
-      return normalizedPosition === 'top';
+      const existingPosition = normalizeSlot(existing.position, 'top') || 'top';
+      return existingPosition === normalizedPosition;
     });
   };
 
-  const handleRhymeSelect = async (rhyme) => {
+  const handleRhymeSelect = async (rhyme: TreeMenuRhyme, options?: { bucket?: 'personalized' | 'nonPersonalized' }) => {
     if (!ensureEditable()) {
       setShowTreeMenu(false);
+      pendingPositionRef.current = null;
       return;
     }
+    const operationId = (rhymeSelectOpRef.current += 1);
     try {
       const pageIndex = currentPageIndex;
       const prevArray = Array.isArray(selectedRhymes) ? selectedRhymes : [];
       const pagesValue = parsePagesValue(rhyme?.pages) ?? 1;
+      const totalPages = pagesValue && pagesValue > 1 ? Math.max(1, Math.round(pagesValue)) : 1;
+      const positionContext = pendingPositionRef.current ?? currentPosition;
+
+      // Close the menu immediately to avoid slot intent races while async work
+      // (network + image probing) completes.
+      if (rhymeSelectOpRef.current === operationId) {
+        setShowTreeMenu(false);
+        setShowReusable(false);
+        setCurrentPosition(null);
+        pendingPositionRef.current = null;
+      }
       const normalizedPosition = pagesValue === 0.5
-        ? normalizeSlot(currentPosition, 'top') || 'top'
+        ? normalizeSlot(positionContext, 'top') || 'top'
         : 'top';
 
+      const normalizedSlot = normalizeSlot(positionContext, 'top') || 'top';
+      if (normalizedSlot === 'bottom' && pagesValue !== 0.5) {
+        toast.error('Bottom slot supports only half-page rhymes.');
+        return;
+      }
+
+      const numericPageIndex = Number(pageIndex);
+      if (!Number.isFinite(numericPageIndex) || numericPageIndex < 0) {
+        setShowTreeMenu(false);
+        setCurrentPosition(null);
+        pendingPositionRef.current = null;
+        return;
+      }
+      // console.log(numericPageIndex)
+
+      if (numericPageIndex >= MAX_PAGES_PER_GRADE) {
+        toast.error(`you can select up to  maximum of ${MAX_PAGES_PER_GRADE} pages`);
+        setShowTreeMenu(false);
+        setShowReusable(false);
+        setCurrentPosition(null);
+        pendingPositionRef.current = null;
+        return;
+      }
+
+      const usageBefore = computePageUsage(prevArray);
+      const nextInfoBefore = computeNextAvailablePageInfoFromUsage(usageBefore);
+     
+      const firstBlankBefore = Number(nextInfoBefore?.index);
+      const highestBefore = Number(nextInfoBefore?.highestIndex);
+      const hasEarlierBlankBefore =
+        Number.isFinite(firstBlankBefore) &&
+        Number.isFinite(highestBefore) &&
+        firstBlankBefore <= highestBefore;
+
+      const endIndex = pagesValue > 0.5 ? numericPageIndex + totalPages - 1 : numericPageIndex;
+
+      if (pagesValue > 0.5) {
+        const hasHalfOnPage = prevArray.some((existing) => {
+          if (!existing) return false;
+          if (Number(existing.page_index) !== numericPageIndex) return false;
+          return parsePagesValue(existing.pages) === 0.5;
+        });
+
+        if (hasHalfOnPage) {
+          toast.error('Remove the half-page rhymes first before selecting a full-page rhyme.');
+          setShowTreeMenu(false);
+          setShowReusable(false);
+          setCurrentPosition(null);
+          pendingPositionRef.current = null;
+          return;
+        }
+      }
+
+      if (pagesValue > 0.5) {
+        if (!Number.isFinite(endIndex) || endIndex >= MAX_PAGES_PER_GRADE) {
+          toast.error(
+            `This rhyme accommodates ${totalPages} pages. Kindly remove subsequent rhyme(s) to accommodate this rhyme.`
+          );
+          setShowTreeMenu(false);
+          setShowReusable(false);
+          setCurrentPosition(null);
+          pendingPositionRef.current = null;
+          return;
+        }
+
+        // Allow users to leave gaps while building selections.
+        // Gaps are handled via Save/Submit validation and page-count gating.
+      }
+
+      // console.log(prevArray)
       const removals = computeRemovalsForSelection({
         selections: prevArray,
         pageIndex,
         normalizedPosition,
-        newPages: pagesValue
+        newPages: pagesValue,
+        endIndex
       });
 
       const filtered = prevArray.filter(existing => !removals.includes(existing));
+      const isReplacement = removals.length > 0;
 
+      const overlapsExistingMultiPage = filtered.some((existing) => {
+        if (!existing) return false;
+        const existingStart = Number(existing.page_index);
+        if (!Number.isFinite(existingStart)) return false;
+
+        const existingPagesValue = parsePagesValue(existing.pages) ?? 1;
+        const existingTotalPages =
+          existingPagesValue && existingPagesValue > 1
+            ? Math.max(1, Math.round(existingPagesValue))
+            : 1;
+
+        if (existingTotalPages <= 1) return false;
+
+        const existingEnd = existingStart + existingTotalPages - 1;
+        return existingStart <= endIndex && existingEnd >= numericPageIndex;
+      });
+
+      if (overlapsExistingMultiPage) {
+        toast.error('Selection overlaps a multi-page rhyme. Replace it from the first page.');
+        setShowTreeMenu(false);
+        setShowReusable(false);
+        setCurrentPosition(null);
+        pendingPositionRef.current = null;
+        return;
+      }
+
+      if (pagesValue > 0.5) {
+        const partiallyCovered = prevArray.find((existing) => {
+          if (!existing) return false;
+          const existingStart = Number(existing.page_index);
+          if (!Number.isFinite(existingStart)) return false;
+          if (existingStart <= numericPageIndex || existingStart > endIndex) return false;
+
+          const existingPagesValue = parsePagesValue(existing.pages) ?? 1;
+          const existingTotalPages =
+            existingPagesValue && existingPagesValue > 1
+              ? Math.max(1, Math.round(existingPagesValue))
+              : 1;
+
+          if (existingTotalPages <= 1) return false;
+
+          const existingEnd = existingStart + existingTotalPages - 1;
+          return existingEnd > endIndex;
+        });
+
+        if (partiallyCovered) {
+          toast.error(
+            `This rhyme accommodates ${totalPages} pages. Kindly remove subsequent rhyme(s) to accommodate this rhyme.`
+          );
+          setShowTreeMenu(false);
+          setShowReusable(false);
+          setCurrentPosition(null);
+          pendingPositionRef.current = null;
+          return;
+        }
+      }
+      /*
+        const numericPageIndex = Number(pageIndex);
+        const endIndex = Number.isFinite(numericPageIndex)
+          ? numericPageIndex + totalPages - 1
+          : numericPageIndex;
+        console.log(endIndex)
+        const hasOverflow = Number.isFinite(endIndex) && endIndex >= MAX_PAGES_PER_GRADE;
+        const firstBlockingIndex = Number.isFinite(numericPageIndex)
+          ? numericPageIndex + 1
+          : numericPageIndex;
+        const newStart = Number(pageIndex);
+const newEnd = newStart + totalPages - 1;
+
+const hasBlockingSelection = filtered.some(existing => {
+  if (!existing) return false;
+
+  const existingStart = Number(existing.page_index);
+  if (!Number.isFinite(existingStart)) return false;
+
+  if (existingStart <= newStart || existingStart > newEnd) return false;
+
+  const existingPagesValue = parsePagesValue(existing.pages) ?? 1;
+  const existingTotalPages =
+    existingPagesValue && existingPagesValue > 1
+      ? Math.max(1, Math.round(existingPagesValue))
+      : 1;
+
+  const existingEnd = existingStart + existingTotalPages - 1;
+
+  return existingEnd > newEnd; // this is the “indirect half replacement” case
+});
+
+
+        if (hasOverflow || hasBlockingSelection) {
+          toast.error(
+            `This rhyme accommodates ${totalPages} pages. Kindly remove subsequent rhyme(s) to accommodate this rhyme.`
+          );
+          setShowTreeMenu(false);
+          setShowReusable(false);
+          setCurrentPosition(null);
+          return;
+        }
+      */
+
+      const gradePersonalisation = gradePersonalisationRef.current ?? gradePersonalisationValue;
+      const previewUrls = buildRhymePreviewUrls(rhyme, {
+        ...options,
+        cartoonVariantForGrade: gradePersonalisation === 'no'
+      });
+      const resolvedBucket =
+        resolvePreviewBucket(options?.bucket) ??
+        (isPersonalizedValue(rhyme?.personalized) ? 'personalized' : 'nonPersonalized');
       const baseRhyme = {
         page_index: pageIndex,
         code: rhyme.code,
         name: rhyme.name,
         pages: rhyme.pages,
+        personalized: rhyme.personalized,
+        bucket: resolvedBucket,
         subject: rhyme.subject || null,
-        requires_cartoon_head: rhyme.requires_cartoon_head === true,
+        imageUrls: previewUrls,
+        imageLoaded: false,
+        imageLoadedUrl: '',
+        imageFetchPending: true,
+        imageLoadFailed: false,
         svgContent: null,
         svgFetchFailed: false,
         position: normalizedPosition
       };
 
       const nextArray = sortSelections([...filtered, baseRhyme]);
-      const isReplacement = removals.length > 0;
-      const nextInfo = computeNextAvailablePageInfo(nextArray);
-
-      if (!isReplacement && !nextInfo.hasCapacity) {
-        toast.error('Maximum of 44 pages reached. Remove a rhyme to add another.');
-        setShowTreeMenu(false);
-        setCurrentPosition(null);
-        return;
-      }
+      const nextUsage = computePageUsage(nextArray);
+      const nextInfo = computeNextAvailablePageInfoFromUsage(nextUsage);
 
       await axios.post(`${API}/rhymes/select`, {
         school_id: school.school_id,
         grade: grade,
         page_index: pageIndex,
         rhyme_code: rhyme.code,
-        position: normalizedPosition
+        position: normalizedPosition,
+        bucket: resolvedBucket === 'personalized' ? 'personalised' : 'non_personalised'
       });
 
       setSelectedRhymes(nextArray);
       selectedRhymesRef.current = nextArray;
 
-      try {
-        const svgContent = await fetchSvgForRhyme(rhyme.code);
-
-        setSelectedRhymes((prev) => {
-          const prevArrayInner = Array.isArray(prev) ? prev : [];
-
-          const updated = prevArrayInner.map((existing) => {
-            if (!existing) return existing;
-            if (Number(existing.page_index) !== Number(pageIndex)) {
-              return existing;
-            }
-
-            const candidatePosition = resolveRhymePosition(existing, {
-              rhymesForContext: prevArrayInner
-            });
-
-            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
-              if (svgContent) {
-                return {
-                  ...existing,
-                  svgContent,
-                  svgFetchFailed: false
-                };
-              }
-
-              return {
-                ...existing,
-                svgContent: '',
-                svgFetchFailed: true
-              };
-            }
-
-            return existing;
-          });
-
-          selectedRhymesRef.current = updated;
-          return updated;
+      const firstPreviewUrl = Array.isArray(previewUrls) ? previewUrls[0] : '';
+      let previewLoaded = false;
+      if (firstPreviewUrl) {
+        previewLoaded = await new Promise<boolean>((resolve) => {
+          const probe = new Image();
+          probe.onload = () => resolve(true);
+          probe.onerror = () => resolve(false);
+          probe.src = firstPreviewUrl;
         });
-      } catch (svgError) {
-        console.error('Error fetching rhyme SVG:', svgError);
+
         setSelectedRhymes((prev) => {
           const prevArrayInner = Array.isArray(prev) ? prev : [];
           const updated = prevArrayInner.map((existing) => {
@@ -2408,49 +3668,155 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
             if (Number(existing.page_index) !== Number(pageIndex)) {
               return existing;
             }
-
             const candidatePosition = resolveRhymePosition(existing, {
               rhymesForContext: prevArrayInner
             });
-
             if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
               return {
                 ...existing,
-                svgContent: '',
-                svgFetchFailed: true
+                imageLoaded: previewLoaded,
+                imageLoadedUrl: previewLoaded ? firstPreviewUrl : '',
+                imageFetchPending: false,
+                imageLoadFailed: !previewLoaded
               };
             }
-
             return existing;
           });
           selectedRhymesRef.current = updated;
           return updated;
         });
+      } else {
+        setSelectedRhymes((prev) => {
+          const prevArrayInner = Array.isArray(prev) ? prev : [];
+          const updated = prevArrayInner.map((existing) => {
+            if (!existing) return existing;
+            if (Number(existing.page_index) !== Number(pageIndex)) {
+              return existing;
+            }
+            const candidatePosition = resolveRhymePosition(existing, {
+              rhymesForContext: prevArrayInner
+            });
+            if (existing.code === rhyme.code && candidatePosition === normalizedPosition) {
+              return {
+                ...existing,
+                imageLoaded: false,
+                imageLoadedUrl: '',
+                imageFetchPending: false,
+                imageLoadFailed: true
+              };
+            }
+            return existing;
+          });
+          selectedRhymesRef.current = updated;
+          return updated;
+        });
+      }
+
+      if (!firstPreviewUrl || !previewLoaded) {
+        // No SVG fallback: previews are the source of truth for rendering.
       }
 
       if (isReplacement) {
         setCurrentPageIndex(pageIndex);
         if (Number.isFinite(pageIndex)) {
           ensurePageAssets(pageIndex).catch((assetError) => {
-            console.error('Error loading rhyme SVGs for page:', assetError);
+            console.error('Error loading rhyme images for page:', assetError);
           });
         }
       } else {
         setTimeout(() => {
-          const nextIndex = Number.isFinite(nextInfo.index) ? nextInfo.index : pageIndex;
-          setCurrentPageIndex(nextIndex);
-          if (Number.isFinite(nextIndex)) {
-            ensurePageAssets(nextIndex).catch((assetError) => {
-              console.error('Error loading rhyme SVGs for page:', assetError);
+          if (!nextInfo.hasCapacity && numericPageIndex === MAX_PAGES_PER_GRADE - 1) {
+            toast.info(`You have reached the max limit  of ${MAX_PAGES_PER_GRADE} pages for this grade. please go to page 1 for submission.`);
+            setCurrentPageIndex(numericPageIndex);
+            ensurePageAssets(numericPageIndex, nextArray).catch((assetError) => {
+              console.error('Error loading rhyme images for page:', assetError);
+            });
+            return;
+          }
+
+          // Navigation is sequential. Only when we are about to advance to the next
+          // page (i.e., effectively "adding a new page") do we enforce filling any
+          // earlier gaps first. We do not block normal browsing via Next/Previous.
+          const entryAfter = nextUsage.usageMap.get(numericPageIndex);
+          const isFullAfter = Boolean(entryAfter?.top && entryAfter?.bottom);
+          const sequentialNextIndex = isFullAfter
+            ? numericPageIndex + (totalPages > 1 ? totalPages : 1)
+            : numericPageIndex;
+
+          let targetIndex = sequentialNextIndex;
+          const isAdvancing = sequentialNextIndex > numericPageIndex;
+          if (isAdvancing) {
+            // At submit milestones (24/28/32/…), when the last page is fully filled,
+            // we show the milestone banner and suppress the trailing blank page until
+            // the user explicitly clicks "Continue". Do not auto-advance into the
+            // newly-available blank page in this case.
+            const nextSelectedPages = Math.max(
+              0,
+              Math.min(Number(nextUsage.highestIndex) + 1, MAX_PAGES_PER_GRADE)
+            );
+            const nextIsSubmitMilestone =
+              nextSelectedPages >= 24 &&
+              nextSelectedPages % 4 === 0 &&
+              nextSelectedPages <= MAX_PAGES_PER_GRADE;
+            const nextLastIndex = nextSelectedPages > 0 ? nextSelectedPages - 1 : -1;
+            const nextLastEntry = nextLastIndex >= 0 ? nextUsage.usageMap.get(nextLastIndex) : null;
+            const nextLastIsComplete = Boolean(nextLastEntry?.top && nextLastEntry?.bottom);
+
+            if (nextIsSubmitMilestone && nextLastIsComplete && milestoneContinuePages === null) {
+              targetIndex = numericPageIndex;
+            } else {
+            const blanksAfter = computeBlankSlotsInSequenceFromUsage(nextUsage);
+            const firstBlankAfter = blanksAfter.length > 0 ? blanksAfter[0] : null;
+            const nextBlankAfterCurrent = blanksAfter.find((blank) => blank?.pageIndex > numericPageIndex) || null;
+
+            const shouldBlockAdvanceForEarlierBlank =
+              firstBlankAfter &&
+              Number.isFinite(firstBlankAfter.pageIndex) &&
+              firstBlankAfter.pageIndex >= 0 &&
+              firstBlankAfter.pageIndex < sequentialNextIndex;
+
+            if (shouldBlockAdvanceForEarlierBlank) {
+              targetIndex = firstBlankAfter.pageIndex;
+              const missingParts = Array.isArray(firstBlankAfter.missing) ? firstBlankAfter.missing : [];
+              const missingLabel =
+                missingParts.length === 2 ? 'top and bottom' : (missingParts[0] === 'bottom' ? 'bottom' : 'top');
+              toast.info(
+                `Page ${firstBlankAfter.pageIndex + 1} (${missingLabel}) is blank. Please fill it before adding new pages.`
+              );
+            } else if (
+              nextBlankAfterCurrent &&
+              Number.isFinite(nextBlankAfterCurrent.pageIndex) &&
+              nextBlankAfterCurrent.pageIndex >= 0 &&
+              nextBlankAfterCurrent.pageIndex <= nextUsage.highestIndex
+            ) {
+              // After filling a blank, jump to the next blank in the current sequence
+              // (before the current highest selected index) so gaps don't get skipped.
+              targetIndex = nextBlankAfterCurrent.pageIndex;
+            }
+            }
+          }
+
+          const clampedIndex = Math.max(0, Math.min(targetIndex, MAX_PAGES_PER_GRADE - 1));
+
+          setCurrentPageIndex(clampedIndex);
+          if (Number.isFinite(clampedIndex)) {
+            ensurePageAssets(clampedIndex, nextArray).catch((assetError) => {
+              console.error('Error loading rhyme images for page:', assetError);
             });
           }
         }, 400);
       }
+      // Close/clear only if this is the latest selection operation. Prevents an
+      // earlier async selection from clearing the slot intent after the user has
+      // already opened the menu for the next slot.
+      if (rhymeSelectOpRef.current === operationId) {
+        setShowTreeMenu(false);
+        setCurrentPosition(null);
+        pendingPositionRef.current = null;
+      }
 
       await fetchAvailableRhymes();
       await fetchReusableRhymes();
-      setShowTreeMenu(false);
-      setCurrentPosition(null);
     } catch (error) {
       console.error('Error selecting rhyme:', error);
     }
@@ -2507,6 +3873,91 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     return 'top';
   };
 
+  const getDeleteSpanForPage = (rhymesList, pageIndex) => {
+    const list = Array.isArray(rhymesList) ? rhymesList : [];
+    const targetIndex = Number(pageIndex);
+    if (!Number.isFinite(targetIndex) || targetIndex < 0) return null;
+
+    let spanFromStart = 1;
+    for (const selection of list) {
+      if (!selection) continue;
+      const start = Number(selection?.page_index);
+      if (!Number.isFinite(start)) continue;
+      if (start !== targetIndex) continue;
+      const pages = parsePagesValue(selection?.pages);
+      if (pages > 1) {
+        spanFromStart = Math.max(1, Math.round(pages));
+        break;
+      }
+    }
+
+    for (const selection of list) {
+      if (!selection) continue;
+      const start = Number(selection?.page_index);
+      if (!Number.isFinite(start)) continue;
+      const pages = parsePagesValue(selection?.pages);
+      if (!(pages > 1)) continue;
+      const span = Math.max(1, Math.round(pages));
+      if (start < targetIndex && targetIndex < start + span) {
+        return null;
+      }
+    }
+
+    return spanFromStart;
+  };
+
+  const openDeletePageDialog = () => {
+    if (!ensureEditable()) {
+      return;
+    }
+
+    const span = getDeleteSpanForPage(selectedRhymesRef.current, currentPageIndex);
+    if (!span) {
+      toast.error('This page is part of a multi-page rhyme. Delete from the first page of the block.');
+      return;
+    }
+
+    toast.warning(
+      span > 1
+        ? `Deleting these ${span} pages will shift later pages forward by ${span}. Page numbers will change — please review before submit.`
+        : `Deleting this page will shift later pages forward by 1. Page numbers will change — please review before submit.`
+    );
+
+    setDeletePageRequest({ pageIndex: Number(currentPageIndex), span });
+    setDeletePageDialogOpen(true);
+  };
+
+  const confirmDeletePage = async () => {
+    if (!deletePageRequest) {
+      return;
+    }
+
+    try {
+      setDeletePagePending(true);
+      await axios.delete(
+        `${API}/rhymes/page/${school?.school_id}/${grade}/${deletePageRequest.pageIndex}`
+      );
+      const deletedIndex = Number(deletePageRequest.pageIndex);
+      const postDeletePreferredIndex =
+        Number.isFinite(currentPageIndex) && Number(currentPageIndex) === deletedIndex
+          ? Math.max(0, deletedIndex - 1)
+          : deletedIndex;
+      await fetchSelectedRhymes({ preferredPageIndex: postDeletePreferredIndex });
+      await fetchAvailableRhymes();
+      await fetchReusableRhymes();
+      ensurePageAssets(postDeletePreferredIndex, selectedRhymesRef.current).catch(() => {});
+      setLastDeletedPageIndex(deletedIndex);
+      toast.success('Page deleted. Page numbers shifted — please review before submitting.');
+      setDeletePageDialogOpen(false);
+      setDeletePageRequest(null);
+    } catch (err) {
+      console.error('Delete page failed:', err.response?.data || err.message);
+      toast.error('Unable to delete page. Please try again.');
+    } finally {
+      setDeletePagePending(false);
+    }
+  };
+
   const handleRemoveRhyme = async (rhyme, explicitPosition) => {
     if (!ensureEditable()) {
       return;
@@ -2517,6 +3968,12 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     }
 
     const position = resolveRhymePosition(rhyme, { explicitPosition });
+    if (position === 'top' || position === 'bottom') {
+      if (removeRhymePending[position]) {
+        return;
+      }
+      setRemoveRhymePending((prev) => ({ ...prev, [position]: true }));
+    }
 
     // console.log("→ Deleting rhyme (request):", {
     //   code: rhyme.code,
@@ -2525,11 +3982,11 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     //   grade
     // });
 
+    let deleteSucceeded = false;
+
     try {
-      const res = await axios.delete(
-        `/api/rhymes/remove/${school.school_id}/${grade}/${currentPageIndex}/${position}`
-      );
-      
+      await axios.delete(`${API}/rhymes/remove/${school?.school_id}/${grade}/${currentPageIndex}/${position}`);
+      deleteSucceeded = true;
 
       setSelectedRhymes(prev => {
         const filtered = prev.filter(r => {
@@ -2543,27 +4000,48 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
         selectedRhymesRef.current = filtered;
         return filtered;
       });
-      await fetchAvailableRhymes();
-      await fetchReusableRhymes();
     } catch (err) {
       console.error("Delete failed:", err.response?.data || err.message);
+    } finally {
+      if (position === 'top' || position === 'bottom') {
+        setRemoveRhymePending((prev) => ({ ...prev, [position]: false }));
+      }
+    }
+
+    // Refresh side lists in the background so navigation can resume immediately after delete.
+    if (deleteSucceeded) {
+      fetchAvailableRhymes().catch((error) => {
+        console.error('Error refreshing available rhymes:', error);
+      });
+      fetchReusableRhymes().catch((error) => {
+        console.error('Error refreshing reusable rhymes:', error);
+      });
     }
   };
 
   const handlePageChange = (newPageIndex) => {
+    if (removeRhymePending.top || removeRhymePending.bottom) {
+      toast.info('Please wait for the delete to finish.');
+      return;
+    }
+
     const clampedIndex = Math.max(0, Math.min(newPageIndex, MAX_PAGES_PER_GRADE - 1));
+
+    if (lastDeletedPageIndex !== null) {
+      setLastDeletedPageIndex(null);
+    }
 
     setCurrentPageIndex(clampedIndex);
 
     if (Number.isFinite(clampedIndex)) {
       ensurePageAssets(clampedIndex).catch((error) => {
-        console.error('Error loading rhyme SVGs for page:', error);
+        console.error('Error loading rhyme images for page:', error);
       });
 
       const nextIndex = clampedIndex + 1;
       if (nextIndex < MAX_PAGES_PER_GRADE) {
         ensurePageAssets(nextIndex).catch((error) => {
-          console.error('Error prefetching next rhyme page:', error);
+          console.error('Error prefetching next rhyme page images:', error);
         });
       }
     }
@@ -2621,31 +4099,51 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     const sorted = sortSelections(updated);
     setSelectedRhymes(sorted);
     selectedRhymesRef.current = sorted;
+    
 
     try {
-      await Promise.all([
-        axios.post(`${API}/rhymes/select`, {
-          school_id: school.school_id,
-          grade,
-          page_index: pageIndex,
-          rhyme_code: first.code,
-          position: secondPos,
-        }),
-        axios.post(`${API}/rhymes/select`, {
-          school_id: school.school_id,
-          grade,
-          page_index: pageIndex,
-          rhyme_code: second.code,
-          position: firstPos,
-        }),
-      ]);
+      const token = await getIdToken?.();
+
+      await axios.patch(
+        `${API}/rhymes/swap/${school?.school_id}/${grade}/${pageIndex}`,
+        null,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
     } catch (error) {
       console.error('Error swapping rhyme order:', error);
       toast.error('Unable to update rhyme order.');
-    }
+      
+    } 
   };
 
   const pageUsage = useMemo(() => computePageUsage(selectedRhymes), [selectedRhymes]);
+  const removeActionPending = Boolean(removeRhymePending.top || removeRhymePending.bottom);
+  const lastBookPageIndex = useMemo(() => {
+    const value = Number(selectedPages);
+    if (!Number.isFinite(value) || value <= 0) return -1;
+    return Math.max(0, Math.min(Math.floor(value) - 1, MAX_PAGES_PER_GRADE - 1));
+  }, [MAX_PAGES_PER_GRADE, selectedPages]);
+  const lastBookPageIsComplete = useMemo(() => {
+    if (lastBookPageIndex < 0) return false;
+    const entry = pageUsage.usageMap.get(lastBookPageIndex);
+    return Boolean(entry?.top && entry?.bottom);
+  }, [lastBookPageIndex, pageUsage.usageMap]);
+
+  useEffect(() => {
+    // Reset the "Continue adding pages" allowance whenever we leave the milestone
+    // state, or when selections progress to a new page count.
+    if (!isSubmitMilestone || !lastBookPageIsComplete) {
+      if (milestoneContinuePages !== null) {
+        setMilestoneContinuePages(null);
+      }
+      return;
+    }
+
+    if (milestoneContinuePages !== null && milestoneContinuePages !== selectedPages) {
+      setMilestoneContinuePages(null);
+    }
+  }, [isSubmitMilestone, lastBookPageIsComplete, milestoneContinuePages, selectedPages]);
   const selectedRhymeCodes = useMemo(() => {
     const codes = new Set<string>();
     if (Array.isArray(selectedRhymes)) {
@@ -2661,34 +4159,97 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     return codes;
   }, [selectedRhymes]);
   const nextPageInfo = useMemo(() => computeNextAvailablePageInfoFromUsage(pageUsage), [pageUsage]);
+  
   const nextAvailablePageIndex = nextPageInfo.index;
+  
   const hasNextPageCapacity = nextPageInfo.hasCapacity;
   const highestFilledIndex = nextPageInfo.highestIndex;
 
+  const blankSlotsInSequence = useMemo(
+    () => computeBlankSlotsInSequenceFromUsage(pageUsage),
+    [pageUsage]
+  );
+  const hasBlankSlotsInSequence = blankSlotsInSequence.length > 0;
+
+  useEffect(() => {
+    if (!submitBlankRedirectActive) return;
+    if (loading) return;
+
+    if (blankSlotsInSequence.length === 0) {
+      if (!submitBlankRedirectToastShown.current) {
+        toast.success('All blanks are filled. You can submit now.');
+        submitBlankRedirectToastShown.current = true;
+      }
+      setSubmitBlankRedirectActive(false);
+      return;
+    }
+
+    const targetIndex = blankSlotsInSequence[0]?.pageIndex;
+    if (!Number.isFinite(targetIndex) || targetIndex < 0) return;
+
+    if (Number(currentPageIndex) === Number(targetIndex)) return;
+
+    setCurrentPageIndex(targetIndex);
+    ensurePageAssets(targetIndex, selectedRhymesRef.current).catch((assetError) => {
+      console.error('Error loading rhyme images for page:', assetError);
+    });
+  }, [
+    blankSlotsInSequence,
+    currentPageIndex,
+    ensurePageAssets,
+    loading,
+    submitBlankRedirectActive
+  ]);
+  
   // Calculate total pages
   const calculateTotalPages = () => {
     const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex : -1;
-    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex : 0;
     const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex : 0;
 
-    const candidates = [normalizedHighest, normalizedNext, normalizedCurrent]
-      .filter(index => Number.isFinite(index) && index >= 0);
+    // Pages are derived from selections. By default, add a trailing blank page
+    // only when the current last page is fully filled (top + bottom). This
+    // prevents the UI from "adding a new page" after selecting only one
+    // half-page rhyme.
+    //
+    // Exception: at submit milestones (24/28/32/…), hide that trailing page
+    // until the user explicitly clicks "Continue".
+    let totalFromSelections = 1;
+    if (normalizedHighest >= 0) {
+      const lastEntry = pageUsage.usageMap.get(normalizedHighest);
+      const isLastFull = Boolean(lastEntry?.top && lastEntry?.bottom);
+      const baseTotal = Math.min(normalizedHighest + (isLastFull ? 2 : 1), MAX_PAGES_PER_GRADE);
 
-    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
+      const shouldSuppressTrailingAtMilestone =
+        isLastFull &&
+        isSubmitMilestone &&
+        selectedPages < MAX_PAGES_PER_GRADE &&
+        milestoneContinuePages !== selectedPages;
 
-    return Math.min(maxIndex + 1, MAX_PAGES_PER_GRADE);
+      totalFromSelections = shouldSuppressTrailingAtMilestone
+        ? Math.min(normalizedHighest + 1, MAX_PAGES_PER_GRADE)
+        : baseTotal;
+    }
+    const totalFromCurrent = Math.max(1, normalizedCurrent + 1);
+
+    let total = Math.min(Math.max(totalFromSelections, totalFromCurrent), MAX_PAGES_PER_GRADE);
+
+    // If the user deleted the last page and we navigated back, avoid immediately
+    // re-adding a trailing blank page with the same page number as the deleted one.
+    if (lastDeletedPageIndex !== null) {
+      const deleted = Number(lastDeletedPageIndex);
+      const deletedUsage = pageUsage.usageMap.get(deleted);
+      const deletedIsBlank = !deletedUsage?.top && !deletedUsage?.bottom;
+
+      if (Number.isFinite(deleted) && deleted >= 0 && deletedIsBlank && deleted > normalizedHighest && total === deleted + 1) {
+        total = Math.max(1, total - 1);
+      }
+    }
+
+    return total;
   };
 
   useEffect(() => {
-    const normalizedHighest = Number.isFinite(highestFilledIndex) ? highestFilledIndex : -1;
-    const normalizedNext = Number.isFinite(nextAvailablePageIndex) ? nextAvailablePageIndex : 0;
-    const normalizedCurrent = Number.isFinite(currentPageIndex) ? currentPageIndex : 0;
-
-    const candidates = [normalizedHighest, normalizedNext, normalizedCurrent]
-      .filter(index => Number.isFinite(index) && index >= 0);
-
-    const maxIndex = candidates.length > 0 ? Math.max(...candidates) : 0;
-    const total = Math.min(maxIndex + 1, MAX_PAGES_PER_GRADE);
+    const total = calculateTotalPages();
 
     if (total <= 0) {
       if (currentPageIndex !== 0) {
@@ -2696,12 +4257,20 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
       }
       return;
     }
-
+    
     const maxAllowed = total - 1;
     if (currentPageIndex > maxAllowed) {
       setCurrentPageIndex(Math.max(0, maxAllowed));
     }
-  }, [highestFilledIndex, nextAvailablePageIndex, currentPageIndex]);
+  }, [
+    currentPageIndex,
+    highestFilledIndex,
+    isSubmitMilestone,
+    milestoneContinuePages,
+    nextAvailablePageIndex,
+    pageUsage.usageMap,
+    selectedPages
+  ]);
 
   // Get rhymes for current page
   const getCurrentPageRhymes = () => {
@@ -2766,24 +4335,64 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
       </div>
     );
   }
-
+  
   const totalPages = calculateTotalPages();
+ 
   const currentPageRhymes = getCurrentPageRhymes();
   const hasTopRhyme = currentPageRhymes.top !== null;
   const hasBottomRhyme = currentPageRhymes.bottom !== null;
   const isTopFullPage = hasTopRhyme && parsePagesValue(currentPageRhymes.top.pages) >= 1;
   const isMultiPageRhyme = (currentPageRhymes.multiPageTotal || 1) > 1;
+  const isMultiPageNonFirstPage = isMultiPageRhyme && (currentPageRhymes.multiPageOffset || 0) > 0;
   const showBottomContainer = !isMultiPageRhyme && !isTopFullPage;
   const topSelection = currentPageRhymes.top;
   const bottomSelection = currentPageRhymes.bottom;
-  const topPages = normalizeSvgPages(topSelection?.svgContent);
-  const topSvgContent = topPages[currentPageRhymes.multiPageOffset] || topPages[0] || '';
-  const bottomPages = normalizeSvgPages(bottomSelection?.svgContent);
-  const bottomSvgContent = bottomPages[0] || '';
-  const topFailed = Boolean(topSelection?.svgFetchFailed);
-  const bottomFailed = Boolean(bottomSelection?.svgFetchFailed);
-  const topReady = !topSelection || topFailed || topSvgContent.length > 0;
-  const bottomReady = !showBottomContainer || !bottomSelection || bottomFailed || bottomSvgContent.length > 0;
+  const topImageUrls = Array.isArray(topSelection?.imageUrls) ? topSelection.imageUrls : [];
+  const topImageUrl =
+    topImageUrls[currentPageRhymes.multiPageOffset] || topImageUrls[0] || '';
+  const bottomImageUrls = Array.isArray(bottomSelection?.imageUrls) ? bottomSelection.imageUrls : [];
+  const bottomImageUrl = bottomImageUrls[0] || '';
+  const topFailed = Boolean(topSelection?.imageLoadFailed);
+  const bottomFailed = Boolean(bottomSelection?.imageLoadFailed);
+  const topImageLoaded =
+    Boolean(topSelection?.imageLoaded) && (topSelection?.imageLoadedUrl || '') === (topImageUrl || '');
+  const bottomImageLoaded =
+    Boolean(bottomSelection?.imageLoaded) && (bottomSelection?.imageLoadedUrl || '') === (bottomImageUrl || '');
+  const topReady =
+    !topSelection ||
+    topFailed ||
+    (topImageUrl.length > 0 ? topImageLoaded : false);
+  const bottomReady =
+    !showBottomContainer ||
+    !bottomSelection ||
+    bottomFailed ||
+    (bottomImageUrl.length > 0 ? bottomImageLoaded : false);
+
+  const deleteSpanForCurrentPage = getDeleteSpanForPage(selectedRhymes, currentPageIndex);
+  const normalizedHighestFilledIndex = Number.isFinite(highestFilledIndex) ? Number(highestFilledIndex) : -1;
+  
+  const canDeleteCurrentPage =
+    hasFreezeField &&
+    !isFrozen &&
+    !isReadOnly &&
+    freezeActionPending === null &&
+    normalizedHighestFilledIndex >= 0 &&
+    Number(currentPageIndex) <= normalizedHighestFilledIndex &&
+    deleteSpanForCurrentPage !== null;
+
+  const currentUsageEntry = pageUsage.usageMap.get(Number(currentPageIndex));
+  const currentPageIsFull = Boolean(currentUsageEntry?.top && currentUsageEntry?.bottom);
+
+  const canAddPageAfterDelete =
+    !isFrozen &&
+    !isReadOnly &&
+    freezeActionPending === null &&
+    lastDeletedPageIndex !== null &&
+    Number.isFinite(currentPageIndex) &&
+    currentPageIndex === totalPages - 1 &&
+    currentPageIsFull &&
+    totalPages < MAX_PAGES_PER_GRADE;
+  
   const isTopLoading = !!topSelection && !topReady;
   const isBottomLoading = showBottomContainer && !!bottomSelection && !bottomReady;
   const canShowNextButton = topReady && bottomReady;
@@ -2793,7 +4402,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     (Array.isArray(selectedRhymes) ? selectedRhymes : []).filter(
       (r) => Number(r?.page_index) === Number(currentPageIndex) && parsePagesValue(r?.pages) === 0.5
     ).length === 2;
-
+  
   const renderLoadingIndicator = (label) => (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-white/80 p-6">
       <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-400 border-t-transparent"></div>
@@ -2801,16 +4410,31 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
     </div>
   );
 
+  const renderUnavailableIndicator = (label) => (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-white/80 p-6 text-center">
+      <p className="text-sm font-semibold text-gray-700">Rhyme not available</p>
+      {label ? (
+        <p className="text-xs text-gray-500">
+          We couldn&apos;t load <span className="font-medium">{label}</span> right now.
+        </p>
+      ) : (
+        <p className="text-xs text-gray-500">We couldn&apos;t load this rhyme right now.</p>
+      )}
+    </div>
+  );
+
   const gradeDisplayName = (customGradeName && customGradeName.trim()) || grade;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-6 sm:px-6">
+    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 pt-1 pb-2 sm:px-6 sm:pt-3 sm:pb-4">
         {/* Header */}
-        <div className="mb-6 flex flex-shrink-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="mb-2 flex flex-shrink-0 flex-col gap-3 md:flex-row md:items-center md:justify-between md:mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800 capitalize">{gradeDisplayName} Grade - Rhyme Selection</h1>
-            <p className="text-gray-600">{school.school_name} ({school.school_id})</p>
+            <h1 className="text-2xl font-bold text-gray-800 capitalize">{gradeDisplayName} - Rhyme Selection</h1>
+            {school?.school_name && (
+              <p className="mt-1 text-sm text-gray-600">{school.school_name}</p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -2835,8 +4459,19 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
           </div>
         </div>
 
+        {(isReadOnly || isFrozen) && (
+          <div className="mb-2 sm:mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
+            <div className="font-semibold">Viewing only</div>
+            <div className="mt-1 text-xs text-amber-800">
+              {isFrozen
+                ? 'Rhyme selections are frozen/approved. Contact an admin for changes.'
+                : 'You do not have permission to edit these selections.'}
+            </div>
+          </div>
+        )}
+
         {/* Main Content */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           <div className="relative h-full">
 
             {/* Dual Container Interface */}
@@ -2844,97 +4479,394 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
               <div className="flex h-full w-full flex-col">
 
                 {/* Navigation Controls */}
-                <div className="flex-shrink-0 space-y-4">
-                  <div className="flex items-center justify-between">
+                <div className="flex-shrink-0 space-y-1 sm:space-y-2">
+                  {isSubmitMilestone &&
+                    lastBookPageIsComplete &&
+                    milestoneContinuePages === null &&
+                    currentPageIndex !== 0 &&
+                    !isFrozen &&
+                    !isReadOnly && (
+                    <div className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-800 shadow-sm">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div className="font-semibold">
+                            You selected {selectedPages} pages{selectedPages === MAX_PAGES_PER_GRADE ? ' (maximum)' :""} for your book
+                          </div>
+                          <div className="mt-0.5 text-xs text-slate-600">
+                            {selectedPages >= MAX_PAGES_PER_GRADE
+                              ? 'Go to Page 1 to submit & freeze selections.'
+                              : `Go to Page 1 to submit & freeze selections, or continue adding pages up to maximum page limit of ${MAX_PAGES_PER_GRADE}.`}
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => {
+                              setCurrentPageIndex(0);
+                              ensurePageAssets(0, selectedRhymesRef.current).catch(() => {});
+                            }}
+                            className="bg-slate-900 text-white hover:bg-slate-800"
+                          >
+                            Go to Page 1
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={selectedPages >= MAX_PAGES_PER_GRADE}
+                            onClick={() => {
+                              setMilestoneContinuePages(selectedPages);
+                              const nextIndex = Math.max(0, Math.min(Number(selectedPages), MAX_PAGES_PER_GRADE - 1));
+                              setCurrentPageIndex(nextIndex);
+                              ensurePageAssets(nextIndex, selectedRhymesRef.current).catch(() => {});
+                            }}
+                            className="bg-white/80"
+                          >
+                            Continue
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {currentPageIndex + 1 === 1 && (
+                    <div className="mx-auto flex w-fit flex-col items-center gap-2">
+                      {!isFrozen ? (
+                        <Button
+                          onClick={handleSaveAndSubmit}
+                          type="button"
+                          disabled={isReadOnly ||  !canSaveAndSubmit || freezeActionPending !== null}
+                          className="w-36 h-8 bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed"
+                        >
+                          {freezeActionPending === 'freeze' ? 'Freezing…' : 'Submit & Freeze'}
+                        </Button>
+                      ) : isSuperAdmin ? (
+                        <Button
+                          onClick={handleUnfreeze}
+                          variant="outline"
+                          type="button"
+                          disabled={freezeActionPending !== null}
+                          className="w-36 h-8 border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {freezeActionPending === 'unfreeze' ? 'Unfreezing…' : 'Unfreeze'}
+                        </Button>
+                      ) : null}
+                    </div>
+                  )}
+                  <div className="mx-auto flex w-fit items-center gap-2 text-[11px] text-slate-600">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5">
+                      Rhyme book pages selected: {selectedPages}
+                    </span>
+                    {!isFrozen && !isReadOnly && pageCountHint ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-900">
+                        {pageCountHint}
+                      </span>
+                    ) : null}
+                  </div>  
+                  {!isFrozen && !isReadOnly && !isSubmitMilestone && lastDeletedPageIndex !== null && (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-900 shadow-sm">
+                      {(() => {
+                        const minPages = 24;
+                        const step = 4;
+                        const current = Number(selectedPages);
+
+                        if (!Number.isFinite(current) || current <= 0) {
+                          return 'Page deleted.';
+                        }
+
+                        const nextMilestone =
+                          current < minPages ? minPages : (current % step === 0 ? current : current + (step - (current % step)));
+                        const prevMilestone =
+                          current >= minPages ? (current % step === 0 ? current : current - (current % step)) : null;
+
+                        const canReachNext = nextMilestone <= MAX_PAGES_PER_GRADE;
+                        const nextTarget = canReachNext ? nextMilestone : null;
+                        const prevTarget = prevMilestone !== null && prevMilestone >= minPages ? prevMilestone : null;
+
+                        const addPages = nextTarget !== null ? Math.max(0, nextTarget - current) : null;
+                        const deletePages = prevTarget !== null ? Math.max(0, current - prevTarget) : null;
+
+                        if (current < minPages) {
+                          return `Page deleted. Add ${minPages - current} page(s) to reach ${minPages} and submit.`;
+                        }
+
+                        if (addPages !== null && deletePages !== null) {
+                          return `Page deleted. Add ${addPages} page(s) to reach ${nextTarget} and submit, or delete ${deletePages} page(s) to reach ${prevTarget} and submit.`;
+                        }
+
+                        if (addPages !== null) {
+                          return `Page deleted. Add ${addPages} page(s) to reach ${nextTarget} and submit.`;
+                        }
+
+                        if (deletePages !== null) {
+                          return `Page deleted. Delete ${deletePages} page(s) to reach ${prevTarget} and submit.`;
+                        }
+
+                        return 'Page deleted.';
+                      })()}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    
                     <Button
                       onClick={() => handlePageChange(Math.max(0, currentPageIndex - 1))}
-                      disabled={currentPageIndex === 0}
+                      disabled={currentPageIndex === 0 || freezeActionPending !== null || removeActionPending}
                       variant="outline"
                       size="sm"
                     >
                       <ChevronLeft className="w-4 h-4 mr-1" />
                       Previous
                     </Button>
-
-                    <div className="text-sm text-gray-600 font-medium">
+                    
+                    <div className="order-3 w-full text-center text-sm text-gray-600 font-medium sm:order-none sm:w-auto">
                       Page {currentPageIndex + 1} of {totalPages}
                     </div>
 
                     {canShowNextButton ? (
-                      <Button
-                        onClick={() => handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1))}
-                        disabled={currentPageIndex >= totalPages - 1}
-                        variant="outline"
-                        size="sm"
-                      >
-                        Next
-                        <ChevronRight className="w-4 h-4 ml-1" />
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          onClick={() => {
+                            if (canAddPageAfterDelete && currentPageIndex >= totalPages - 1) {
+                              setLastDeletedPageIndex(null);
+                              handlePageChange(currentPageIndex + 1);
+                              return;
+                            }
+                            handlePageChange(Math.min(totalPages - 1, currentPageIndex + 1));
+                          }}
+                          disabled={freezeActionPending !== null || removeActionPending || (currentPageIndex >= totalPages - 1 && !canAddPageAfterDelete)}
+                          variant="outline"
+                          size="sm"
+                        >
+                          {canAddPageAfterDelete && currentPageIndex >= totalPages - 1 ? 'Add page' : 'Next'}
+                          <ChevronRight className="w-4 h-4 ml-1" />
+                        </Button>
+                        
+                      </div>
                     ) : (
                       <div className="flex h-10 min-w-[120px] items-center justify-center rounded-full border border-dashed border-orange-200 bg-white/80 px-4 text-xs font-medium text-orange-500">
                         Loading page...
                       </div>
                     )}
                   </div>
-                  <div className="flex justify-end">
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {canDeleteCurrentPage ? (
+                      <Button
+                        onClick={openDeletePageDialog}
+                        disabled={deletePagePending || freezeActionPending !== null}
+                        variant="outline"
+                        size="sm"
+                        className="border-red-200 bg-white/80 text-red-700 hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="mr-1 h-4 w-4" />
+                        Delete page
+                      </Button>
+                    ) : null}
+                    <Button
+                      onClick={() => handlePageChange(0)}
+                      disabled={currentPageIndex === 0 || freezeActionPending !== null || removeActionPending}
+                      variant="outline"
+                      size="sm"
+                      aria-label="First page"
+                    >
+                      <ChevronLeft className="hidden md:inline-block w-4 h-4 mr-1" />
+                      <span>First</span>
+                    </Button>
+                    <Button
+                      onClick={() => handlePageChange(Math.max(0, totalPages - 1))}
+                      disabled={totalPages <= 1 || currentPageIndex >= totalPages - 1 || freezeActionPending !== null || removeActionPending}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Last
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </Button>
+                     
                     <Button
                       onClick={swapCurrentPageOrder}
-                      disabled={!canSwapHalfPage || isReadOnly}
+                      disabled={!canSwapHalfPage || isReadOnly || freezeActionPending !== null}
                       variant="outline"
                       size="sm"
                       className="bg-white/80"
                     >
                       Change order
                     </Button>
+
+                    {!isMultiPageNonFirstPage ? (
+                    <Button
+                      onClick={toggleSwapAcrossPages}
+                      disabled={isReadOnly || freezeActionPending !== null || removeActionPending || swapAcrossPagesPending}
+                      variant="outline"
+                      size="sm"
+                      className={`bg-white/80 ${swapAcrossPagesActive ? 'border-orange-400 text-orange-700' : ''}`}
+                    >
+                      {swapAcrossPagesPending
+                        ? 'Swapping…'
+                        : swapAcrossPagesActive
+                          ? (swapAcrossPagesSource && swapAcrossPagesSource.pageIndex !== Number(currentPageIndex) ? 'Swap with this page' : 'Cancel swap')
+                          : 'Swap pages'}
+                    </Button>
+                    ) : null}
+
+                    <AlertDialog
+                      open={deletePageDialogOpen}
+                      onOpenChange={(open) => {
+                        setDeletePageDialogOpen(open);
+                        if (!open) {
+                          setDeletePageRequest(null);
+                        }
+                      }}
+                    >
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>
+                            Delete page {deletePageRequest ? deletePageRequest.pageIndex + 1 : currentPageIndex + 1}?
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This removes the page from the book and shifts all later pages forward by{' '}
+                            {deletePageRequest ? deletePageRequest.span : deleteSpanForCurrentPage || 1}. The rhyme sequence stays the same,
+                            but page numbers will change. This action can&apos;t be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel disabled={deletePagePending}>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={(event) => {
+                              event.preventDefault();
+                              confirmDeletePage();
+                            }}
+                            disabled={deletePagePending}
+                            className="bg-red-600 text-white hover:bg-red-700"
+                          >
+                            {deletePagePending ? 'Deleting…' : 'Delete page'}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
                 </div>
 
                 <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex-1 min-h-0 py-2">
+                  <div className="flex-1 min-h-0 py-0.5 sm:py-1">
                     <div className="flex h-full items-start justify-center">
 
                       <div className="relative flex w-full justify-center transition-all duration-300 ease-out">
 
-                        <div className="a4-preview relative flex w-full flex-col overflow-hidden">
+                        <div
+                          className="a4-preview relative flex w-full flex-col overflow-hidden"
+                          style={{ aspectRatio: IMG_PREVIEW_ASPECT_RATIO }}
+                        >
                           {showBottomContainer && (
                             <div className="pointer-events-none absolute inset-x-12 top-1/2 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
                           )}
+                          {/* parent of top nd bottom container */}
                           <div className="rhyme-page-grid h-full">
                                 <div
 
                                   className="relative flex w-full min-h-0 flex-col rhyme-slot"
 
                                 >
+                                  {/* if it ha a top rhyme already seected diplay that else dsplay + button to add in top slot*/}
                                   {hasTopRhyme ? (
                                     <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper">
                                       {canReplaceTop && (
-                                        <Button
-                                          onClick={() => handleAddRhyme('top')}
-                                          variant="outline"
-                                          disabled={isReadOnly}
-                                          className={`absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white${isReadOnly ? ' cursor-not-allowed opacity-60' : ''}`}
-                                        >
-                                          <Replace className="w-4 h-4 mr-2" />
-                                          Replace
-                                        </Button>
+                                        <div className="z-10 flex justify-end gap-2 px-2 pt-1 sm:absolute sm:top-4 sm:right-4 sm:px-0 sm:pt-0">
+                                          <Button
+                                            onClick={() => handleReplaceRhyme(topSelection, 'top')}
+                                            variant="outline"
+                                            disabled={isReadOnly}
+                                            className={`bg-white/90 backdrop-blur px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-gray-700 shadow-md hover:bg-white${isReadOnly ? ' cursor-not-allowed opacity-60' : ''}`}
+                                          >
+                                            <Replace className="w-4 h-4 sm:mr-2" />
+                                            <span className="hidden sm:inline">Replace</span>
+                                          </Button>
+                                          <Button
+                                            onClick={() => handleRemoveRhyme(topSelection, 'top')}
+                                            variant="outline"
+                                            disabled={isReadOnly || removeRhymePending.top}
+                                            className={`bg-white/90 backdrop-blur px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-red-600 shadow-md hover:bg-white hover:text-red-700${isReadOnly || removeRhymePending.top ? ' cursor-not-allowed opacity-60' : ''}`}
+                                          >
+                                            {removeRhymePending.top ? (
+                                              <Loader2 className="w-4 h-4 animate-spin sm:mr-2" />
+                                            ) : (
+                                              <Trash2 className="w-4 h-4 sm:mr-2" />
+                                            )}
+                                            <span className="hidden sm:inline">Remove</span>
+                                          </Button>
+                                        </div>
                                       )}
-
-                                      <div className={`rhyme-slot-container${hasTopRhyme ? ' has-svg' : ''}`}>
-                                        {isTopLoading ? (
-                                          renderLoadingIndicator(currentPageRhymes.top?.name || 'rhyme')
-                                        ) : topSvgContent.length > 0 ? (
-                                          <InlineSvg
-                                            markup={topSvgContent}
-                                            className="rhyme-svg-content"
-                                            sanitize={false}
-                                            ariaLabel={`${currentPageRhymes.top?.name || 'Rhyme'} illustration`}
-                                          />
-                                        ) : (
-                                          <div className="flex h-full w-full items-center justify-center bg-white/80 text-sm text-gray-500">
-                                            SVG preview unavailable
+                                      
+                                      <div
+                                        className={`rhyme-slot-container${
+                                          hasTopRhyme
+                                            ? !topFailed && topImageUrl.length > 0
+                                              ? ' has-img'
+                                              : ''
+                                            : ''
+                                        }`}
+                                        style={{ aspectRatio: IMG_PREVIEW_ASPECT_RATIO }}
+                                      >
+                                        {!topFailed && topImageUrl.length > 0 ? (
+                                          <div className="relative h-full w-full">
+                                            {!topImageLoaded && renderLoadingIndicator(currentPageRhymes.top?.name || 'rhyme')}
+                                            <img
+                                              src={topImageUrl}
+                                              alt={`${currentPageRhymes.top?.name || 'Rhyme'} preview`}
+                                              width={595}
+                                              height={822}
+                                              className={`rhyme-img-content${topImageLoaded ? '' : ' opacity-0'}`}
+                                              onLoad={() => {
+                                                const targetPos = normalizeSlot(topSelection?.position, 'top') || 'top';
+                                                setSelectedRhymes((prev) => {
+                                                  const prevArrayInner = Array.isArray(prev) ? prev : [];
+                                                  const updated = prevArrayInner.map((existing) => {
+                                                    if (!existing) return existing;
+                                                    if (existing.code !== topSelection?.code) return existing;
+                                                    if (Number(existing.page_index) !== Number(topSelection?.page_index)) return existing;
+                                                    const existingPos = normalizeSlot(existing.position, 'top') || 'top';
+                                                    if (existingPos !== targetPos) return existing;
+                                                    return {
+                                                      ...existing,
+                                                      imageLoaded: true,
+                                                      imageLoadedUrl: topImageUrl || '',
+                                                      imageFetchPending: false,
+                                                      imageLoadFailed: false
+                                                    };
+                                                  });
+                                                  selectedRhymesRef.current = updated;
+                                                  return updated;
+                                                });
+                                              }}
+                                              onError={() => {
+                                                const targetPos = normalizeSlot(topSelection?.position, 'top') || 'top';
+                                                setSelectedRhymes((prev) => {
+                                                  const prevArrayInner = Array.isArray(prev) ? prev : [];
+                                                  const updated = prevArrayInner.map((existing) => {
+                                                    if (!existing) return existing;
+                                                    if (existing.code !== topSelection?.code) return existing;
+                                                    if (Number(existing.page_index) !== Number(topSelection?.page_index)) return existing;
+                                                    const existingPos = normalizeSlot(existing.position, 'top') || 'top';
+                                                    if (existingPos !== targetPos) return existing;
+                                                    return {
+                                                      ...existing,
+                                                      imageLoaded: false,
+                                                      imageLoadedUrl: '',
+                                                      imageFetchPending: false,
+                                                      imageLoadFailed: true
+                                                    };
+                                                  });
+                                                  selectedRhymesRef.current = updated;
+                                                  return updated;
+                                                });
+                                              }}
+                                            />
                                           </div>
+                                        ) : isTopLoading ? (
+                                          renderLoadingIndicator(currentPageRhymes.top?.name || 'rhyme')
+                                        ) : (
+                                          renderUnavailableIndicator(currentPageRhymes.top?.name || 'rhyme')
                                         )}
                                       </div>
+                                      {/* if its a multipgae we are displaying message to go to first page for replacement */}
                                       {showMultiPageNote && (
                                         <p className="mt-2 text-xs text-gray-600">
                                           To replace this rhyme, return to the first page of this rhyme selection.
@@ -2963,30 +4895,101 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
 
                                     {hasBottomRhyme ? (
                                       <div className="relative flex flex-1 min-h-0 flex-col rhyme-slot-wrapper">
-                                        <Button
-                                          onClick={() => handleAddRhyme('bottom')}
-                                          variant="outline"
-                                          disabled={isReadOnly}
-                                          className={`absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 sm:px-4 py-2 text-sm text-gray-700 shadow-md hover:bg-white${isReadOnly ? ' cursor-not-allowed opacity-60' : ''}`}
-                                        >
-                                          <Replace className="w-4 h-4 mr-2" />
-                                          Replace
-                                        </Button>
+                                        <div className="z-10 flex justify-end gap-2 px-2 pt-1 sm:absolute sm:top-4 sm:right-4 sm:px-0 sm:pt-0">
+                                          <Button
+                                            onClick={() => handleReplaceRhyme(bottomSelection, 'bottom')}
+                                            variant="outline"
+                                            disabled={isReadOnly}
+                                            className={`bg-white/90 backdrop-blur px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-gray-700 shadow-md hover:bg-white${isReadOnly ? ' cursor-not-allowed opacity-60' : ''}`}
+                                          >
+                                            <Replace className="w-4 h-4 sm:mr-2" />
+                                            <span className="hidden sm:inline">Replace</span>
+                                          </Button>
+                                          <Button
+                                            onClick={() => handleRemoveRhyme(bottomSelection, 'bottom')}
+                                            variant="outline"
+                                            disabled={isReadOnly || removeRhymePending.bottom}
+                                            className={`bg-white/90 backdrop-blur px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-red-600 shadow-md hover:bg-white hover:text-red-700${isReadOnly || removeRhymePending.bottom ? ' cursor-not-allowed opacity-60' : ''}`}
+                                          >
+                                            {removeRhymePending.bottom ? (
+                                              <Loader2 className="w-4 h-4 animate-spin sm:mr-2" />
+                                            ) : (
+                                              <Trash2 className="w-4 h-4 sm:mr-2" />
+                                            )}
+                                            <span className="hidden sm:inline">Remove</span>
+                                          </Button>
+                                        </div>
 
-                                        <div className={`rhyme-slot-container${hasBottomRhyme ? ' has-svg' : ''}`}>
-                                          {isBottomLoading ? (
-                                            renderLoadingIndicator(currentPageRhymes.bottom?.name || 'rhyme')
-                                          ) : bottomSvgContent.length > 0 ? (
-                                            <InlineSvg
-                                              markup={bottomSvgContent}
-                                              className="rhyme-svg-content"
-                                              sanitize={false}
-                                              ariaLabel={`${currentPageRhymes.bottom?.name || 'Rhyme'} illustration`}
-                                            />
-                                          ) : (
-                                            <div className="flex h-full w-full items-center justify-center bg-white/80 text-sm text-gray-500">
-                                              SVG preview unavailable
+                                        <div
+                                          className={`rhyme-slot-container${
+                                            hasBottomRhyme
+                                              ? !bottomFailed && bottomImageUrl.length > 0
+                                                ? ' has-img'
+                                                : ''
+                                              : ''
+                                          }`}
+                                          style={{ aspectRatio: IMG_PREVIEW_ASPECT_RATIO }}
+                                        >
+                                          {!bottomFailed && bottomImageUrl.length > 0 ? (
+                                            <div className="relative h-full w-full">
+                                              {!bottomImageLoaded &&
+                                                renderLoadingIndicator(currentPageRhymes.bottom?.name || 'rhyme')}
+                                              <img
+                                                src={bottomImageUrl}
+                                                alt={`${currentPageRhymes.bottom?.name || 'Rhyme'} preview`}
+                                                width={595}
+                                                height={822}
+                                                className={`rhyme-img-content${bottomImageLoaded ? '' : ' opacity-0'}`}
+                                                onLoad={() => {
+                                                  const targetPos = normalizeSlot(bottomSelection?.position, 'top') || 'top';
+                                                  setSelectedRhymes((prev) => {
+                                                    const prevArrayInner = Array.isArray(prev) ? prev : [];
+                                                    const updated = prevArrayInner.map((existing) => {
+                                                      if (!existing) return existing;
+                                                      if (existing.code !== bottomSelection?.code) return existing;
+                                                      if (Number(existing.page_index) !== Number(bottomSelection?.page_index)) return existing;
+                                                      const existingPos = normalizeSlot(existing.position, 'top') || 'top';
+                                                      if (existingPos !== targetPos) return existing;
+                                                      return {
+                                                        ...existing,
+                                                        imageLoaded: true,
+                                                        imageLoadedUrl: bottomImageUrl || '',
+                                                        imageFetchPending: false,
+                                                        imageLoadFailed: false
+                                                      };
+                                                    });
+                                                    selectedRhymesRef.current = updated;
+                                                    return updated;
+                                                  });
+                                                }}
+                                                onError={() => {
+                                                  const targetPos = normalizeSlot(bottomSelection?.position, 'top') || 'top';
+                                                  setSelectedRhymes((prev) => {
+                                                    const prevArrayInner = Array.isArray(prev) ? prev : [];
+                                                    const updated = prevArrayInner.map((existing) => {
+                                                      if (!existing) return existing;
+                                                      if (existing.code !== bottomSelection?.code) return existing;
+                                                      if (Number(existing.page_index) !== Number(bottomSelection?.page_index)) return existing;
+                                                      const existingPos = normalizeSlot(existing.position, 'top') || 'top';
+                                                      if (existingPos !== targetPos) return existing;
+                                                      return {
+                                                        ...existing,
+                                                        imageLoaded: false,
+                                                        imageLoadedUrl: '',
+                                                        imageFetchPending: false,
+                                                        imageLoadFailed: true
+                                                      };
+                                                    });
+                                                    selectedRhymesRef.current = updated;
+                                                    return updated;
+                                                  });
+                                                }}
+                                              />
                                             </div>
+                                          ) : isBottomLoading ? (
+                                            renderLoadingIndicator(currentPageRhymes.bottom?.name || 'rhyme')
+                                          ) : (
+                                            renderUnavailableIndicator(currentPageRhymes.bottom?.name || 'rhyme')
                                           )}
                                         </div>
                                       </div>
@@ -3013,6 +5016,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
                 </div>
               </div>
             </div>
+            {/* based on showTreemenu value rendering tree menu  */}
             <div
               className={`absolute inset-0 z-40 flex transition-opacity duration-300 ease-out ${
                 showTreeMenu ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
@@ -3025,7 +5029,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
               >
                 <div className="flex-shrink-0 p-4 sm:p-5 lg:p-6">
                   <Button
-                    onClick={() => { setShowTreeMenu(false); setCurrentPosition(null); }}
+                    onClick={() => { setShowTreeMenu(false); setCurrentPosition(null); pendingPositionRef.current = null; }}
                     variant="outline"
                     className="w-full"
                   >
@@ -3034,10 +5038,15 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
                   </Button>
                 </div>
                 <div className="flex-1 min-h-0 overflow-hidden px-2 pb-4 sm:px-4">
+                  {/* passing treemenu props */}
                     <TreeMenu
                       rhymesData={availableRhymes}
                       reusableRhymes={reusableRhymes}
                       showReusable={showReusable}
+                      grade={grade}
+                      languageConfig={rhymeSettings?.languageConfig || null}
+                      currentPageIndex={currentPageIndex}
+                      maxPagesPerGrade={MAX_PAGES_PER_GRADE}
                       onRhymeSelect={handleRhymeSelect}
                       onToggleReusable={handleToggleReusable}
                       hideFullPageRhymes={currentPosition === 'bottom'}
@@ -3051,7 +5060,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
                   showTreeMenu ? 'opacity-100' : 'opacity-0'
                 }`}
                 aria-label="Close tree menu overlay"
-                onClick={() => { setShowTreeMenu(false); setCurrentPosition(null); }}
+                onClick={() => { setShowTreeMenu(false); setCurrentPosition(null); pendingPositionRef.current = null; }}
               />
             </div>
           </div>
@@ -3064,6 +5073,7 @@ const RhymeSelectionPage = ({ school, grade, customGradeName, onBack, onLogout, 
               <button
                 key={index}
                 onClick={() => handlePageChange(index)}
+                disabled={removeActionPending}
                 className={`h-3 w-3 rounded-full transition-colors duration-200 ${index === currentPageIndex
                     ? 'bg-orange-400'
                     : 'bg-gray-300'
@@ -3093,13 +5103,16 @@ export function RhymesWorkflowApp() {
   );
   const [modePending, setModePending] = useState(false);
   const [coverStatusChecking, setCoverStatusChecking] = useState(false);
-  const [hasBookSelections, setHasBookSelections] = useState(false);
+  const [hasBookSelections, setHasBookSelections] = useState<boolean | null>(null);
+  const [gateRhymesOption, setGateRhymesOption] = useState(true);
   const [school, setSchool] = useState<SchoolProfile | null>(() => persistedState.school ?? null);
   const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
   const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
   const [coverWorkflowIntent, setCoverWorkflowIntent] = useState<'edit' | 'view'>('edit');
   const [, setIsCoverDetailsStepComplete] = useState(false);
+  const [bookSelectionsPayload, setBookSelectionsPayload] = useState(null)
   const [coverDefaults, setCoverDefaults] = useState(() =>
+  
     mergeCoverDefaults({
       ...(persistedState.coverDefaults || {}),
       gradeNames: buildGradeNamesFromSchool(persistedState.school)
@@ -3121,6 +5134,8 @@ export function RhymesWorkflowApp() {
   const isSuperAdminUser = workspaceUser?.role === 'super-admin';
   const [coverSelectionsReady, setCoverSelectionsReady] = useState(false);
   const [coverStatusCode, setCoverStatusCode] = useState<string>('1');
+  const [rhymesFreeze, setRhymesFreeze] = useState(false)
+  
   const coverStatus = useMemo(() => coverStatusCode, [coverStatusCode]);
 
   const selectionsFrozen = useMemo(() => {
@@ -3187,10 +5202,11 @@ export function RhymesWorkflowApp() {
       return;
     }
     if (!freezeNoticeShown.current) {
-      toast.info('Selections are frozen. You can only view them.');
+      // toast.info('Selections are frozen. You can only view them.');
       freezeNoticeShown.current = true;
     }
   }, [isSuperAdminUser, selectionsFrozen]);
+
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -3257,8 +5273,9 @@ export function RhymesWorkflowApp() {
       selectedMode,
       selectedGrade,
       coverDefaults,
+      rhymesFreeze,
     });
-  }, [workspaceUser, school, selectedMode, selectedGrade, coverDefaults]);
+  }, [workspaceUser, school, selectedMode, selectedGrade, coverDefaults, rhymesFreeze]);
 
   useEffect(() => {
     if (!school) {
@@ -3318,14 +5335,18 @@ export function RhymesWorkflowApp() {
         return '';
       }
 
-      const stored = coverDefaults?.gradeNames?.[gradeId];
-      if (typeof stored === 'string' && stored.trim().length > 0) {
-        return stored.trim();
+      const schoolGrades = school?.grades as any;
+      const fromSchool =
+        schoolGrades && typeof schoolGrades === 'object'
+          ? schoolGrades?.[gradeId]?.label
+          : null;
+      if (typeof fromSchool === 'string' && fromSchool.trim().length > 0) {
+        return fromSchool.trim();
       }
 
       return resolveDefaultGradeLabel(gradeId);
     },
-    [coverDefaults]
+    [school]
   );
 
   const handleAuth = ({ school: nextSchool, user: nextWorkspaceUser }) => {
@@ -3334,6 +5355,15 @@ export function RhymesWorkflowApp() {
     }
 
     setWorkspaceUser(nextWorkspaceUser);
+
+    // Reset per-school status so the mode selection cards never show the previous
+    // school's cover status while the new school's status request is in-flight.
+    preflightCheckRef.current = { schoolId: null, done: false };
+    coverStatusFetchRef.current = { inFlight: false, schoolId: null };
+    bookPresenceFetchRef.current = { inFlight: false, schoolId: null };
+    setCoverStatusCode('1');
+    setCoverStatusChecking(false);
+    setHasBookSelections(null);
     setSchool(nextSchool);
     setSelectedMode(null);
     setSelectedGrade(null);
@@ -3365,6 +5395,7 @@ export function RhymesWorkflowApp() {
         return false;
       }
       const hasCovers = response.data?.has_covers === true;
+      
       if (!hasCovers) {
         toast.warning('Please complete cover page selections before moving to books.');
         setCoverSelectionsReady(false);
@@ -3392,31 +5423,35 @@ export function RhymesWorkflowApp() {
     inFlight: false,
     schoolId: null
   });
-
-  const refreshBookSelectionsPresence = useCallback(async (force: boolean = false) => {
+  
+  const refreshBookSelectionsPresence = useCallback(async (force: boolean = false): Promise<boolean | null> => {
     // Defer until Firebase auth is ready so the first request carries a token.
     if (authLoading || !user) {
-      return;
+      return null;
     }
     if (!school?.school_id) {
-      setHasBookSelections(false);
+      setHasBookSelections(null);
+      setGateRhymesOption(true);
       bookPresenceFetchRef.current = { inFlight: false, schoolId: null };
-      return;
+      return null;
     }
     if (!force) {
       if (bookPresenceFetchRef.current.inFlight && bookPresenceFetchRef.current.schoolId === school.school_id) {
-        return;
+        return hasBookSelections;
       }
       if (bookPresenceFetchRef.current.schoolId === school.school_id) {
-        return;
+        return hasBookSelections;
       }
     }
+    
     bookPresenceFetchRef.current = { inFlight: true, schoolId: school.school_id };
     try {
       const token = await getIdToken?.();
       if (!token) {
         throw new Error('Unable to fetch Firebase token');
+
       }
+      
       const headers = { Authorization: `Bearer ${token}` };
       const response = await axios.get(`${API}/book-selections/${school.school_id}`, {
         headers,
@@ -3424,9 +5459,14 @@ export function RhymesWorkflowApp() {
       });
       if (response.status >= 400) {
         setHasBookSelections(false);
-        return;
+        // setGateRhymesOption(true);
+        return false;
       }
       const payload = response.data;
+      setBookSelectionsPayload(payload)
+      
+      
+      
       const selectionsArray = Array.isArray(payload?.classes)
         ? payload.classes
         : Array.isArray(payload?.selections)
@@ -3440,15 +5480,22 @@ export function RhymesWorkflowApp() {
         ? selectionsArray.length > 0
         : Boolean(payload && Object.keys(payload || {}).length);
       setHasBookSelections(hasAny);
+      // Gate rhymes when book selections do not exist.
+      // setGateRhymesOption(!hasAny);
+      return hasAny;
     } catch (error) {
       console.warn('Unable to verify book selections', error);
       setHasBookSelections(false);
+      // setGateRhymesOption(true);
+      return false;
     } finally {
       bookPresenceFetchRef.current.inFlight = false;
     }
-  }, [API, authLoading, getIdToken, school?.school_id, user]);
+  }, [API, authLoading, getIdToken, hasBookSelections, school?.school_id, user]);
+ 
 
-  useEffect(() => {
+
+useEffect(() => {
     if (authLoading || !user) {
       return;
     }
@@ -3457,28 +5504,22 @@ export function RhymesWorkflowApp() {
     }
     // Only check presence when the mode selection (main menu) is showing.
     if (selectedMode !== null) {
+      
       return;
     }
-    // Ensure a fresh check on each entry to mode page
-    bookPresenceFetchRef.current = { inFlight: false, schoolId: null };
-    void refreshBookSelectionsPresence(true);
-  }, [authLoading, refreshBookSelectionsPresence, school?.school_id, selectedMode, user]);
-
-  useEffect(() => {
-    if (!school?.school_id) {
-      preflightCheckRef.current = { schoolId: null, done: false };
-      setCoverSelectionsReady(false);
-      setCoverStatusCode('1');
-      setCoverStatusChecking(false);
-      return;
-    }
-    // Sync status code from persisted school metadata (no network)
-    const statusVal = (school.cover_status || '1').toString();
-    console.log(statusVal)
-    setCoverStatusCode(statusVal === 'finished' ? '4' : statusVal);
-    if (selectedMode !== null) {
-      return;
-    }
+    // if (!school?.school_id) {
+    //   preflightCheckRef.current = { schoolId: null, done: false };
+    //   setCoverSelectionsReady(false);
+    //   // setCoverStatusCode('1');
+    //   setCoverStatusChecking(false);
+    //   return;
+    // }
+    // doc_ref=db.collection("")
+    // // Sync status code from persisted school metadata (no network)
+    // const statusVal = (school.cover_status || '1').toString();
+    
+    // setCoverStatusCode(statusVal === 'finished' ? '4' : statusVal);
+    
     if (preflightCheckRef.current.schoolId === school.school_id && preflightCheckRef.current.done) {
       setCoverStatusChecking(false);
       return;
@@ -3490,7 +5531,6 @@ export function RhymesWorkflowApp() {
         const statusHeaders: Record<string, string> = {};
         const token = await getIdToken?.();
         
-        
         if (token) {
           statusHeaders.Authorization = `Bearer ${token}`;
         }
@@ -3501,29 +5541,102 @@ export function RhymesWorkflowApp() {
             validateStatus: () => true,
           });
           if (existsResp.status < 400) {
-            const statusVal = (existsResp.data?.status || existsResp.data?.cover_status || '1').toString();
-            setCoverStatusCode(statusVal === 'finished' ? '4' : statusVal);
-            setCoverSelectionsReady(existsResp.data?.has_covers === true);
+            const statusVal = (existsResp.data?.status).toString();
+            
+            setCoverStatusCode(statusVal);
+            
+            
+            // setCoverSelectionsReady(existsResp.data?.has_covers === true);
           }
           coverStatusFetchRef.current.inFlight = false;
         }
       } catch (_) {
         coverStatusFetchRef.current.inFlight = false;
       }
-      if (!hasBookSelections) {
-        await refreshBookSelectionsPresence(true);
-      }
+      // if (hasBookSelections !== true) {
+        
+      //   await refreshBookSelectionsPresence(true);
+      // }
       setCoverStatusChecking(false);
     })();
-  }, [getIdToken, refreshBookSelectionsPresence, school?.cover_status, school?.school_id, selectedMode, hasBookSelections]);
+  }, [getIdToken,  school?.school_id, selectedMode, hasBookSelections]);
 
+
+
+
+
+  useEffect(() => {
+    if (authLoading || !user) {
+      return;
+    }
+    if (!school?.school_id) {
+      return;
+    }
+    // Only check presence when the mode selection (main menu) is showing.
+    if (selectedMode !== null) {
+      
+      return;
+    }
+    
+    // Ensure a fresh check on each entry to mode page
+    bookPresenceFetchRef.current = { inFlight: false, schoolId: null };
+   
+    void refreshBookSelectionsPresence(true);
+  }, [authLoading, refreshBookSelectionsPresence, school?.school_id, selectedMode, user]);
+
+  
   // Force a book presence refresh when school loads (e.g., after reload).
   useEffect(() => {
-    if (!school?.school_id) return;
+    if (!school?.school_id) return;  
     // Reset guard so this fetch always runs for the current school.
     bookPresenceFetchRef.current = { inFlight: false, schoolId: null };
     void refreshBookSelectionsPresence(true);
   }, [refreshBookSelectionsPresence, school?.school_id]);
+
+// useEffect(() => {
+//  if (authLoading || !user || (!school?.school_id)) return;
+//  if (selectedMode!==null){
+//     return
+//  }
+
+//    (async () => {
+//      const token = await getIdToken();
+    
+    
+//    const res = await axios.get(`${API}/rhymes/freeze/${school?.school_id}/${selectedGrade}`, {
+      
+//      headers: { Authorization: `Bearer ${token}` },
+//      });
+//    setRhymesFreeze(res.data.freeze);
+ 
+//    })();
+
+
+// }, [authLoading,user, school?.school_id, getIdToken]);
+
+
+  // useEffect(() => {
+  //   if (authLoading || !user || !school?.school_id) {
+  //     setRhymesFreeze(false);
+  //     return;
+  //   }
+    
+
+  //   const docRef = doc(db, 'rhyme_selections', school.school_id);
+    
+  //   const unsubscribe = onSnapshot(
+  //     docRef,
+  //     (snapshot) => {
+  //       const data = snapshot.data() || {};
+  //       setRhymesFreeze(Boolean((data as any).freeze));
+  //     },
+  //     (error) => {
+  //       console.warn('Unable to subscribe to rhyme freeze status', error);
+  //     }
+  //   );
+
+  //   return () => unsubscribe();
+  // }, [authLoading, school?.school_id, user]);
 
   const resolveFirstEnabledGrade = useCallback(() => {
     for (const option of GRADE_OPTIONS) {
@@ -3537,6 +5650,7 @@ export function RhymesWorkflowApp() {
 
   const handleModeSelect = useCallback(
     async (mode) => {
+      
       if (modePending) {
         return;
       }
@@ -3544,15 +5658,25 @@ export function RhymesWorkflowApp() {
       try {
         if (mode === 'books') {
           // Only check covers/presence for Explore flow; skip for View
-          if (!hasBookSelections) {
+          let resolvedHasBooks: boolean | null = hasBookSelections;
+          if (resolvedHasBooks === null) {
+            resolvedHasBooks = await refreshBookSelectionsPresence(false);
+          }
+          if (resolvedHasBooks === null) {
+            return;
+          }
+          if (resolvedHasBooks === false) {
             if (!coverSelectionsReady) {
               const ok = await ensureCoverSelectionsExist();
+              
+
               if (!ok) {
                 return;
               }
             }
-            await refreshBookSelectionsPresence(true);
+            
           }
+          
           if (typeof window !== 'undefined') {
             if (school?.school_id) {
               window.localStorage.setItem('bookSelectionSchoolId', school.school_id);
@@ -3575,9 +5699,28 @@ export function RhymesWorkflowApp() {
           setIsCoverDetailsStepComplete(false);
           setCoverWorkflowIntent(selectionsFrozen ? 'view' : 'edit');
         }
-      } finally {
+
+      //   if (mode==='rhymes'){
+         
+      //   // if (hasBookSelections){
+      //   //   setSelectedMode(mode)
+      //   //   toast.warning('Please complete book selections before moving to rhymes.');
+      //   //   return 
+      //   // }
+      //   // else{
+      //   //   setSelectedMode(m)
+      //   // }
+        
+        
+
+      // }
+      } 
+      finally {
         setModePending(false);
       }
+      
+      
+      
     },
     [
       ensureCoverSelectionsExist,
@@ -3613,6 +5756,34 @@ export function RhymesWorkflowApp() {
     setSelectedGrade(null);
     setSelectedMode(null);
     setCoverWorkflowIntent(selectionsFrozen ? 'view' : 'edit');
+
+    // Optimistically sync cover status from localStorage so the menu reflects the
+    // change immediately after an admin updates status (server refresh runs next).
+    try {
+      const schoolId = school?.school_id;
+      if (schoolId && typeof window !== 'undefined') {
+        const cacheKey = `cover-status-${schoolId}`;
+        const raw =
+          window.sessionStorage.getItem(cacheKey) ??
+          window.localStorage.getItem(cacheKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const statusVal = (parsed?.status ?? '').toString().trim();
+          if (statusVal) {
+            setCoverStatusCode(statusVal);
+          }
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    // Force re-check of cover status when returning to mode selection so the
+    // cover card reflects the latest status (avoid stale status due to
+    // preflightCheckRef guard).
+    preflightCheckRef.current = { schoolId: null, done: false };
+    coverStatusFetchRef.current = { inFlight: false, schoolId: null };
+    setCoverStatusChecking(false);
   };
 
   const handleEditCoverDetails = useCallback(() => {
@@ -3674,7 +5845,15 @@ export function RhymesWorkflowApp() {
     setIsEditingSchoolProfile(false);
     navigate('/');
   }, [navigate, setIsEditingSchoolProfile]);
+  async function bookselection() {
+  const data = await refreshBookSelectionsPresence(); 
+  return data// response available here
+  // use data
+}
 
+  console.log(coverStatusCode)
+
+  
   return (
     <div className="App">
       <Toaster position="top-right" />
@@ -3705,20 +5884,26 @@ export function RhymesWorkflowApp() {
           isSuperAdmin={isSuperAdminUser}
           isFrozen={selectionsFrozen}
           hasBookSelections={hasBookSelections}
+          
           onBackToWorkspace={handleReturnToAdminWorkspace}
           onBackToDashboard={!isSuperAdminUser ? handleReturnToBranchList : undefined}
+          coverstatus={coverStatusCode}
           onEditProfile={() => setIsEditingSchoolProfile(true)}
           modePending={modePending}
         />)
-      ) : !selectedGrade && (selectedMode === 'rhymes' || selectedMode === 'cover') ? (
+      ) : !selectedGrade && (selectedMode === 'rhymes' ) ? (
         <GradeSelectionPage
           school={school}
           mode={selectedMode}
           onGradeSelect={handleGradeSelect}
           onBackToMode={handleBackToModeSelection}
-          coverDefaults={coverDefaults}
-          onEditCoverDetails={handleEditCoverDetails}
+          
+          // coverDefaults={coverDefaults}
+          
           onCoverIntentChange={setCoverWorkflowIntent}
+          bookselections={bookSelectionsPayload}
+        
+          
         />
       ) : 
       selectedMode === 'rhymes' ? (
@@ -3728,14 +5913,16 @@ export function RhymesWorkflowApp() {
           customGradeName={resolveStoredGradeName(selectedGrade)}
           onBack={handleBackToGrades}
           onLogout={handleLogout}
-          isReadOnly={selectionsFrozen}
-          isFrozen={selectionsFrozen}
+          isReadOnly={rhymesFreeze}
+          isFrozen={rhymesFreeze}
+          isSuperAdmin={isSuperAdminUser}
+          onRhymeFreezeChange={setRhymesFreeze}
         />
       ) : 
-      selectedMode === 'cover' && selectedGrade ? (
+      selectedMode === 'cover' ? (
         <CoverPageWorkflow
           school={school}
-          grade={selectedGrade}
+          // grade={selectedGrade}
           onBackToMode={handleBackToModeSelection}
           coverDefaults={coverDefaults}
           isReadOnly={selectionsFrozen || coverWorkflowIntent === 'view'}

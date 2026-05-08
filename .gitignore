@@ -53,8 +53,12 @@ venv/
 .venv/
 virtual_env/
 backend/firebase_key.json
+
 backend/images/
 backend/public/subject-pdfs/
+backend/schools/
+
+backend/public/rhymes
 package.json
 yarn.lock
 # Development tools

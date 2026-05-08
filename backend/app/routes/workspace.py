@@ -11,6 +11,7 @@ from ..firebase_service import (
     db,
     ensure_user_document,
     verify_and_decode_token,
+   
 )
 from ..schemas import (
     UserSessionResponse,
@@ -36,6 +37,7 @@ def _lookup_zoho_customer_id(
 
 
 def _build_workspace_user(record: Dict[str, Any]) -> WorkspaceUser:
+    
     return WorkspaceUser(
         uid=record["uid"],
         email=record.get("email"),
@@ -45,55 +47,89 @@ def _build_workspace_user(record: Dict[str, Any]) -> WorkspaceUser:
         created_at=record.get("created_at") or datetime.utcnow(),
         updated_at=record.get("updated_at") or datetime.utcnow(),
     )
-
+import time
 
 @router.get("/users/me", response_model=UserSessionResponse)
 def get_current_workspace_user(authorization: Optional[str] = Header(None)):
+    t0 = time.perf_counter()
     decoded_token = verify_and_decode_token(authorization)
+    t1 = time.perf_counter()
     user_record = ensure_user_document(decoded_token)
+    t2 = time.perf_counter()
+    print("t2-t1",t2-t1,"t1-t0",t1-t0)
     user_email = user_record.get("email")
+    existing_ids = user_record.get("school_ids") or []
     
-    if user_email :
-        school_ids_for_email = school_profiles.find_school_ids_by_email(db, user_email)
-        if school_ids_for_email:
-            existing_ids_list = list(user_record.get("school_ids", []))
-            existing_ids_set = set(existing_ids_list)
-            new_ids = [
-                school_id
-                for school_id in sorted(school_ids_for_email)
-                if school_id not in existing_ids_set
-            ]
-            if new_ids:
-                updated_ids = existing_ids_list + new_ids
-                now = datetime.utcnow()
-                db.collection("users").document(user_record["uid"]).update(
-                    {"school_ids": updated_ids, "updated_at": now}
-                )
-                user_record["school_ids"] = updated_ids
+    role=user_record.get("role")
+    t_link0 = time.perf_counter()
+    if role!="super-admin" :
+       
+        
+            if user_email and not (existing_ids):
+                school_ids_for_email = school_profiles.find_school_ids_by_email(db, user_email)
+            
+                if school_ids_for_email:
+                    existing_ids_list = list(user_record.get("school_ids", []))
+                    existing_ids_set = set(existing_ids_list)
+                    new_ids = [
+                        school_id
+                        for school_id in sorted(school_ids_for_email)
+                        if school_id not in existing_ids_set
+                    ]
+                    if new_ids:
+                        updated_ids = existing_ids_list + new_ids
+                        now = datetime.utcnow()
+                        db.collection("users").document(user_record["uid"]).update(
+                            {"school_ids": updated_ids, "updated_at": now}
+                        )
+                        user_record["school_ids"] = updated_ids
+    t_link1 = time.perf_counter()
     workspace_user = _build_workspace_user(user_record)
+    t3 = time.perf_counter()
+    # print("timing ms:",
+    #     "auth", (t1-t0)*1000,
+    #     "ensure_user", (t2-t1)*1000,
+    #     "link_ids", (t_link1-t_link0)*1000,
+    #     "build_user", (t3-t_link1)*1000)
+    
     if workspace_user.role == "super-admin":
+       
         return UserSessionResponse(user=workspace_user, schools=[])
     zoho_cache: Dict[str, Optional[str]] = {}
     schools: List[School] = []
     seen_branch_ids = set()
     branch_parent_ids: List[str] = []
+    t_school_total0 = time.perf_counter()
+    
+    school_fields = [
+  "school_id","school_name","email","phone","address","city","state","pin","website",
+  "facebook_link","instagram_link","tagline",
+  "principal_name","principal_email","principal_phone",
+  "sales_representative",
+  "grades","branch_parent_id","branches",
+  "status","selection_status",
+  "grade_default_labels"
+]
     
     for school_id in workspace_user.school_ids:
         if not school_id:
             continue
         
         doc_ref = db.collection("schools").document(school_id)
-        snapshot = doc_ref.get()
+        t_get0 = time.perf_counter()
+        snapshot = doc_ref.get(field_paths=school_fields)
+        t_get1 = time.perf_counter()
         if not snapshot.exists:
             continue
         record = snapshot.to_dict() or {}
         record.setdefault("id", snapshot.id)
         record.setdefault("school_id", record.get("school_id") or snapshot.id)
 
-        zoho_school_id = record.get("branch_parent_id") or record.get("school_id")
-        if zoho_school_id:
-            record["zoho_customer_id"] = _lookup_zoho_customer_id(zoho_school_id, zoho_cache)
-
+        # zoho_school_id = record.get("branch_parent_id") or record.get("school_id")
+        # t_zoho0 = time.perf_counter()
+        # if zoho_school_id:
+        #     record["zoho_customer_id"] = _lookup_zoho_customer_id(zoho_school_id, zoho_cache)
+        # t_zoho1 = time.perf_counter()
         schools.append(school_profiles.build_school_from_record(record))
        
         branch_parent_id = record.get("school_id") or record.get("id")
@@ -102,6 +138,7 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
 
         raw_branches = record.get("branches") or {}
         branch_entries = list(raw_branches.values()) if isinstance(raw_branches, dict) else list(raw_branches)
+        t_br0 = time.perf_counter()
         for branch_entry in branch_entries:
             if not isinstance(branch_entry, dict):
                 continue
@@ -112,22 +149,34 @@ def get_current_workspace_user(authorization: Optional[str] = Header(None)):
             branch_record["zoho_customer_id"] = record.get("zoho_customer_id")
             seen_branch_ids.add(branch_record["school_id"])
             schools.append(school_profiles.build_school_from_record(branch_record))
-
-    for parent_id in set(branch_parent_ids):
-        branch_docs_query = (
-            db.collection("schools").where("branch_parent_id", "==", parent_id).stream()
-        )
-        zoho_customer_id = _lookup_zoho_customer_id(parent_id, zoho_cache)
-        for branch_doc in branch_docs_query:
-            branch_data = branch_doc.to_dict() or {}
-            branch_id = branch_data.get("school_id") or branch_doc.id
-            if branch_id in seen_branch_ids:
-                continue
-            branch_data.setdefault("branch_parent_id", parent_id)
-            branch_data["zoho_customer_id"] = zoho_customer_id
-            branch = school_profiles.build_school_from_record(branch_data)
-            schools.append(branch)
-            seen_branch_ids.add(branch_id)
+        # t_br1 = time.perf_counter()
+        # print("school", school_id, "ms:",
+        #     "get", (t_get1-t_get0)*1000,
+        #     # "zoho", (t_zoho1-t_zoho0)*1000,
+        #     "branches", (t_br1-t_br0)*1000)
+        # t_school_total1 = time.perf_counter()
+        # print("TOTAL ms:",
+        # "auth", (t1-t0)*1000,
+        # "ensure_user", (t2-t1)*1000,
+        # "link_ids", (t_link1-t_link0)*1000,
+        # "build_user", (t3-t2)*1000,
+        # "schools_total", (t_school_total1-t_school_total0)*1000,
+        # "all", (t_school_total1-t0)*1000)
+    # for parent_id in set(branch_parent_ids):
+    #     branch_docs_query = (
+    #         db.collection("schools").where("branch_parent_id", "==", parent_id).stream()
+    #     )
+    #     zoho_customer_id = _lookup_zoho_customer_id(parent_id, zoho_cache)
+    #     for branch_doc in branch_docs_query:
+    #         branch_data = branch_doc.to_dict() or {}
+    #         branch_id = branch_data.get("school_id") or branch_doc.id
+    #         if branch_id in seen_branch_ids:
+    #             continue
+    #         branch_data.setdefault("branch_parent_id", parent_id)
+    #         branch_data["zoho_customer_id"] = zoho_customer_id
+    #         branch = school_profiles.build_school_from_record(branch_data)
+    #         schools.append(branch)
+    #         seen_branch_ids.add(branch_id)
              
 
     return UserSessionResponse(user=workspace_user, schools=schools)
@@ -157,4 +206,5 @@ def update_current_workspace_user(
     uid = user_record["uid"]
     db.collection("users").document(uid).update(updates)
     user_record.update(updates)
+    
     return _build_workspace_user(user_record)

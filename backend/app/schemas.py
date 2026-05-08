@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -59,3 +59,26 @@ class GradeStatus(BaseModel):
 class PaginatedSchoolResponse(BaseModel):
     schools: List[SchoolWithSelections]
     total_count: int
+
+
+class AdminSchoolRow(BaseModel):
+    school_id: str
+    school_name: str
+    logo_url: Optional[str] = None
+    sales_representative: Optional[str] = None
+    branch_parent_id: Optional[str] = None
+    branch_ids: Optional[List[str]] = None
+    grades: Optional[Dict[str, Dict[str, Any]]] = None
+    service_status: Optional[Dict[str, str]] = None
+    service_type: Optional[List[str]] = None
+    id_card_fields: Optional[List[str]] = None
+  
+    selection_status: Optional[str] = None
+    selections_approved: Optional[bool] = None
+    timestamp: Optional[datetime] = None
+    last_updated: Optional[datetime] = None
+
+
+class PaginatedAdminSchoolResponse(BaseModel):
+    schools: List[AdminSchoolRow]
+   

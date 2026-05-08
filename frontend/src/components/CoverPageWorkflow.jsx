@@ -6,13 +6,21 @@ import React, {
   useRef,
 } from "react";
 import axios from "axios";
+import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
-import { CheckCircle2, ChevronLeft, ImageOff, Star, X } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronLeft,
+  ImageOff,
+  Loader2,
+  Star,
+  X,
+} from "lucide-react";
 
 import {
   API_BASE_URL,
@@ -228,14 +236,29 @@ const CoverPageWorkflow = ({
     const schoolId = school?.school_id;
     return schoolId ? `cover-status-${schoolId}` : null;
   }, [school?.school_id]);
+  
 
   const initialWorkflowStatus = (() => {
     const schoolId = school?.school_id;
     if (schoolId && rootStatusCacheKey) {
       try {
-        const cachedStatus = sessionStorage.getItem(rootStatusCacheKey);
+        const cachedStatus =
+          sessionStorage.getItem(rootStatusCacheKey) ??
+          localStorage.getItem(rootStatusCacheKey);
         if (cachedStatus) {
-          return cachedStatus.toString();
+          const raw = cachedStatus.toString();
+          if (raw.trim().startsWith("{")) {
+            try {
+              const parsed = JSON.parse(raw);
+              const statusVal = (parsed?.status ?? "").toString().trim();
+              if (statusVal) {
+                return statusVal;
+              }
+            } catch {
+              // ignore parse errors; fall through to raw
+            }
+          }
+          return raw;
         }
       } catch (err) {
         // ignore cache errors
@@ -304,6 +327,9 @@ const CoverPageWorkflow = ({
   const [approvalLoading, setApprovalLoading] = useState(false);
   const [approvalError, setApprovalError] = useState("");
   const [approvalRatios, setApprovalRatios] = useState({});
+  const [isFinishing, setIsFinishing] = useState(false);
+  const finishingRef = useRef(false);
+  const isMountedRef = useRef(true);
   const fetchInFlightRef = useRef(false);
   const [serverVersion, setServerVersion] = useState(0);
   const normalizeGradeKey = useCallback((value) => {
@@ -349,44 +375,6 @@ const CoverPageWorkflow = ({
     // No separate admin document; summary is driven by the client document only.
     return [];
   }, []);
-  const buildClientAssignmentsForTheme = useCallback(
-    (themeId) => {
-      if (!themeId) return {};
-      const normalizedTheme = normalizeThemeId(themeId);
-      const result = {};
-      Object.entries(fetchedGrades.client || {}).forEach(
-        ([gradeKey, entry]) => {
-          const entryTheme = normalizeThemeId(
-            entry?.client_theme ||
-              entry?.client_theme_id ||
-              entry?.clientTheme ||
-              entry?.theme ||
-              entry?.theme_id,
-          );
-          if (!entryTheme || entryTheme !== normalizedTheme) return;
-          const colourId = normalizeColourId(
-            entry?.client_colour_png ||
-              entry?.client_colour ||
-              entry?.client_colour_id ||
-              entry?.theme_colour ||
-              entry?.colour_id,
-          );
-          const gradeCode = GRADE_CODE_MAP[gradeKey];
-          const src =
-            colourId && gradeCode
-              ? libraryColours[colourId]?.[gradeCode]
-              : null;
-          if (colourId && src) {
-            const key = `${colourId}:${src}`;
-            result[key] = { gradeKey, gradeId: gradeCode, colourId, src };
-          }
-        },
-      );
-      return result;
-    },
-    [fetchedGrades.client, libraryColours],
-  );
-
   // No anchor-based prefill; admin can freely select themes without auto-injection
   useEffect(() => {
     if (!isAdmin) return;
@@ -420,6 +408,16 @@ const CoverPageWorkflow = ({
     });
     return map;
   }, [school?.grades]);
+
+  useEffect(() => {
+    // React StrictMode can run effect cleanup/setup cycles in dev.
+    // Ensure the ref reflects the current mount so async finally blocks
+    // can clear loading state reliably.
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const isGradeEnabled = useCallback(
     (gradeKey) => {
@@ -637,6 +635,7 @@ const CoverPageWorkflow = ({
       if (rootStatusCacheKey) {
         try {
           sessionStorage.setItem(rootStatusCacheKey, nextStatus);
+          localStorage.setItem(rootStatusCacheKey, JSON.stringify({ status: nextStatus, updatedAt: Date.now() }));
         } catch (err) {
           // ignore cache errors
         }
@@ -820,11 +819,19 @@ const CoverPageWorkflow = ({
     async (nextStatus, { force = false, suppressToast = false } = {}) => {
       if (effectiveReadOnly && !force) return false;
       const previousStatus = workflowStatus;
-      setWorkflowStatus(nextStatus);
+      // For non-admin users, updating workflow status immediately causes the UI to
+      // jump to the status screen before we navigate back to the mode menu.
+      // Keep the optimistic update for admins only.
+      if (isAdmin) {
+        console.log(nextStatus)
+        setWorkflowStatus(nextStatus);
+      }
       const schoolId = school?.school_id;
       if (!schoolId) {
         toast.error("Missing school id.");
-        setWorkflowStatus(previousStatus);
+        if (isAdmin) {
+          setWorkflowStatus(previousStatus);
+        }
         return false;
       }
 
@@ -836,7 +843,8 @@ const CoverPageWorkflow = ({
         const headers = token
           ? { Authorization: `Bearer ${token}` }
           : undefined;
-        if (hasAssignments && selectedThemeId) {
+        const didPersistAssignments = Boolean(hasAssignments && selectedThemeId);
+        if (didPersistAssignments) {
           // Save assignments (upsert) for each grade via POST
           const assignedEntries = Object.values(pngAssignments || {})
             .filter((entry) => entry?.gradeKey && entry?.src)
@@ -885,6 +893,14 @@ const CoverPageWorkflow = ({
         setIsFinished(nextStatus !== "1");
         const timestamp = Date.now();
         setLastSavedAt(timestamp);
+        if (rootStatusCacheKey) {
+          try {
+            sessionStorage.setItem(rootStatusCacheKey, nextStatus);
+            localStorage.setItem(rootStatusCacheKey, JSON.stringify({ status: nextStatus, updatedAt: timestamp }));
+          } catch {
+            // ignore cache errors
+          }
+        }
         saveCoverWorkflowState(schoolId, grade, {
           selectedThemeId: selectedThemeId || "",
           selectedColourId: selectedColourId || "",
@@ -895,12 +911,17 @@ const CoverPageWorkflow = ({
         });
         // Do not mutate grade docs on status-only updates
         setFetchedGrades((prev) => ({ ...(prev || {}) }));
-        // Clear local selections and reload fresh data to avoid auto-selecting the previous theme on grade switches.
-        setSelectedThemeId("");
-        setSelectedColourId("");
-        setPngAssignments({});
-        setHasHydratedFromServer(false);
-        void hydrateSelectionsFromServer();
+        // Only reload selections when we actually persisted assignments. For admin
+        // status-only changes, re-hydrating can re-apply a stale status snapshot
+        // and make the UI appear not to update.
+        if (didPersistAssignments) {
+          // Clear local selections and reload fresh data to avoid auto-selecting the previous theme on grade switches.
+          setSelectedThemeId("");
+          setSelectedColourId("");
+          setPngAssignments({});
+          setHasHydratedFromServer(false);
+          void hydrateSelectionsFromServer();
+        }
         if (!suppressToast) {
           toast.success(
             nextStatus === "4" ? "Covers approved." : "Status updated",
@@ -910,6 +931,9 @@ const CoverPageWorkflow = ({
       } catch (error) {
         console.warn("Unable to persist cover selections", error);
         toast.error("Could not save cover selection/status");
+        // if (isAdmin) {
+        //   setWorkflowStatus(previousStatus);
+        // }
         setWorkflowStatus(previousStatus);
         return false;
       }
@@ -934,18 +958,30 @@ const CoverPageWorkflow = ({
 
   const handleFinishSave = async () => {
     // status 2 = preparing after selections
-    const ok = await persistStatus("2", { suppressToast: true });
-    if (ok) {
-      toast.success("Cover page selections are successfully saved to DB.");
-      if (typeof onBackToMode === "function") {
-        onBackToMode();
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    flushSync(() => {
+      setIsFinishing(true);
+    });
+    try {
+      const ok = await persistStatus("2", { suppressToast: true });
+      if (ok) {
+        toast.success("Cover page selections are successfully saved to DB.");
+        if (typeof onBackToMode === "function") {
+          onBackToMode();
+        }
+        setSelectedThemeId("");
+        setSelectedColourId("");
+        setPngAssignments({});
+        setHasHydratedFromServer(false);
+        // Refresh data then update cache inside hydrate
+        void hydrateSelectionsFromServer();
       }
-      setSelectedThemeId("");
-      setSelectedColourId("");
-      setPngAssignments({});
-      setHasHydratedFromServer(false);
-      // Refresh data then update cache inside hydrate
-      void hydrateSelectionsFromServer();
+    } finally {
+      finishingRef.current = false;
+      if (isMountedRef.current) {
+        setIsFinishing(false);
+      }
     }
   };
 
@@ -994,7 +1030,29 @@ const CoverPageWorkflow = ({
     setIsFinished(false);
   };
 
+  const missingEnabledGrades = useMemo(() => {
+    const requiredGrades = enabledGradeOrder?.length
+      ? enabledGradeOrder
+      : GRADE_ORDER;
+    const assigned = new Set(
+      Object.values(pngAssignments || {})
+        .map((entry) => entry?.gradeKey)
+        .filter(Boolean),
+    );
+    return requiredGrades.filter((gradeKey) => !assigned.has(gradeKey));
+  }, [enabledGradeOrder, pngAssignments]);
+
   const handleFinish = () => {
+    if (finishingRef.current) return;
+    if (missingEnabledGrades.length > 0) {
+      const remaining = missingEnabledGrades
+        .map((gradeKey) =>
+          resolveGradeLabel(gradeKey, resolvedGradeNames[gradeKey]),
+        )
+        .join(", ");
+      toast.error(`Select colours for remaining grades: ${remaining}`);
+      return;
+    }
     void handleFinishSave();
   };
   const showBookSelectionCta =
@@ -1209,13 +1267,16 @@ const CoverPageWorkflow = ({
                         }}
                       />
                     </div>
+                    
                     <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
+                      
                       <div className="flex flex-col min-w-0">
                         <span className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 truncate">
                           {gradeLabel}
                         </span>
                         <span className="font-semibold text-slate-800 truncate">
                           {displayTitle}
+                          
                         </span>
                       </div>
                       {imageUrl ? (
@@ -1433,23 +1494,26 @@ const CoverPageWorkflow = ({
   ]);
 
   const handleAdminStatusChange = (nextStatus) => {
+    console.log(nextStatus)
     void persistStatus(nextStatus);
   };
 
   const completionDisabled =
     !selectedThemeId ||
     effectiveReadOnly ||
-    Object.keys(pngAssignments).length === 0;
+    missingEnabledGrades.length > 0 ||
+    isFinishing;
 
+  const workflowStatusKey = (workflowStatus ?? "1").toString();
   const statusLabel =
     {
-      1: "Explore cover pages",
-      2: "Cover pages are being prepared",
-      3: "View uploaded cover pages",
-      4: "Selections are frozen",
+      "1": "Explore cover pages",
+      "2": "Cover pages are being prepared",
+      "3": "View uploaded cover pages",
+      "4": "Selections are frozen",
       finished: "Selections are frozen",
       "in-progress": "Cover pages are being prepared",
-    }[workflowStatus] || "Explore cover pages";
+    }[workflowStatusKey] || "Explore cover pages";
   const approvedMessage =
     "Order of cover selections is approved and frozen. Please contact the admin for further changes.";
 
@@ -1486,30 +1550,8 @@ const CoverPageWorkflow = ({
     resolvedGradeNames,
   ]);
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    const { baselineTheme } = getClientBaseline(grade);
-    const normalizedBaseline = normalizeThemeId(baselineTheme);
-    if (
-      !selectedThemeId ||
-      normalizeThemeId(selectedThemeId) !== normalizedBaseline
-    ) {
-      return;
-    }
-    if (Object.keys(pngAssignments || {}).length === 0) {
-      setPngAssignments(buildClientAssignmentsForTheme(selectedThemeId));
-    }
-  }, [
-    buildClientAssignmentsForTheme,
-    getClientBaseline,
-    grade,
-    isAdmin,
-    pngAssignments,
-    selectedThemeId,
-  ]);
-
   // For non-admin users, show status-specific views when status > 1.
-  if (!isAdmin && workflowStatus !== "1") {
+  if (!isAdmin && !isFinishing && workflowStatus !== "1") {
     if (workflowStatus === "2") {
       return (
         <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 py-10 px-6">
@@ -1775,7 +1817,7 @@ const CoverPageWorkflow = ({
               Choose a theme
             </CardTitle>
             <p className="text-base text-slate-600">
-              Sixteen PNG containers are available. Pick one to reveal the
+              Sixteen Themes  are available. Pick one to reveal the
               colour grid.
             </p>
           </CardHeader>
@@ -1854,8 +1896,7 @@ const CoverPageWorkflow = ({
                 Select a colour family
               </CardTitle>
               <p className="text-base text-slate-600">
-                Choose a colour for this grade. Four thumbnails are shown in a
-                spacious grid for easy reading.
+                Choose a colour for this grade. Four colours options for this theme are shown are for assigning to your school grades .
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1989,13 +2030,20 @@ const CoverPageWorkflow = ({
                 </div>
                 {!isFinished && !effectiveReadOnly && (
                   <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      onClick={handleFinish}
-                      disabled={completionDisabled}
-                    >
-                      Finish
-                    </Button>
+                    {isFinishing ? (
+                      <Button type="button" disabled>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Saving...
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        onClick={handleFinish}
+                        disabled={completionDisabled}
+                      >
+                        Finish
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
