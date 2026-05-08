@@ -397,6 +397,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const lastFetchedWorkspaceUserId = useRef<string | null>(null);
   const workspaceCacheRef = useRef<{ userId: string; session: WorkspaceSession; updatedAt: number } | null>(null);
   const coverStatusLoadedKey = useRef<string | null>(null);
+  const adminSchoolsFetchKeyRef = useRef<string | null>(null);
+  const adminSchoolsFetchInFlightRef = useRef<Set<string>>(new Set());
+
   const adminFetchSequence = useRef(0);
   const activeAdminFetch = useRef<{ id: number; mode: 'all' | 'search'; query?: string }>({
     id: 0,
@@ -621,6 +624,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       limitArg?: number,
       showLoading = true 
     ) => {
+      
+   
       if (!workspaceUser || workspaceUser.role !== 'super-admin') {
         return;
       }
