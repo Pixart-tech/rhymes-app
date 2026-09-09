@@ -21,7 +21,7 @@ export default defineConfig({
         secure: false,
       },
       '/public': {
-        // //rget: 'https://book.eshiksavikas.in',
+        
         target: 'https://book.eshiksavikas.in',
         // target: 'http://localhost:8000',
         

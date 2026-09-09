@@ -289,7 +289,7 @@ const ModeSelectionPage = ({
       icon: Music
     }
   ].filter((option) => {
-  if (!isSuperAdmin && (option.id === 'books')) return false;
+  if (!isSuperAdmin && (option.id === 'books' || option.id === 'rhymes')) return false;
   return true;
 })
 
@@ -323,9 +323,15 @@ const ModeSelectionPage = ({
             <CardTitle className="text-xl sm:text-2xl font-semibold text-gray-800">
               Choose what you would like to work on
             </CardTitle>
-            <p className="text-sm sm:text-base text-gray-600">
-              Select one of the workflows below to continue. You can always return to this menu to switch tasks.
-            </p>
+            {isSuperAdmin && (
+              <p className="text-sm sm:text-base text-gray-600">
+                Select one of the workflows below to continue. You can always return to this menu to switch tasks.
+              </p>
+            )}{!isSuperAdmin && (
+              <p className="text-sm sm:text-base text-gray-600">
+                Select cover workflow below to continue.
+              </p>
+            )}
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
@@ -336,7 +342,7 @@ const ModeSelectionPage = ({
                 const showCoverButton = !(option.id === 'cover' && coverStatus !== '1');
                 const isBooksOption = option.id === 'books';
                 const isRhymesOption = option.id === 'rhymes';
-                // const isRhymesGated = isRhymesOption && gateRhymesOption;
+              
                 const isBooksChecking = isBooksOption && hasBookSelections === null;
                 const isRhymesChecking = isRhymesOption && hasBookSelections === null;
                 const isRhymesBlocked = isRhymesOption && hasBookSelections === false;

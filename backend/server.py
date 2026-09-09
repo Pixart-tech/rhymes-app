@@ -2965,6 +2965,7 @@ async def get_binder_json(school_id: str, authorization: Optional[str] = Header(
     latest_book_update: Optional[Any] = None
     for doc in class_docs:
         data = doc.to_dict() or {}
+        
         personalisation[data['class']]=data['personalisation']
         items = data.get("items", [])
         
