@@ -2399,20 +2399,35 @@ def list_cover_uploads(school_id: str, authorization: Optional[str] = Header(Non
         for doc in class_docs:
             data = doc.to_dict() or {}
             class_label = (
-                data.get("class_label")
-                or data.get("class")
+                data.get("class_label")or data.get("class")
                 or doc.id
+              
             )
             items = data.get("items") or []
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                for key in ("core_cover", "work_cover", "addon_cover"):
-                    value = (item.get(key) or "").strip()
-                    if value:
-                        cover_class_map[value] = class_label
+               
+                if item.get("component")=="core":
+                    title = item.get("core_cover_title")
+                    key=item.get("core_cover")
+                elif item.get("component")=="work":
+                    title = item.get("work_cover_title")
+                    key=item.get("work_cover")
+                else:
+                    title = item.get("addon_cover_title")
+                    key=item.get("addon_cover")
+                    
+                
+                value = key
+                if value:
+                    cover_class_map[value] = {"class_label": class_label, "title": title}
+                   
+              
+            
     except Exception:
         cover_class_map = {}
+   
 
     files: List[Dict[str, Any]] = []
     present_codes: Set[str] = set()
@@ -2422,10 +2437,10 @@ def list_cover_uploads(school_id: str, authorization: Optional[str] = Header(Non
             present_codes.add(code)
             files.append(
                 {
-                    "name": entry.name,
+                    "name": cover_class_map.get(code, {}).get("title", ""),
                     "path": str(entry),
                     "url": f"/api/cover-uploads/{school_id}/{entry.name}",
-                    "class_label": cover_class_map.get(code, ""),
+                    "class_label": cover_class_map.get(code, {}).get("class_label", "")
                 }
             )
 
@@ -2434,8 +2449,9 @@ def list_cover_uploads(school_id: str, authorization: Optional[str] = Header(Non
     for code, label in cover_class_map.items():
         if code not in present_codes:
             missing_codes.append({"code": code, "class_label": label})
+  
 
-    return {"files": files, "missing": missing_codes}
+    return {"files": files,"missing": missing_codes}
 
 
 @api_router.get("/cover-uploads/{school_id}/{file_name}")

@@ -1229,8 +1229,9 @@ const CoverPageWorkflow = ({
                     return item.title.toString().trim();
                   return item.name
                     ? item.name.replace(/\.[^.]+$/, "")
-                    : "Cover";
+                    : "undefined";
                 })();
+               
                 const imageUrl = item.uploadedUrl || item.url;
                 const ratioKey =
                   item.name || imageUrl || `${gradeLabel}-${displayTitle}`;
@@ -1271,9 +1272,7 @@ const CoverPageWorkflow = ({
                     <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
                       
                       <div className="flex flex-col min-w-0">
-                        <span className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 truncate">
-                          {gradeLabel}
-                        </span>
+                       
                         <span className="font-semibold text-slate-800 truncate">
                           {displayTitle}
                           

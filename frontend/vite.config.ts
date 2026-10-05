@@ -15,7 +15,8 @@ export default defineConfig({
     open: true,
     proxy: {
       '/api': {
-        target: 'https://book.eshiksavikas.in',
+        // target: 'https://book.eshiksavikas.in',
+       target: 'https://book.eshiksavikas.in',
         // target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
