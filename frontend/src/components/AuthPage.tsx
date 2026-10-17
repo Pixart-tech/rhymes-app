@@ -302,6 +302,8 @@ interface WorkspaceSession {
 interface AuthPageProps {
   onAuth: (selection: { school: SchoolProfile; user: WorkspaceUserProfile }) => void;
   onLogout: () => void;
+  adminSearch: string;
+  onAdminSearchChange: (value: string) => void;
 }
 
 interface PaginatedAdminSchoolsResponse {
@@ -314,7 +316,7 @@ interface AdminSchoolsCountResponse {
   total_count: number;
 }
 
-const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
+const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout, adminSearch, onAdminSearchChange }) => {
   const { user, signInWithGoogle, loading: authLoading, getIdToken } = useAuth();
   const initialAdminWorkspace = loadPersistedAdminWorkspace();
   const [workspaceUser, setWorkspaceUser] = useState<WorkspaceUserProfile | null>(null);
@@ -341,12 +343,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [schoolsPerPage, setSchoolsPerPage] = useState(10);
   const [totalAdminSchoolsCount, setTotalAdminSchoolsCount] = useState<number | null>(null);
+
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [profileForm, setProfileForm] = useState({ display_name: '', email: '' });
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   const [deletingSchoolId, setDeletingSchoolId] = useState<string | null>(null);
   const [logoMap, setLogoMap] = useState<Record<string, string>>({});
-  const [adminSearch, setAdminSearch] = useState('');
   const [adminSearchDebounced, setAdminSearchDebounced] = useState('');
   const [serviceFilter, setServiceFilter] = useState<AdminServiceFilter>('all');
   const [coverStatusFilter, setCoverStatusFilter] = useState<'all' | '1' | '2' | '3' | '4' | 'unknown'>('all');
@@ -653,7 +655,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       }
       const page = pageArg ?? currentPage;
       const limit = limitArg ?? schoolsPerPage;
-      console.log(limit)
+      
       const fetchKey = `all:${workspaceUser.uid}:${page}:${limit}`;
       
     
@@ -664,7 +666,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
       adminSchoolsFetchInFlightRef.current.add(fetchKey);
 
       const requestId = ++adminFetchSequence.current;
-      console.log(requestId)
+   
       activeAdminFetch.current = { id: requestId, mode: 'all' };
       if (showLoading) {
         setAdminLoading(true);
@@ -686,8 +688,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
         }
         setAdminSchools(response.data.schools);
         const totalFromServer = response.data.totalCount ?? response.data.total_count;
+        
         if (typeof totalFromServer === 'number' && totalFromServer >= 0) {
           setTotalAdminSchoolsCount(totalFromServer);
+          
         }
         setAdminError(null);
         adminSchoolsLastFetchedKeyRef.current = fetchKey;
@@ -775,11 +779,13 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
             headers: { Authorization: `Bearer ${token}` }
           }
         );
+       
         if (activeAdminFetch.current.id !== requestId) {
           return;
         }
+        
         setAdminSchools(response.data.schools);
-       
+      
         setAdminError(null);
         adminSchoolsLastFetchedKeyRef.current = fetchKey;
       } catch (error) {
@@ -804,8 +810,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
   useEffect(() => {
     if (!adminSearch.trim()) {
       setAdminSearchDebounced('');
+      
+      
       return;
     }
+    
+    
     const handle = window.setTimeout(() => {
       setAdminSearchDebounced(adminSearch);
     }, 300);
@@ -849,10 +859,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
     adminWorkspaceSchool
   ]);
 
+  
   const availablePageSizeOptions = useMemo(() => {
+    
+
     const total = Math.max(totalAdminSchoolsCount ?? 0, schoolsPerPage, 5);
     const maxMultiple = Math.ceil(total / 5) * 5;
     const options = new Set<number>(PAGE_SIZE_OPTIONS);
+   
     for (let size = 5; size <= maxMultiple; size += 5) {
       options.add(size);
     }
@@ -2196,7 +2210,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                               className="h-14 w-14 rounded-full object-cover"
                               loading="lazy"
                               decoding="async"
-                              fetchPriority="low"
+                              fetchPriority="auto"
                             />
                           ) : (
                             <School className="h-6 w-6" />
@@ -2523,7 +2537,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onLogout }) => {
                   onChange={(event) => {
                     setCurrentPage(1);
                     const nextValue = event.target.value;
-                    setAdminSearch(nextValue);
+                    onAdminSearchChange(nextValue);
                     if (!nextValue.trim()) {
                       setAdminSearchDebounced('');
                     }

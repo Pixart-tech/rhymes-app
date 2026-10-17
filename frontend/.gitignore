@@ -16,6 +16,7 @@ dist/
 
 # Virtual environments
 backend/virtual_env/
+backend/public/cover-library/
 
 
 # misc

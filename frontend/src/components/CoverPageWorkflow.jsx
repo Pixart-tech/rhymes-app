@@ -987,6 +987,7 @@ const CoverPageWorkflow = ({
 
   const handleThemeSelect = (themeId) => {
     if (effectiveReadOnly) {
+      console.warn("Read-only mode: cannot select theme");
       return;
     }
     setSelectedThemeId(themeId);
@@ -994,6 +995,9 @@ const CoverPageWorkflow = ({
     setSelectedColoursByGrade((prev) => ({ ...prev, [grade]: "" }));
     setPngAssignments({});
     setIsFinished(false);
+    if (themeId) {
+      colourSectionRef.current=document.querySelector('div.space-y-6');
+    }
     if (colourSectionRef.current) {
       // Smooth scroll to colour section after DOM updates
       setTimeout(() => {

@@ -1443,55 +1443,27 @@ def get_school(
         doc.setdefault("id", doc.get("school_id") or snapshot.id)
         return doc
 
-    def _prefix_query(field: str, prefix: str) -> List[Dict[str, Any]]:
-        if not prefix:
-            return []
-        snapshots = (
-            db.collection("schools")
-            .select(fields)
-            .where(field, ">=", prefix)
-            .where(field, "<", f"{prefix}\uf8ff")
-            .order_by(field)
-            .get()
-        )
-        return [_coerce_snapshot(s) for s in snapshots]
+
 
     matching_docs: List[Dict[str, Any]] = []
     seen_ids: Set[str] = set()
 
-    # Optimized path: prefix match against normalized fields (if present on docs).
-    # For now, if nothing matches we fall back to the original scan + substring
-    # match so existing docs still show up.
-    for doc in _prefix_query("school_name_norm", normalized_query):
-        sid = str(doc.get("school_id") or "").strip()
-        if sid and sid not in seen_ids:
-            seen_ids.add(sid)
+   
+    school_docs_query = db.collection("schools").select(fields)
+    for snapshot in school_docs_query.get():
+        doc = _coerce_snapshot(snapshot)
+        school_name = (doc.get("school_name") or "").strip()
+        school_id = (doc.get("school_id") or "").strip()
+        school_email = (doc.get("email") or "").strip()
+        sales_representative = (doc.get("sales_representative") or "").strip()
+
+        if (
+            normalized_query in school_name.casefold()
+            or normalized_query in school_id.casefold()
+            or normalized_query in school_email.casefold()
+            or normalized_query in sales_representative.casefold()
+        ):
             matching_docs.append(doc)
-
-    for doc in _prefix_query("sales_representative_norm", normalized_query):
-        sid = str(doc.get("school_id") or "").strip()
-        if sid and sid not in seen_ids:
-            seen_ids.add(sid)
-            matching_docs.append(doc)
-
-    if not matching_docs:
-        print("Iam running")
-        # Fallback: scan and substring match (case-insensitive).
-        school_docs_query = db.collection("schools").select(fields)
-        for snapshot in school_docs_query.get():
-            doc = _coerce_snapshot(snapshot)
-            school_name = (doc.get("school_name") or "").strip()
-            school_id = (doc.get("school_id") or "").strip()
-            school_email = (doc.get("email") or "").strip()
-            sales_representative = (doc.get("sales_representative") or "").strip()
-
-            if (
-                normalized_query in school_name.casefold()
-                or normalized_query in school_id.casefold()
-                or normalized_query in school_email.casefold()
-                or normalized_query in sales_representative.casefold()
-            ):
-                matching_docs.append(doc)
 
     matching_docs.sort(key=lambda entry: (str(entry.get("school_name") or "").casefold(), str(entry.get("school_id") or "")))
 
@@ -1646,9 +1618,7 @@ def get_all_schools_with_selections(
         .order_by("timestamp", direction=firestore.Query.DESCENDING)
         .select(
             [
-                
                 "school_id",
-                
                 "school_name",
                 "sales_representative",
                 "branch_parent_id",

@@ -5112,6 +5112,8 @@ export function RhymesWorkflowApp() {
   const [hasBookSelections, setHasBookSelections] = useState<boolean | null>(null);
   const [gateRhymesOption, setGateRhymesOption] = useState(true);
   const [school, setSchool] = useState<SchoolProfile | null>(() => persistedState.school ?? null);
+  // This survives AuthPage unmounting during a school workflow, but resets on browser refresh.
+  const [adminSearch, setAdminSearch] = useState('');
   const [selectedMode, setSelectedMode] = useState(() => persistedState.selectedMode ?? null);
   const [selectedGrade, setSelectedGrade] = useState(() => persistedState.selectedGrade ?? null);
   const [coverWorkflowIntent, setCoverWorkflowIntent] = useState<'edit' | 'view'>('edit');
@@ -5857,14 +5859,19 @@ useEffect(() => {
   // use data
 }
 
-  console.log(coverStatusCode)
+
 
   
   return (
     <div className="App">
       <Toaster position="top-right" />
       {!school ? (
-        <AuthPage onAuth={handleAuth} onLogout={handleLogout} />
+        <AuthPage
+          onAuth={handleAuth}
+          onLogout={handleLogout}
+          adminSearch={adminSearch}
+          onAdminSearchChange={setAdminSearch}
+        />
       ) : isEditingSchoolProfile ? (
           <SchoolForm
             mode="edit"

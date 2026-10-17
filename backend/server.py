@@ -2916,13 +2916,13 @@ def get_selected_rhymes(school_id: str,grade:str):
     return result
 
 @api_router.get("/admin/school-logo/{school_id}")
-async def get_school_logo(school_id:str,authorization:Optional[str] = Header(None)):
+def get_school_logo(school_id:str,authorization:Optional[str] = Header(None)):
     try:
         _verify_and_decode_token(authorization)
     except HTTPException:
         pass
     doc_ref = db.collection("schools").document(school_id)
-    snapshot = doc_ref.get()
+    snapshot =  doc_ref.get()
     if not snapshot.exists:
         raise HTTPException(status_code=404, detail="School not found")
 
