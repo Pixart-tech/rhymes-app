@@ -1243,23 +1243,42 @@ def _extract_component_title(item: BookSelectionSummaryPdfItem) -> str:
     if ":" in raw:
         return raw.split(":", 1)[1].strip()
     return raw
-
-
-def _is_custom_subject_entry(item: BookSelectionSummaryPdfItem) -> bool:
-    label = (item.type or "").strip()
-    return label.casefold() == "custom"
-
-
-def _subject_display_name(subject_name: str, items: List[BookSelectionSummaryPdfItem]) -> str:
+def _subject_display_name(
+    subject_name: str,
+    items: List[BookSelectionSummaryPdfItem],
+    grade_key: str,
+) -> str:
     """
-    Render subject name for the PDF.
-    - Default: just the subject name
-    - Custom subject: `Subject (Custom)` (uses the item.type label)
+    Render the subject name and include its type only where applicable.
+
+    Playgroup shows types only for custom subjects. Other grades show types
+    for all subjects except Art, Rhymes, and EVS; custom subjects always show
+    their type.
     """
-    for item in items:
-        if _is_custom_subject_entry(item):
-            label = (item.type or "").strip() or "Custom"
-            return f"{subject_name} ({label})"
+    subject_norm = (subject_name or "").strip().casefold()
+    is_custom = any(
+        (item.type or "").strip().casefold() == "custom"
+        for item in items
+    )
+    excluded_type_subjects = {
+        "art & craft",
+        "evs",
+        "rhymes & stories"
+    }
+    show_type = is_custom or (
+        grade_key != "playgroup"
+        and subject_norm not in excluded_type_subjects
+    )
+    if not show_type:
+        return subject_name
+
+    type_labels = list(dict.fromkeys(
+        (item.type or "").strip()
+        for item in items
+        if (item.type or "").strip()
+    ))
+    if type_labels:
+        return f"{subject_name} (Type: {', '.join(type_labels)})"
     return subject_name
 
 
@@ -1372,7 +1391,11 @@ def download_book_selection_summary_pdf(
             entries_for_subject: List[BookSelectionSummaryPdfItem] = []
             for entry_list in comps.values():
                 entries_for_subject.extend(entry_list)
-            display_subject = _subject_display_name(subject_name, entries_for_subject)
+            display_subject = _subject_display_name(
+                subject_name,
+                entries_for_subject,
+                grade_key,
+            )
 
             if grade_key == "playgroup":
                 line = f"• {display_subject}"

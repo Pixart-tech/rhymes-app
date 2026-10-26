@@ -1267,7 +1267,7 @@ def approve_school_selections(
 
 
 @router.get("/schools/{school_id}/logo")
-def get_school_logo(school_id: str):
+def  get_school_logo(school_id: str):
     doc_ref = db.collection("schools").document(school_id)
     snapshot = doc_ref.get(field_paths=["logo_blob"])
     if not snapshot.exists:
