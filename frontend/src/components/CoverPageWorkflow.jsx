@@ -1843,6 +1843,7 @@ const CoverPageWorkflow = ({
                 const isSelected = selectedThemeId === theme.id;
                 const sources = buildThemeSources(theme);
                 const cardSrc = sources?.cover || sources?.original || "";
+               
                 return (
                   <button
                     key={theme.id}
@@ -1868,6 +1869,9 @@ const CoverPageWorkflow = ({
                       </div>
                     )}
                     <div className="h-full w-full overflow-hidden">
+                      <span className="text-sm text-slate-500" style={{ textalign: "right", color: "#334155",position: "absolute", right: "0.1rem", top: "0.1rem", backgroundColor: "#f1f5f9", padding: "0.25rem 0.5rem", borderRadius: "0.25rem" }}>
+                      {theme.label}
+                      </span>
                       {cardSrc ? (
                         <img
                           src={cardSrc}
@@ -1882,12 +1886,21 @@ const CoverPageWorkflow = ({
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-slate-400">
                           <ImageOff className="h-8 w-8" />
+                          
                         </div>
                       )}
                     </div>
+                     
                   </button>
+                  
+                  
                 );
-              })}
+              })
+              
+              
+              }
+             
+              
             </div>
           </CardContent>
         </Card>
